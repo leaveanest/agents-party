@@ -41,6 +41,15 @@ Run the app locally:
 uv run agents-party
 ```
 
+## Codex Skills
+
+Repository-local Codex skills live under `.agents/skills/`.
+
+- `agent-skill-authoring`
+  - guidance and helper scripts for creating Codex skills in this repository
+- `pydantic-ai-agent-development`
+  - guidance and helper scripts for adding `pydantic-ai` agents in this repository
+
 ## Environment Variables
 
 Set the following environment variables before using Slack integration:
