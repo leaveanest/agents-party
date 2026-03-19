@@ -1,0 +1,1 @@
+Keep changes small and local. Use Python 3.12+, uv for package management, ruff for formatting/linting, and ty for type checking. Keep Slack SDK usage inside src/agents_party/slack and Firestore SDK usage inside src/agents_party/infrastructure/firestore; prefer repository boundaries between domain logic and persistence.

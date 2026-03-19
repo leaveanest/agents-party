@@ -1,0 +1,1 @@
+agents-party is a Python Slack application that uses FastAPI for HTTP entrypoints, pydantic-ai and pydantic-ai-skills for agent behavior, and Firestore for persistence. Repo structure is centered on src/agents_party with slack, agents, domain, repositories, and infrastructure/firestore subpackages, plus tests, terraform, and docs.

@@ -1,0 +1,1 @@
+Use uv for dependency and environment management: `uv sync`, `uv add <pkg>`, `uv add --dev <pkg>`. Validate changes with `uv run ruff check <path>`, `uv run ruff format <path>`, and `uv run ty check <path>`. Use broader tests/checks only when needed by the change.

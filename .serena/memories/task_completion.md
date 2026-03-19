@@ -1,0 +1,1 @@
+After editing Python files, run `uv run ruff check <changed-path>`, `uv run ruff format <changed-path>`, and `uv run ty check <changed-path>`. Run broader validation only when changes affect shared config, imports, or multiple packages.
