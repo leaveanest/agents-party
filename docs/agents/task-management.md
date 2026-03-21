@@ -747,6 +747,75 @@ src/agents_party/
     features/work_management.py
 ```
 
+`src/agents_party/agents/skills/` は Python の tool / support code を置く場所であり、
+repo root の `skills/` は catalog に登録された built-in agent skill を置く場所である。
+この設計書で挙げる候補は、現時点で built-in skill として追加済みであることを意味しない。
+
+## Skill への切り分け
+
+この設計のうち、**language-heavy で再利用したい判断** は agent 内部の prompt section や private support layer に切り出しやすい。
+一方で、**整合性・可視性・永続化を壊すと困るルール** は agent / domain / repository に残す。
+
+現行 repo の built-in skill は user-facing な業務ワークフロー単位で catalog 管理されている。
+そのため、ここで挙げる候補は repo-wide built-in skill の即時追加案ではなく、まずは work manager agent 専用の内部レイヤとして扱うのが自然である。
+
+### agent 内部に切り出しやすいもの
+
+#### `work-item-capture`
+
+雑な会話やメモから、work item 候補を整える prompt section / support layer。
+
+- title の圧縮
+- description の要約
+- `primary_assignee` / `collaborator` / `follower` の候補抽出
+- `due_at` と `next_attention_at_for_me` の手掛かり抽出
+- 曖昧さが残る点の列挙
+
+#### `work-item-clarifier`
+
+登録や更新の前に、確認質問を 1 つだけ返す prompt section / support layer。
+
+- どの曖昧さが blocking かを選ぶ
+- `visibility_kind`、担当、期限、対象 item のどれを先に確認すべきか決める
+- 質問を短く返す
+
+#### `attention-review-builder`
+
+一覧結果を Slack 向けに短く整形する prompt section / support layer。
+
+- `needs_attention`
+- `today`
+- `waiting`
+- `done_recently`
+
+を、そのまま読める短い返答にまとめる。
+
+これらは work manager agent の内部手順としては有用だが、
+現行 catalog の built-in skill と同じ粒度で公開する前に、
+user-facing な業務ワークフローとして独立価値があるかを別途検証した方がよい。
+
+### agent / domain / repository に残すもの
+
+- `WorkItem` / `ParticipantRelation` / `WorkEvent` / `WorkItemAttentionIndexDocument` のモデル定義
+- `primary_assignee_user_id` と `audience_channel_id` の cached field 同期
+- `visibility_kind` と `audience_channel_id` の導出
+- `viewer_context_channel_ids` を使った `context` visibility 判定
+- `mutate_work_item` の transaction 境界
+- semantic event の生成規則
+- Firestore の配置と query モデル
+
+### 判断基準
+
+- skill は「どう読むか」「どう聞くか」「どう短く返すか」を担当する
+- agent は「どの tool を呼ぶか」「どの mutation を行うか」を担当する
+- domain / repository は「何が正しい状態か」を担当する
+- policy を提案するのは skill でよいが、policy を enforce するのは skill に置かない
+
+したがって、この task-management 設計全体を 1 つの skill にするのではなく、
+**capture / clarification / review formatting のような再利用可能な思考手順を、まずは agent 内部の prompt section / support layer として切り出す** のが自然である。
+repo root の `skills/` に追加するのは、それが work manager 専用の内部部品ではなく、
+他の agent からも user-facing に呼ばれる built-in workflow として成立する場合に限る。
+
 ## 結論
 
 この agent では、ユーザー体験としては `task` を扱っていても、設計上の中心は `WorkItem` である。
