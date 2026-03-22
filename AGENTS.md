@@ -48,6 +48,15 @@ If `ruff`, `ty`, or test tooling is missing from the project, add it through `uv
 - Put agent orchestration and skill composition in `src/agents_party/agents/`.
 - Do not introduce database migration tooling for Firestore in this project.
 
+## Documentation Conventions
+
+- Store architecture diagrams under `docs/` and prefer PlantUML (`.puml`) unless the user asks for a different format.
+- For architecture diagrams, prioritize system-to-system relationships over library-level dependencies.
+- When documenting Google Cloud architecture, show managed services explicitly and keep Google Cloud internals more detailed than external systems when that helps explain the design.
+- Treat Vertex AI as a Google Cloud service inside the Google Cloud boundary, not as an external provider.
+- Do not enumerate Secret Manager contents or individual secret names in repository documentation unless the user explicitly asks for that level of detail.
+- If a diagram includes infrastructure that is operationally assumed but not yet codified in `terraform/` or deployment config, label that assumption clearly.
+
 ## Validation Expectations
 
 - After editing Python files, run `ruff` and `ty` on the changed paths.
