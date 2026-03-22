@@ -19,7 +19,6 @@ box "Google Cloud Project"
   participant "Agent Selector" as agent_selector
   participant "Selected Agent" as selected_agent
   database "Firestore\nthreads/{thread_ts}" as fs_threads
-  database "Firestore\nagents/{agent_id}" as fs_agents
   participant "Vertex AI" as vertex_ai
 end box
 
@@ -33,9 +32,7 @@ alt Explicit agent invocation by mention
     fs_threads --> agent_routing : Existing agent_id
   else Agent not selected on the thread
     fs_threads --> agent_routing : No agent_id
-    agent_routing -> fs_agents : Load enabled agents
-    fs_agents --> agent_routing : Agent candidates
-    agent_routing -> agent_selector : Select agent from user request\nand candidate metadata
+    agent_routing -> agent_selector : Select agent from user request\nand available agent candidates
     agent_selector -> vertex_ai : Reason over the request
     vertex_ai --> agent_selector : Recommended agent_id
     agent_selector --> agent_routing : Selected agent_id
