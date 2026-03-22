@@ -1,4 +1,5 @@
 from agents_party.domain.slack_documents import (
+    AgentRouteScope,
     ChannelDocument,
     ChannelType,
     InstallationScope,
@@ -6,10 +7,16 @@ from agents_party.domain.slack_documents import (
     TenantSlackIdentityDocument,
     ThreadDocument,
     ThreadMessage,
+    resolve_agent_id_for_slack_context,
 )
 
 
 def test_tenant_slack_identity_supports_enterprise_workspace_mapping() -> None:
+    """Verify enterprise identities can store multiple workspace ids.
+
+    Returns:
+        None.
+    """
     identity = TenantSlackIdentityDocument(
         enterprise_id="E123",
         primary_team_id="T123",
@@ -22,6 +29,11 @@ def test_tenant_slack_identity_supports_enterprise_workspace_mapping() -> None:
 
 
 def test_thread_document_derives_message_fields() -> None:
+    """Verify thread validation derives message count and last message timestamp.
+
+    Returns:
+        None.
+    """
     thread = ThreadDocument(
         thread_ts="1712345678.123456",
         root_message_ts="1712345678.123456",
@@ -48,6 +60,11 @@ def test_thread_document_derives_message_fields() -> None:
 
 
 def test_channel_document_uses_slack_aligned_channel_id() -> None:
+    """Verify channel documents preserve the Slack channel id field.
+
+    Returns:
+        None.
+    """
     channel = ChannelDocument(
         channel_id="C123",
         team_id="T123",
@@ -56,3 +73,19 @@ def test_channel_document_uses_slack_aligned_channel_id() -> None:
     )
 
     assert channel.channel_id == "C123"
+
+
+def test_resolve_agent_id_for_slack_context_prefers_narrower_scope() -> None:
+    """Verify route resolution prefers thread over broader scopes.
+
+    Returns:
+        None.
+    """
+    agent_id, scope = resolve_agent_id_for_slack_context(
+        thread_agent_id="thread-agent",
+        channel_agent_id="channel-agent",
+        workspace_agent_id="workspace-agent",
+    )
+
+    assert agent_id == "thread-agent"
+    assert scope == AgentRouteScope.THREAD

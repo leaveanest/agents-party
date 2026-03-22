@@ -8,8 +8,21 @@ from agents_party.slack.features import register_feature_handlers
 
 
 def create_bolt_app(settings: Settings) -> AsyncApp:
+    """Create the Slack Bolt application when Slack is configured.
+
+    Args:
+        settings: Application settings containing Slack credentials.
+
+    Returns:
+        Configured asynchronous Slack Bolt application.
+
+    Raises:
+        ValueError: If the minimum Slack credentials are not configured.
+    """
     if not settings.slack_enabled:
-        raise ValueError("Slack is not configured. Set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET.")
+        raise ValueError(
+            "Slack is not configured. Set SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET."
+        )
 
     app = AsyncApp(
         token=settings.slack_bot_token,
@@ -23,11 +36,27 @@ def create_bolt_app(settings: Settings) -> AsyncApp:
 
 class SlackBoltGateway:
     def __init__(self, settings: Settings):
+        """Initialize the FastAPI-to-Bolt gateway.
+
+        Args:
+            settings: Application settings used to decide whether Slack is enabled.
+
+        Returns:
+            None.
+        """
         self._handler: AsyncSlackRequestHandler | None = None
         if settings.slack_enabled:
             self._handler = AsyncSlackRequestHandler(create_bolt_app(settings))
 
     async def handle(self, request: Request) -> Response:
+        """Handle a FastAPI request by delegating to Slack Bolt when configured.
+
+        Args:
+            request: Incoming HTTP request from the Slack events endpoint.
+
+        Returns:
+            Slack Bolt response, or a `503` response when Slack is not configured.
+        """
         if self._handler is None:
             return Response(
                 content="Slack is not configured.",

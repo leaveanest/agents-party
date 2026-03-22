@@ -25,7 +25,10 @@ The repository currently includes:
 - basic handlers for:
   - `app_home_opened`
   - `app_mention`
-  - `/agents-party`
+
+The agent that responds to an `app_mention` is intended to be selected by workspace, channel,
+and thread settings. The repository may contain multiple agent implementations even though the
+Slack app itself is a single app.
 
 ## Setup
 

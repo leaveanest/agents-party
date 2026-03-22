@@ -751,6 +751,20 @@ src/agents_party/
 repo root の `skills/` は catalog に登録された built-in agent skill を置く場所である。
 この設計書で挙げる候補は、現時点で built-in skill として追加済みであることを意味しない。
 
+## Google Calendar 連携の境界
+
+Google Calendar 連携の active proposal は、task 管理の中核設計から切り出して
+共通プランの [`../plans/google-calendar-integration-plan.md`](../plans/google-calendar-integration-plan.md) と
+work 管理向けプランの [`../plans/work-management-google-calendar-plan.md`](../plans/work-management-google-calendar-plan.md) に置く。
+
+この設計書には、長く残したい境界だけを残す。
+
+- Google Calendar event は `WorkEvent` ではなく、外部予定への参照として扱う
+- `due_at` と `next_attention_at` は Google Calendar の時刻と自動同一視しない
+- work 管理の中核モデルは Google API に直接依存しない
+- 実装後の挙動はコードとテストを正とする
+- 実装後に長く残すべき判断が出たら、ADR かこの設計書へ昇格する
+
 ## Skill への切り分け
 
 この設計のうち、**language-heavy で再利用したい判断** は agent 内部の prompt section や private support layer に切り出しやすい。

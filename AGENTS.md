@@ -8,8 +8,14 @@ It uses `pydantic-ai` and `pydantic-ai-skills` for agent behavior, Firestore for
 - Use `uv` for Python environment and dependency management.
 - Use `ruff` for linting and formatting.
 - Use `ty` for type checking.
+- Default new agent implementations to Gemini models unless the user or existing configuration explicitly requires a different model.
+- Do not hardcode OpenAI model ids as defaults in agent configuration for this repository.
 - Do not use `pip`, `poetry`, or ad-hoc virtualenv workflows in this repository.
 - Keep changes small and local. Avoid speculative repo-wide rewrites.
+- Write Python docstrings for new or changed modules, classes, functions, and methods.
+- Prefer structured docstrings that clearly document purpose, parameters, return values, and raised errors. Use sections such as `Args`, `Returns`, and `Raises` when applicable.
+- For functions and methods, document each argument's role and any non-obvious constraints, units, defaults, side effects, or mutation behavior that callers need to know.
+- When touching an existing Python function or method, add or update its docstring in the same change.
 
 ## Required Commands
 
