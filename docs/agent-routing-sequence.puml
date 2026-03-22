@@ -1,0 +1,93 @@
+@startuml agent-routing
+title Agent Routing And Execution Sequence
+
+autonumber
+skinparam shadowing false
+skinparam defaultFontName Monospace
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor "Slack User" as slack_user
+participant "Slack" as slack
+participant "Slack Conversations API" as slack_api
+
+box "Google Cloud Project"
+  participant "Slack Events Endpoint\nPOST /slack/events" as slack_events_endpoint
+  participant "Mention Handler" as mention_handler
+  participant "Message Handler" as message_handler
+  participant "Agent Routing" as agent_routing
+  participant "Agent Selector" as agent_selector
+  participant "Selected Agent" as selected_agent
+  database "Firestore\nthreads/{thread_ts}" as fs_threads
+  database "Firestore\nagents/{agent_id}" as fs_agents
+  participant "Vertex AI" as vertex_ai
+end box
+
+slack_user -> slack : Post a message in a channel or thread
+alt Explicit agent invocation by mention
+  slack -> slack_events_endpoint : app_mention event
+  slack_events_endpoint -> mention_handler : Pass event payload
+  mention_handler -> agent_routing : Build invocation\n(team, channel, thread, user text)
+  agent_routing -> fs_threads : Read thread setting\n(agent_id)
+  alt Agent already selected on the thread
+    fs_threads --> agent_routing : Existing agent_id
+  else Agent not selected on the thread
+    fs_threads --> agent_routing : No agent_id
+    agent_routing -> fs_agents : Load enabled agents
+    fs_agents --> agent_routing : Agent candidates
+    agent_routing -> agent_selector : Select agent from user request\nand candidate metadata
+    agent_selector -> vertex_ai : Reason over the request
+    vertex_ai --> agent_selector : Recommended agent_id
+    agent_selector --> agent_routing : Selected agent_id
+    agent_routing -> fs_threads : Persist selected agent_id\nas thread setting
+  end
+else Follow-up message in an active agent thread
+  slack -> slack_events_endpoint : message event
+  slack_events_endpoint -> message_handler : Pass event payload
+  message_handler -> fs_threads : Read thread state\n(agent_id, status)
+  alt Thread has an active agent conversation
+    fs_threads --> message_handler : Existing agent_id and active status
+    message_handler -> agent_routing : Continue with thread agent\nwithout mention
+  else No active agent conversation
+    fs_threads --> message_handler : No active thread agent
+    message_handler --> slack : No response
+  end
+end
+
+agent_routing -> slack_api : Fetch full thread history\nvia Slack API (conversations.replies)
+slack_api --> agent_routing : All thread messages\n(user posts + bot posts)
+agent_routing -> selected_agent : Execute with selected agent_id\nand full thread messages
+selected_agent -> vertex_ai : Generate reply from full thread context
+vertex_ai --> selected_agent : Response content
+selected_agent --> agent_routing : Agent output
+agent_routing -> slack : Post reply to the thread
+slack --> slack_user : Show agent response
+
+note right of selected_agent
+Basic behavior:
+the agent reads all posts in the thread,
+including user posts and bot posts,
+and generates the output from that full context.
+end note
+
+note over agent_routing, fs_threads
+Assumption for this diagram:
+if selector fallback chooses an agent, the result is stored on the thread
+so later mentions in the same thread reuse that agent directly.
+end note
+
+note over message_handler
+Recommended guard conditions for message events:
+- react only to user-authored messages
+- ignore bot, edit, and delete related subtypes
+- limit auto-replies to threads with an active agent conversation
+end note
+
+note over slack_api, selected_agent
+Context collection rule:
+retrieve the full thread from Slack API,
+including both user messages and bot messages,
+before running the selected agent.
+end note
+
+@enduml
