@@ -1,5 +1,6 @@
 from pydantic_ai import Agent
 
+from agents_party.agents.tools.common import get_time_context
 from agents_party.agents.tools.participants import (
     set_my_attention,
     update_participants,
@@ -28,6 +29,7 @@ def register_work_manager_tools(
     Returns:
         None.
     """
+    agent.tool(get_time_context)
     agent.tool(capture_work_item)
     agent.tool(list_work_items)
     agent.tool(update_work_item_status)
@@ -42,6 +44,7 @@ __all__ = [
     "capture_work_item",
     "complete_work_item",
     "find_work_item_candidates",
+    "get_time_context",
     "list_work_items",
     "register_work_manager_tools",
     "set_my_attention",

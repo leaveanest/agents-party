@@ -29,6 +29,10 @@ Keep instructions concise, keep dependencies typed, and keep side effects behind
 5. Add tools and toolsets deliberately.
    - Group reusable capabilities into toolsets.
    - Keep each tool narrow, typed, and explicit about side effects.
+   - For this repository, when a Gemini-backed agent needs enterprise Google access, assume Vertex AI via `google-vertex` unless the task explicitly requires `google-gla`.
+   - On Vertex AI, plan around `WebSearchTool`, `CodeExecutionTool`, and `WebFetchTool`; use `ImageGenerationTool` only with image generation models.
+   - On Vertex AI, do not design around `FileSearchTool`, `MemoryTool`, or `MCPServerTool` as built-in tools.
+   - When using Google built-in tools, avoid combining them with function tools or output tools; if structured output is still required, prefer `PromptedOutput`.
    - Keep long domain detail in references or repositories, not in massive instruction strings.
 6. Validate on the changed paths.
    - Run `uv run ruff check <changed paths>`.
@@ -53,3 +57,4 @@ Keep instructions concise, keep dependencies typed, and keep side effects behind
 - Do not put Firestore SDK calls outside `src/agents_party/infrastructure/firestore/` without a strong reason.
 - Do not add multi-agent coordination when a single typed agent is enough.
 - Do not leave outputs untyped when a stable schema is known.
+- Do not propose Vertex AI built-in `FileSearchTool` support without re-verifying current provider support first.

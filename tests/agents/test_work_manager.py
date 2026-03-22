@@ -7,17 +7,28 @@ from typing import cast
 
 import pytest
 from pydantic_ai import RunContext
+from pydantic_ai import CodeExecutionTool, WebFetchTool, WebSearchTool
 from pydantic_ai.models.test import TestModel
 
+import agents_party.agents.work_manager as work_manager_module
 from agents_party.agents.work_manager import (
+    WorkManagerAction,
     WorkManagerDeps,
+    WorkManagerInvocation,
+    WorkManagerPreparedRequest,
     WorkManagerRequestContext,
+    WorkManagerResult,
+    build_work_manager_execution_input,
     build_work_manager_agent,
+    build_work_manager_preparer_agent,
+    prepare_work_manager_request,
+    run_work_manager,
 )
 from agents_party.agents.tools import (
     capture_work_item,
     complete_work_item,
     find_work_item_candidates,
+    get_time_context,
     list_work_items,
     set_my_attention,
     update_participants,
@@ -263,15 +274,23 @@ class InMemoryRepository:
         )
 
 
-def make_ctx(repository: InMemoryRepository) -> RunContext[WorkManagerDeps]:
+def make_ctx(
+    repository: InMemoryRepository,
+    *,
+    current_time: datetime | None = None,
+    default_timezone: str = "UTC",
+) -> RunContext[WorkManagerDeps]:
     """Build a work-manager run context backed by the in-memory repository.
 
     Args:
         repository: In-memory repository used by the tool tests.
+        current_time: Optional fixed current time for deterministic tests.
+        default_timezone: IANA timezone used by the tool-facing context.
 
     Returns:
         Run context carrying deterministic dependencies and request metadata.
     """
+    resolved_now = current_time or datetime(2026, 3, 22, tzinfo=UTC)
     deps = WorkManagerDeps(
         request_context=WorkManagerRequestContext(
             team_id="T1",
@@ -282,8 +301,8 @@ def make_ctx(repository: InMemoryRepository) -> RunContext[WorkManagerDeps]:
             message_ts="1712345678.000100",
         ),
         work_item_repository=repository,
-        now=lambda: datetime(2026, 3, 22, tzinfo=UTC),
-        default_timezone="UTC",
+        now=lambda: resolved_now,
+        default_timezone=default_timezone,
     )
     return cast(RunContext[WorkManagerDeps], SimpleNamespace(deps=deps))
 
@@ -315,6 +334,7 @@ async def test_build_work_manager_agent_registers_expected_tools() -> None:
     params = model.last_model_request_parameters
     assert params is not None
     assert {tool.name for tool in params.function_tools} == {
+        "get_time_context",
         "capture_work_item",
         "list_work_items",
         "update_work_item_status",
@@ -324,6 +344,208 @@ async def test_build_work_manager_agent_registers_expected_tools() -> None:
         "complete_work_item",
         "find_work_item_candidates",
     }
+
+
+@pytest.mark.asyncio
+async def test_prepare_work_manager_request_defaults_to_original_text() -> None:
+    """Verify default work-manager preparation preserves the original request.
+
+    Returns:
+        None.
+    """
+    invocation = WorkManagerInvocation(
+        team_id="T1",
+        user_id="U1",
+        channel_id="C123",
+        text="capture a task for tomorrow morning",
+    )
+
+    prepared = await prepare_work_manager_request(invocation)
+
+    assert prepared.original_text == invocation.text
+    assert prepared.execution_text == invocation.text
+    assert prepared.planning_notes == []
+
+
+def test_build_work_manager_preparer_agent_registers_expected_builtin_tools() -> None:
+    """Verify the work-manager preparer exposes the intended builtin tools.
+
+    Returns:
+        None.
+    """
+    agent = build_work_manager_preparer_agent(
+        model="google-vertex:gemini-3-flash-preview"
+    )
+
+    builtin_tool_types = {type(tool) for tool in agent._builtin_tools}
+
+    assert builtin_tool_types == {
+        WebSearchTool,
+        CodeExecutionTool,
+        WebFetchTool,
+    }
+
+
+def test_build_work_manager_execution_input_includes_planning_notes() -> None:
+    """Verify planning notes are attached ahead of executor input text.
+
+    Returns:
+        None.
+    """
+    prepared = WorkManagerPreparedRequest(
+        original_text="capture a task",
+        execution_text="capture a task with normalized timing",
+        planning_notes=["Resolved `tomorrow morning` in Asia/Tokyo."],
+    )
+
+    prompt = build_work_manager_execution_input(prepared)
+
+    assert prompt.startswith(
+        "Preparation notes:\n- Resolved `tomorrow morning` in Asia/Tokyo."
+    )
+    assert prompt.endswith("capture a task with normalized timing")
+
+
+def test_get_time_context_returns_localized_now() -> None:
+    """Verify the time-context tool exposes localized request time metadata.
+
+    Returns:
+        None.
+    """
+    repository = InMemoryRepository()
+    ctx = make_ctx(
+        repository,
+        current_time=datetime(2026, 3, 22, 15, 30, tzinfo=UTC),
+        default_timezone="Asia/Tokyo",
+    )
+
+    result = get_time_context(ctx)
+
+    assert result.now.isoformat() == "2026-03-23T00:30:00+09:00"
+    assert result.timezone_name == "Asia/Tokyo"
+    assert result.current_date == "2026-03-23"
+    assert result.current_time == "00:30"
+    assert result.current_day_of_week == "Monday"
+
+
+@pytest.mark.asyncio
+async def test_run_work_manager_uses_builtin_preparer_for_google_string_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify Google string models trigger the builtin-tool preparer stage.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub the preparer and executor.
+
+    Returns:
+        None.
+    """
+    repository = InMemoryRepository()
+    invocation = WorkManagerInvocation(
+        team_id="T1",
+        user_id="U1",
+        channel_id="C123",
+        text="capture a task from https://example.com by tomorrow",
+    )
+    called = False
+
+    async def fake_run_work_manager_preparer(
+        prepared_invocation: WorkManagerInvocation,
+        *,
+        model: str | None = None,
+    ) -> WorkManagerPreparedRequest:
+        nonlocal called
+        called = True
+        assert prepared_invocation.text == invocation.text
+        assert model == "google-vertex:gemini-3-flash-preview"
+        return WorkManagerPreparedRequest(
+            original_text=prepared_invocation.text,
+            execution_text="capture a task with normalized date",
+            planning_notes=["Fetched the referenced page before executor run."],
+        )
+
+    class FakeExecutorAgent:
+        async def run(self, prompt: str, deps: WorkManagerDeps) -> SimpleNamespace:
+            assert "Fetched the referenced page before executor run." in prompt
+            assert "capture a task with normalized date" in prompt
+            assert deps.request_context.channel_id == "C123"
+            return SimpleNamespace(
+                output=WorkManagerResult(
+                    action=WorkManagerAction.NO_OP,
+                    message="ok",
+                    work_items=[],
+                    needs_confirmation=False,
+                    follow_up_question=None,
+                )
+            )
+
+    monkeypatch.setattr(
+        work_manager_module,
+        "run_work_manager_preparer",
+        fake_run_work_manager_preparer,
+    )
+    monkeypatch.setattr(
+        work_manager_module,
+        "build_work_manager_executor_agent",
+        lambda model: FakeExecutorAgent(),
+    )
+
+    result = await run_work_manager(
+        invocation,
+        repository=repository,
+        model="google-vertex:gemini-3-flash-preview",
+    )
+
+    assert called is True
+    assert result.message == "ok"
+
+
+@pytest.mark.asyncio
+async def test_run_work_manager_accepts_request_preparer() -> None:
+    """Verify a custom work-manager request-preparer hook is invoked.
+
+    Returns:
+        None.
+    """
+    repository = InMemoryRepository()
+    model = TestModel(
+        call_tools=[],
+        custom_output_args={
+            "action": "no_op",
+            "message": "ok",
+            "work_items": [],
+            "needs_confirmation": False,
+            "follow_up_question": None,
+        },
+    )
+    called = False
+    invocation = WorkManagerInvocation(
+        team_id="T1",
+        user_id="U1",
+        channel_id="C123",
+        text="capture a task for tomorrow morning",
+    )
+
+    async def request_preparer(
+        prepared_invocation: WorkManagerInvocation,
+    ) -> WorkManagerPreparedRequest:
+        nonlocal called
+        called = True
+        return WorkManagerPreparedRequest(
+            original_text=prepared_invocation.text,
+            execution_text="capture a task for 2026-03-23 09:00",
+            planning_notes=["Normalized relative scheduling before executor run."],
+        )
+
+    result = await run_work_manager(
+        invocation,
+        repository=repository,
+        model=model,
+        request_preparer=request_preparer,
+    )
+
+    assert called is True
+    assert result.message == "ok"
 
 
 def test_capture_list_update_attention_complete_and_clarify() -> None:

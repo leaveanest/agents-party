@@ -11,7 +11,9 @@ from agents_party.agents.work_manager import (
     WorkManagerAction,
     WorkManagerDeps,
     WorkManagerResult,
+    WorkManagerTimeContext,
     WorkManagerWorkItem,
+    _timezone_or_utc,
 )
 from agents_party.domain import (
     ParticipantRelationDocument,
@@ -35,6 +37,26 @@ def now(ctx: RunContext[WorkManagerDeps]) -> datetime:
         Current timestamp from the configured clock.
     """
     return ctx.deps.now()
+
+
+def get_time_context(ctx: RunContext[WorkManagerDeps]) -> WorkManagerTimeContext:
+    """Return localized time context for relative scheduling expressions.
+
+    Args:
+        ctx: Tool execution context carrying work-manager dependencies.
+
+    Returns:
+        Localized timestamp details that help the model resolve relative dates.
+    """
+    timezone = _timezone_or_utc(ctx.deps.default_timezone)
+    localized_now = now(ctx).astimezone(timezone)
+    return WorkManagerTimeContext(
+        now=localized_now,
+        timezone_name=getattr(timezone, "key", str(timezone)),
+        current_date=localized_now.strftime("%Y-%m-%d"),
+        current_time=localized_now.strftime("%H:%M"),
+        current_day_of_week=localized_now.strftime("%A"),
+    )
 
 
 def summaries(
@@ -279,6 +301,7 @@ __all__ = [
     "default_visibility_kind",
     "generate_work_item_id",
     "get_work_item_or_none",
+    "get_time_context",
     "make_event",
     "missing_item_result",
     "now",

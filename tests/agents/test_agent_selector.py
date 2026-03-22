@@ -7,8 +7,11 @@ from agents_party.agents.agent_selector import (
     AgentSelectorAction,
     AgentSelectorCandidate,
     AgentSelectorInvocation,
+    AgentSelectorPreparedRequest,
     build_agent_selector_agent,
+    build_agent_selector_decision_prompt,
     build_agent_selector_prompt,
+    prepare_agent_selector_request,
     run_agent_selector,
 )
 
@@ -76,6 +79,40 @@ async def test_build_agent_selector_agent_registers_builtin_skill_tools() -> Non
 
 
 @pytest.mark.asyncio
+async def test_prepare_agent_selector_request_defaults_to_rendered_prompt() -> None:
+    """Verify default selector preparation preserves the current prompt shape.
+
+    Returns:
+        None.
+    """
+    invocation = make_invocation()
+
+    prepared = await prepare_agent_selector_request(invocation)
+
+    assert prepared.prompt == build_agent_selector_prompt(invocation)
+    assert prepared.preparation_notes == []
+
+
+def test_build_agent_selector_decision_prompt_includes_notes() -> None:
+    """Verify preparation notes are attached ahead of the decision prompt.
+
+    Returns:
+        None.
+    """
+    prepared = AgentSelectorPreparedRequest(
+        prompt="Select the best agent.",
+        preparation_notes=["Checked external escalation policy."],
+    )
+
+    prompt = build_agent_selector_decision_prompt(prepared)
+
+    assert prompt.startswith(
+        "Preparation notes:\n- Checked external escalation policy."
+    )
+    assert prompt.endswith("Select the best agent.")
+
+
+@pytest.mark.asyncio
 async def test_run_agent_selector_returns_structured_selection() -> None:
     """Verify selector execution returns the model's structured recommendation.
 
@@ -98,3 +135,43 @@ async def test_run_agent_selector_returns_structured_selection() -> None:
 
     assert result.recommended_agent_id == "handover-agent"
     assert result.matched_skill_names == ["handover-brief-builder"]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_selector_accepts_request_preparer() -> None:
+    """Verify a custom selector request-preparer hook is invoked.
+
+    Returns:
+        None.
+    """
+    model = TestModel(
+        call_tools=[],
+        custom_output_args={
+            "action": "selected",
+            "recommended_agent_id": "handover-agent",
+            "matched_skill_names": ["handover-brief-builder"],
+            "reasoning_summary": "Prepared request still points to the handover agent.",
+            "needs_clarification": False,
+            "follow_up_question": None,
+        },
+    )
+    called = False
+
+    async def request_preparer(
+        invocation: AgentSelectorInvocation,
+    ) -> AgentSelectorPreparedRequest:
+        nonlocal called
+        called = True
+        return AgentSelectorPreparedRequest(
+            prompt=build_agent_selector_prompt(invocation),
+            preparation_notes=["Checked a future research-ready pre-stage hook."],
+        )
+
+    result = await run_agent_selector(
+        make_invocation(),
+        model=model,
+        request_preparer=request_preparer,
+    )
+
+    assert called is True
+    assert result.recommended_agent_id == "handover-agent"

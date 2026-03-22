@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable, Mapping
 from enum import StrEnum
-from typing import Any, Mapping, cast
+from inspect import isawaitable
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, RunContext
@@ -56,6 +58,20 @@ class AgentSelectorAction(StrEnum):
     NO_MATCH = "no_match"
 
 
+class AgentSelectorPreparedRequest(BaseModel):
+    """Prepared selector input after optional pre-processing or research.
+
+    Attributes:
+        prompt: Final selector request body to pass into the decision agent.
+        preparation_notes: Optional notes produced by an earlier preparation stage.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str
+    preparation_notes: list[str] = Field(default_factory=list)
+
+
 class AgentSelectorResult(BaseModel):
     """Structured selector decision returned by the model."""
 
@@ -88,6 +104,12 @@ If no candidate is a clear fit, ask one short blocking question and return `clar
 If none of the candidates should handle the request, return `no_match`.
 Keep the reasoning summary short and operational.
 """
+
+
+type AgentSelectorRequestPreparer = Callable[
+    [AgentSelectorInvocation],
+    AgentSelectorPreparedRequest | Awaitable[AgentSelectorPreparedRequest],
+]
 
 
 def build_agent_selector_instructions() -> tuple[str, ...]:
@@ -131,16 +153,54 @@ def build_agent_selector_prompt(invocation: AgentSelectorInvocation) -> str:
     )
 
 
-def build_agent_selector_agent(
-    model: Model | KnownModelName | str | None = None,
-) -> Agent[None, AgentSelectorResult]:
-    """Build the selector agent with built-in skill discovery tools enabled.
+def build_agent_selector_decision_prompt(
+    prepared_request: AgentSelectorPreparedRequest,
+) -> str:
+    """Render the final prompt passed to the selector decision agent.
 
     Args:
-        model: Optional model override for the selector agent.
+        prepared_request: Selector request prepared by an earlier stage.
 
     Returns:
-        Configured selector agent.
+        Prompt text combining preparation notes and the decision prompt body.
+    """
+    if not prepared_request.preparation_notes:
+        return prepared_request.prompt
+
+    notes = "\n".join(
+        f"- {note}" for note in prepared_request.preparation_notes if note.strip()
+    )
+    if not notes:
+        return prepared_request.prompt
+    return f"Preparation notes:\n{notes}\n\n{prepared_request.prompt}"
+
+
+async def prepare_agent_selector_request(
+    invocation: AgentSelectorInvocation,
+) -> AgentSelectorPreparedRequest:
+    """Prepare selector input for the decision-stage agent.
+
+    Args:
+        invocation: Validated selector invocation.
+
+    Returns:
+        Prepared selector request ready for the decision agent.
+    """
+    return AgentSelectorPreparedRequest(
+        prompt=build_agent_selector_prompt(invocation),
+    )
+
+
+def build_agent_selector_decision_agent(
+    model: Model | KnownModelName | str | None = None,
+) -> Agent[None, AgentSelectorResult]:
+    """Build the selector decision agent with skill discovery tools enabled.
+
+    Args:
+        model: Optional model override for the selector decision agent.
+
+    Returns:
+        Configured selector decision agent.
 
     Raises:
         ValueError: If no selector model can be resolved from configuration or arguments.
@@ -190,6 +250,20 @@ def build_agent_selector_agent(
     return agent
 
 
+def build_agent_selector_agent(
+    model: Model | KnownModelName | str | None = None,
+) -> Agent[None, AgentSelectorResult]:
+    """Build the selector agent.
+
+    Args:
+        model: Optional model override for the selector agent.
+
+    Returns:
+        Configured selector agent.
+    """
+    return build_agent_selector_decision_agent(model=model)
+
+
 def _validate_output(
     _ctx: RunContext[None],
     output: AgentSelectorResult,
@@ -235,16 +309,42 @@ def _configuration_error_result() -> AgentSelectorResult:
     )
 
 
+async def _prepare_selector_request(
+    invocation: AgentSelectorInvocation,
+    request_preparer: AgentSelectorRequestPreparer | None = None,
+) -> AgentSelectorPreparedRequest:
+    """Resolve the prepared selector request for the decision stage.
+
+    Args:
+        invocation: Validated selector invocation.
+        request_preparer: Optional custom request preparer hook.
+
+    Returns:
+        Prepared selector request for the decision agent.
+    """
+    if request_preparer is None:
+        return await prepare_agent_selector_request(invocation)
+
+    prepared_request = request_preparer(invocation)
+    if isawaitable(prepared_request):
+        return await cast(Awaitable[AgentSelectorPreparedRequest], prepared_request)
+    return prepared_request
+
+
 async def run_agent_selector(
     invocation: Mapping[str, Any] | AgentSelectorInvocation,
     *,
     model: Model | KnownModelName | str | None = None,
+    request_preparer: AgentSelectorRequestPreparer | None = None,
 ) -> AgentSelectorResult:
     """Run the selector agent and return a structured routing decision.
 
     Args:
         invocation: Raw or validated selector invocation payload.
         model: Optional model override for this selector run.
+        request_preparer: Optional hook that prepares selector input before the
+            decision-stage agent runs. This is the intended integration point for
+            future built-in-tool or research-assisted pre-processing.
 
     Returns:
         Structured selector decision.
@@ -260,8 +360,12 @@ async def run_agent_selector(
     if resolved_model is None:
         return _configuration_error_result()
 
-    agent = build_agent_selector_agent(model=resolved_model)
-    result = await agent.run(build_agent_selector_prompt(parsed_invocation))
+    prepared_request = await _prepare_selector_request(
+        parsed_invocation,
+        request_preparer=request_preparer,
+    )
+    agent = build_agent_selector_decision_agent(model=resolved_model)
+    result = await agent.run(build_agent_selector_decision_prompt(prepared_request))
     return result.output
 
 
@@ -272,9 +376,13 @@ __all__ = [
     "AgentSelectorAction",
     "AgentSelectorCandidate",
     "AgentSelectorInvocation",
+    "AgentSelectorPreparedRequest",
     "AgentSelectorResult",
     "build_agent_selector_agent",
+    "build_agent_selector_decision_agent",
+    "build_agent_selector_decision_prompt",
     "build_agent_selector_instructions",
     "build_agent_selector_prompt",
+    "prepare_agent_selector_request",
     "run_agent_selector",
 ]
