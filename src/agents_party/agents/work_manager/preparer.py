@@ -69,6 +69,7 @@ async def prepare_work_manager_request(
     return WorkManagerPreparedRequest(
         original_text=invocation.text,
         execution_text=invocation.text,
+        thread_messages=list(invocation.thread_messages),
     )
 
 
@@ -93,7 +94,9 @@ async def run_work_manager_preparer(
     )
     agent = build_work_manager_preparer_agent(model=model)
     result = await agent.run(build_work_manager_preparer_prompt(parsed_invocation))
-    return result.output
+    prepared_request = result.output
+    prepared_request.thread_messages = list(parsed_invocation.thread_messages)
+    return prepared_request
 
 
 __all__ = [

@@ -14,6 +14,7 @@ from agents_party.agents.request_preparation import RequestPreparer
 from agents_party.agents.slack_runtime import SlackAgentInvocation
 from agents_party.domain import (
     AttentionProfile,
+    ThreadMessage,
     WorkItemAggregate,
     WorkItemPriority,
     WorkItemStatus,
@@ -50,6 +51,7 @@ class WorkManagerPreparedRequest(BaseModel):
         original_text: Original user request text from Slack.
         execution_text: Normalized execution request text for the executor agent.
         planning_notes: Optional notes from an earlier preparation or research stage.
+        thread_messages: Normalized Slack transcript supplied by the routing layer.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -57,6 +59,7 @@ class WorkManagerPreparedRequest(BaseModel):
     original_text: str
     execution_text: str
     planning_notes: list[str] = Field(default_factory=list)
+    thread_messages: list[ThreadMessage] = Field(default_factory=list)
 
 
 @dataclass(slots=True)

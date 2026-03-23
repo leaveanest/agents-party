@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from agents_party.domain import AgentRouteScope
+from agents_party.domain import AgentRouteScope, ThreadStatus
 from agents_party.infrastructure.firestore import FirestoreSlackAgentRepository
 
 
@@ -243,3 +243,67 @@ def test_list_enabled_agents_returns_only_enabled_candidates() -> None:
     agents = repository.list_enabled_agents(team_id="T1", channel_id="C123")
 
     assert [agent.agent_id for agent in agents] == ["enabled-agent"]
+
+
+def test_activate_thread_agent_upserts_minimal_state_only() -> None:
+    """Verify thread activation writes only routing state fields.
+
+    Returns:
+        None.
+    """
+    client = FakeFirestoreClient()
+    repository = FirestoreSlackAgentRepository(client=client)
+
+    thread = repository.activate_thread_agent(
+        team_id="T1",
+        channel_id="C123",
+        thread_ts="1712345678.000100",
+        agent_id="work-manager",
+        root_message_ts="1712345678.000100",
+        last_message_ts="1712345680.000200",
+    )
+
+    stored = client.documents[
+        ("workspaces", "T1", "channels", "C123", "threads", "1712345678.000100")
+    ]
+    assert thread.status == ThreadStatus.ACTIVE
+    assert stored["agent_id"] == "work-manager"
+    assert stored["status"] == ThreadStatus.ACTIVE
+    assert stored["root_message_ts"] == "1712345678.000100"
+    assert stored["last_message_ts"] == "1712345680.000200"
+    assert "messages" not in stored
+    assert "participant_user_ids" not in stored
+    assert "summary" not in stored
+
+
+def test_is_thread_auto_reply_enabled_prefers_channel_then_workspace_then_default() -> (
+    None
+):
+    """Verify thread auto-reply settings resolve with the intended precedence.
+
+    Returns:
+        None.
+    """
+    client = FakeFirestoreClient()
+    repository = FirestoreSlackAgentRepository(client=client)
+
+    assert (
+        repository.is_thread_auto_reply_enabled(team_id="T1", channel_id="C123") is True
+    )
+
+    client.documents[("workspaces", "T1", "app_settings", "default")] = {
+        "thread_auto_reply": False,
+    }
+    assert (
+        repository.is_thread_auto_reply_enabled(team_id="T1", channel_id="C123")
+        is False
+    )
+
+    client.documents[
+        ("workspaces", "T1", "channels", "C123", "app_settings", "default")
+    ] = {
+        "thread_auto_reply": True,
+    }
+    assert (
+        repository.is_thread_auto_reply_enabled(team_id="T1", channel_id="C123") is True
+    )

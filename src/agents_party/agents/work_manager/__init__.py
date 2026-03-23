@@ -29,6 +29,7 @@ from .prompts import (
     build_work_manager_instructions,
     build_work_manager_preparer_instructions,
     build_work_manager_preparer_prompt,
+    format_thread_transcript,
 )
 from .runtime import (
     build_work_manager_agent,
@@ -65,6 +66,7 @@ __all__ = [
     "build_work_manager_preparer_agent",
     "build_work_manager_preparer_instructions",
     "build_work_manager_preparer_prompt",
+    "format_thread_transcript",
     "format_timestamp",
     "format_work_item_brief",
     "prepare_work_manager_request",

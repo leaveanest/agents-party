@@ -14,7 +14,12 @@ from agents_party.agents.agent_selector import (
     AgentSelectorCandidate,
     run_agent_selector,
 )
-from agents_party.domain import AgentDocument, AgentRouteScope, ResolvedAgentRoute
+from agents_party.domain import (
+    AgentDocument,
+    AgentRouteScope,
+    ResolvedAgentRoute,
+    ThreadMessage,
+)
 from agents_party.repositories import SlackAgentRepository, WorkItemRepository
 
 
@@ -29,6 +34,7 @@ class SlackAgentInvocation(BaseModel):
         text: User request text after Slack-specific normalization.
         thread_ts: Optional thread timestamp for thread-aware routing and replies.
         message_ts: Optional originating message timestamp.
+        thread_messages: Normalized Slack thread transcript used for execution.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -40,6 +46,7 @@ class SlackAgentInvocation(BaseModel):
     text: str
     thread_ts: str | None = None
     message_ts: str | None = None
+    thread_messages: list[ThreadMessage] = Field(default_factory=list)
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> Self:

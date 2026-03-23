@@ -47,6 +47,7 @@ from agents_party.domain.work_management import (
     WorkItemQueryView,
     WorkItemStatus,
 )
+from agents_party.domain import MessageRole, ThreadMessage
 
 
 @dataclass
@@ -358,6 +359,14 @@ async def test_prepare_work_manager_request_defaults_to_original_text() -> None:
         user_id="U1",
         channel_id="C123",
         text="capture a task for tomorrow morning",
+        thread_messages=[
+            ThreadMessage(
+                ts="1712345678.000100",
+                role=MessageRole.USER,
+                text="capture a task for tomorrow morning",
+                user_id="U1",
+            )
+        ],
     )
 
     prepared = await prepare_work_manager_request(invocation)
@@ -365,6 +374,7 @@ async def test_prepare_work_manager_request_defaults_to_original_text() -> None:
     assert prepared.original_text == invocation.text
     assert prepared.execution_text == invocation.text
     assert prepared.planning_notes == []
+    assert prepared.thread_messages == invocation.thread_messages
 
 
 def test_build_work_manager_preparer_agent_registers_expected_builtin_tools() -> None:
@@ -396,13 +406,23 @@ def test_build_work_manager_execution_input_includes_planning_notes() -> None:
         original_text="capture a task",
         execution_text="capture a task with normalized timing",
         planning_notes=["Resolved `tomorrow morning` in Asia/Tokyo."],
+        thread_messages=[
+            ThreadMessage(
+                ts="1712345678.000100",
+                role=MessageRole.USER,
+                text="capture a task",
+                user_id="U1",
+            )
+        ],
     )
 
     prompt = build_work_manager_execution_input(prepared)
 
     assert prompt.startswith(
-        "Preparation notes:\n- Resolved `tomorrow morning` in Asia/Tokyo."
+        "Slack thread transcript:\n[1712345678.000100] user:U1 capture a task"
     )
+    assert "Preparation notes:\n- Resolved `tomorrow morning` in Asia/Tokyo." in prompt
+    assert "User request:\ncapture a task with normalized timing" in prompt
     assert prompt.endswith("capture a task with normalized timing")
 
 
@@ -446,6 +466,14 @@ async def test_run_work_manager_uses_builtin_preparer_for_google_string_model(
         user_id="U1",
         channel_id="C123",
         text="capture a task from https://example.com by tomorrow",
+        thread_messages=[
+            ThreadMessage(
+                ts="1712345678.000100",
+                role=MessageRole.USER,
+                text="capture a task from https://example.com by tomorrow",
+                user_id="U1",
+            )
+        ],
     )
     called = False
 
@@ -466,6 +494,11 @@ async def test_run_work_manager_uses_builtin_preparer_for_google_string_model(
 
     class FakeExecutorAgent:
         async def run(self, prompt: str, deps: WorkManagerDeps) -> SimpleNamespace:
+            assert "Slack thread transcript:" in prompt
+            assert (
+                "[1712345678.000100] user:U1 capture a task from https://example.com by tomorrow"
+                in prompt
+            )
             assert "Fetched the referenced page before executor run." in prompt
             assert "capture a task with normalized date" in prompt
             assert deps.request_context.channel_id == "C123"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agents_party.domain import ThreadMessage
+
 from .models import WorkManagerInvocation, WorkManagerPreparedRequest
 
 WORK_ITEM_CAPTURE_SECTION = """
@@ -38,6 +40,7 @@ WORK_MANAGER_PREPARER_OUTPUT_SECTION = """
 Return `original_text` unchanged from the user request.
 Set `execution_text` to a concise normalized instruction for the executor agent.
 Use `planning_notes` for short factual notes from web research, page fetches, or calculations that the executor should preserve.
+Return `thread_messages` unchanged from the provided Slack transcript.
 If no preparation is needed, keep `execution_text` effectively equivalent to the original request and leave `planning_notes` empty.
 """
 
@@ -71,12 +74,33 @@ def build_work_manager_preparer_prompt(invocation: WorkManagerInvocation) -> str
         "viewer_context_channel_ids": invocation.viewer_context_channel_ids,
         "thread_ts": invocation.thread_ts,
         "message_ts": invocation.message_ts,
+        "thread_messages": [
+            message.model_dump(mode="python") for message in invocation.thread_messages
+        ],
     }
     return (
         "Prepare this Slack work-item request for executor handling.\n"
         "Normalize dates, external references, and derived facts only when useful.\n"
         f"{payload!r}"
     )
+
+
+def format_thread_transcript(thread_messages: list[ThreadMessage]) -> str:
+    """Render normalized Slack thread messages into a stable transcript block.
+
+    Args:
+        thread_messages: Normalized Slack thread messages in chronological order.
+
+    Returns:
+        Plain-text transcript suitable for preparer and executor prompts.
+    """
+    lines: list[str] = []
+    for message in thread_messages:
+        speaker = message.role.value
+        if message.user_id:
+            speaker = f"{speaker}:{message.user_id}"
+        lines.append(f"[{message.ts}] {speaker} {message.text}")
+    return "\n".join(lines)
 
 
 def build_work_manager_executor_instructions() -> tuple[str, ...]:
@@ -120,12 +144,22 @@ def build_work_manager_execution_input(
     if not execution_text:
         execution_text = prepared_request.original_text.strip()
 
+    sections: list[str] = []
+    if prepared_request.thread_messages:
+        transcript = format_thread_transcript(prepared_request.thread_messages)
+        if transcript:
+            sections.append(f"Slack thread transcript:\n{transcript}")
+
     notes = "\n".join(
         f"- {note}" for note in prepared_request.planning_notes if note.strip()
     )
-    if not notes:
+    if notes:
+        sections.append(f"Preparation notes:\n{notes}")
+
+    if not sections:
         return execution_text
-    return f"Preparation notes:\n{notes}\n\nUser request:\n{execution_text}"
+    sections.append(f"User request:\n{execution_text}")
+    return "\n\n".join(sections)
 
 
 __all__ = [
@@ -137,4 +171,5 @@ __all__ = [
     "build_work_manager_instructions",
     "build_work_manager_preparer_instructions",
     "build_work_manager_preparer_prompt",
+    "format_thread_transcript",
 ]

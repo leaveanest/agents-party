@@ -13,7 +13,14 @@ from agents_party.agents.slack_runtime import (
     resolve_routed_agent,
 )
 from agents_party.agents.work_manager import WorkManagerAction, WorkManagerResult
-from agents_party.domain import AgentDocument, AgentRouteScope, ResolvedAgentRoute
+from agents_party.domain import (
+    AgentDocument,
+    AgentRouteScope,
+    MessageRole,
+    ResolvedAgentRoute,
+    ThreadDocument,
+    ThreadMessage,
+)
 
 
 class StubSlackAgentRepository:
@@ -75,6 +82,73 @@ class StubSlackAgentRepository:
         del team_id, channel_id, thread_ts
         return list(self.agents)
 
+    def get_thread_document(
+        self,
+        *,
+        team_id: str,
+        channel_id: str,
+        thread_ts: str,
+    ) -> ThreadDocument | None:
+        """Return no stored thread document for runtime-only routing tests.
+
+        Args:
+            team_id: Workspace id, unused by the fake repository.
+            channel_id: Channel id, unused by the fake repository.
+            thread_ts: Thread timestamp, unused by the fake repository.
+
+        Returns:
+            Always `None` for these tests.
+        """
+        del team_id, channel_id, thread_ts
+        return None
+
+    def activate_thread_agent(
+        self,
+        *,
+        team_id: str,
+        channel_id: str,
+        thread_ts: str,
+        agent_id: str,
+        root_message_ts: str,
+        last_message_ts: str,
+    ) -> ThreadDocument:
+        """Raise because runtime routing tests do not persist thread state.
+
+        Args:
+            team_id: Workspace id, unused by the fake repository.
+            channel_id: Channel id, unused by the fake repository.
+            thread_ts: Thread timestamp, unused by the fake repository.
+            agent_id: Agent id, unused by the fake repository.
+            root_message_ts: Root message timestamp, unused by the fake repository.
+            last_message_ts: Last message timestamp, unused by the fake repository.
+
+        Returns:
+            Never returns because these tests should not call this method.
+
+        Raises:
+            AssertionError: Always, because the method should not be used here.
+        """
+        del team_id, channel_id, thread_ts, agent_id, root_message_ts, last_message_ts
+        raise AssertionError("activate_thread_agent should not run in these tests")
+
+    def is_thread_auto_reply_enabled(
+        self,
+        *,
+        team_id: str,
+        channel_id: str,
+    ) -> bool:
+        """Return a fixed auto-reply setting for runtime-only routing tests.
+
+        Args:
+            team_id: Workspace id, unused by the fake repository.
+            channel_id: Channel id, unused by the fake repository.
+
+        Returns:
+            Always `True`.
+        """
+        del team_id, channel_id
+        return True
+
 
 def make_invocation() -> SlackAgentInvocation:
     """Build a representative Slack invocation for runtime tests.
@@ -90,7 +164,44 @@ def make_invocation() -> SlackAgentInvocation:
         text="follow up with finance",
         thread_ts="1712345678.000100",
         message_ts="1712345678.000100",
+        thread_messages=[
+            ThreadMessage(
+                ts="1712345678.000100",
+                role=MessageRole.USER,
+                text="follow up with finance",
+                user_id="U1",
+            )
+        ],
     )
+
+
+def test_slack_agent_invocation_validates_thread_messages() -> None:
+    """Verify Slack invocation payloads validate nested thread transcript messages.
+
+    Returns:
+        None.
+    """
+    invocation = SlackAgentInvocation.model_validate(
+        {
+            "team_id": "T1",
+            "user_id": "U1",
+            "channel_id": "C123",
+            "viewer_context_channel_ids": ["C123"],
+            "text": "follow up with finance",
+            "thread_ts": "1712345678.000100",
+            "message_ts": "1712345678.000100",
+            "thread_messages": [
+                {
+                    "ts": "1712345678.000100",
+                    "role": "user",
+                    "text": "follow up with finance",
+                    "user_id": "U1",
+                }
+            ],
+        }
+    )
+
+    assert invocation.thread_messages[0].role == MessageRole.USER
 
 
 @pytest.mark.asyncio
@@ -210,6 +321,7 @@ async def test_execute_registered_agent_runs_work_manager(
         """
         del repository, request_preparer
         assert invocation.channel_id == "C123"
+        assert invocation.thread_messages[0].text == "follow up with finance"
         assert model == "google-gla:gemini-3-flash-preview"
         return WorkManagerResult(
             action=WorkManagerAction.NO_OP,

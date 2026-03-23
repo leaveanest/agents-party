@@ -156,10 +156,12 @@ def _build_builtin_work_manager_request_preparer(
         Returns:
             Prepared request from the builtin-tool-backed preparer stage.
         """
-        return await run_work_manager_preparer(
+        prepared_request = await run_work_manager_preparer(
             prepared_invocation,
             model=model,
         )
+        prepared_request.thread_messages = list(prepared_invocation.thread_messages)
+        return prepared_request
 
     return builtin_request_preparer
 
