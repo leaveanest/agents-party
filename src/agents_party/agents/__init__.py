@@ -9,6 +9,11 @@ from agents_party.agents.agent_selector import (
     prepare_agent_selector_request,
     run_agent_selector,
 )
+from agents_party.agents.prepared_agent_runner import (
+    RepositoryBackedPreparedAgentRunner,
+    ResolvedAgentModel,
+)
+from agents_party.agents.request_preparation import resolve_request_preparation
 from agents_party.agents.skills import (
     EXPECTED_BUILTIN_SKILL_NAMES,
     build_builtin_skills_toolset,
@@ -16,6 +21,14 @@ from agents_party.agents.skills import (
     builtin_skills_path,
     load_builtin_skills,
     repository_root,
+)
+from agents_party.agents.slack_runtime import (
+    RoutedAgentDecision,
+    RoutedAgentDecisionAction,
+    SlackAgentInvocation,
+    build_agent_model_name,
+    execute_registered_agent,
+    resolve_routed_agent,
 )
 from agents_party.agents.work_manager import (
     WorkManagerDeps,
@@ -40,11 +53,17 @@ __all__ = [
     "AgentSelectorInvocation",
     "AgentSelectorPreparedRequest",
     "AgentSelectorResult",
+    "RepositoryBackedPreparedAgentRunner",
+    "ResolvedAgentModel",
+    "RoutedAgentDecision",
+    "RoutedAgentDecisionAction",
+    "SlackAgentInvocation",
     "WorkManagerDeps",
     "WorkManagerInvocation",
     "WorkManagerPreparedRequest",
     "WorkManagerRequestContext",
     "WorkManagerResult",
+    "build_agent_model_name",
     "build_agent_selector_agent",
     "build_agent_selector_decision_agent",
     "build_agent_selector_decision_prompt",
@@ -58,9 +77,12 @@ __all__ = [
     "build_work_manager_preparer_prompt",
     "builtin_skills_directory",
     "builtin_skills_path",
+    "execute_registered_agent",
     "load_builtin_skills",
     "prepare_work_manager_request",
     "repository_root",
+    "resolve_request_preparation",
+    "resolve_routed_agent",
     "run_work_manager_preparer",
     "run_agent_selector",
     "run_work_manager",

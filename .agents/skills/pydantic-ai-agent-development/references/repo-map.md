@@ -35,7 +35,9 @@ Use this map before deciding where new agent code belongs.
 
 ## Placement Rules
 
-- Put new agent definitions under `src/agents_party/agents/definitions/`.
-- Put shared agent support code under `src/agents_party/agents/skills/`.
+- Put new agent packages under `src/agents_party/agents/<agent_name>/`.
+- Use `src/agents_party/agents/<agent_name>/__init__.py` as the public import surface and re-export the package API from there.
+- Start new agents with `models.py` and `runtime.py`; add `executor.py`, `preparer.py`, `prompts.py`, or `messages.py` only when the responsibilities truly split.
+- Put shared agent support code in adjacent `src/agents_party/agents/` modules such as reusable runners or request-preparation helpers.
 - Route repository-backed side effects through repository abstractions when practical.
 - Keep repository-local Codex skills under the repo root `.agents/skills/`.

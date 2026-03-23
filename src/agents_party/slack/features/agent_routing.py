@@ -2,16 +2,17 @@ from __future__ import annotations
 
 from importlib import import_module
 from collections.abc import Mapping
-from typing import Any, NotRequired, Protocol, TypedDict, cast
+from typing import Any, Protocol, cast
 
-from agents_party.agents.agent_selector import (
-    AgentSelectorAction,
-    AgentSelectorCandidate,
-    run_agent_selector,
+from agents_party.agents.slack_runtime import (
+    RoutedAgentDecisionAction,
+    SlackAgentInvocation,
+    execute_registered_agent,
+    resolve_routed_agent,
 )
 from agents_party.config import settings
-from agents_party.domain import AgentDocument, ResolvedAgentRoute
-from agents_party.repositories import SlackAgentRepository
+from agents_party.domain import AgentRouteScope
+from agents_party.repositories import SlackAgentRepository, WorkItemRepository
 
 
 class SayResponder(Protocol):
@@ -28,16 +29,6 @@ class SayResponder(Protocol):
             Slack responder-specific response payload.
         """
         ...
-
-
-class AgentInvocation(TypedDict):
-    team_id: str
-    user_id: str
-    channel_id: str
-    viewer_context_channel_ids: tuple[str, ...]
-    text: str
-    thread_ts: NotRequired[str | None]
-    message_ts: NotRequired[str | None]
 
 
 def _require_text_field(payload: Mapping[str, Any], field_name: str) -> str:
@@ -129,41 +120,41 @@ def build_agent_unconfigured_message(user_id: str | None = None) -> str:
     )
 
 
-def build_agent_selected_message(route: ResolvedAgentRoute) -> str:
-    """Build the temporary response used when a configured route is resolved.
+def build_unimplemented_agent_message(
+    agent_id: str,
+    *,
+    route_scope: AgentRouteScope | None = None,
+    reasoning_summary: str | None = None,
+) -> str:
+    """Build the message shown when an agent is selected without a runtime.
 
     Args:
-        route: Resolved configured route for the current Slack context.
+        agent_id: Agent identifier selected by routing.
+        route_scope: Configured scope that produced the agent, if any.
+        reasoning_summary: Optional selector summary to append for context.
 
     Returns:
-        Slack-formatted confirmation message.
+        Slack-formatted message describing the missing runtime binding.
     """
-    return (
-        f"Resolved agent `{route.agent.agent_id}` from {route.scope.value} settings, "
-        "but execution is not connected yet."
-    )
-
-
-def build_selector_selected_message(agent_id: str, reasoning_summary: str) -> str:
-    """Build the temporary response used when selector fallback chooses an agent.
-
-    Args:
-        agent_id: Agent id recommended by the selector.
-        reasoning_summary: Short explanation returned by the selector.
-
-    Returns:
-        Slack-formatted confirmation message.
-    """
-    return (
-        f"Selected agent `{agent_id}` from selector fallback, "
-        f"but execution is not connected yet. {reasoning_summary}"
-    )
+    if route_scope is not None:
+        message = (
+            f"Resolved agent `{agent_id}` from {route_scope.value} settings. "
+            "No runtime is registered yet."
+        )
+    else:
+        message = (
+            f"Selected agent `{agent_id}` from selector fallback. "
+            "No runtime is registered yet."
+        )
+    if reasoning_summary:
+        return f"{message} {reasoning_summary}"
+    return message
 
 
 def build_agent_invocation_from_mention(
     body: Mapping[str, Any],
     event: Mapping[str, Any],
-) -> AgentInvocation:
+) -> SlackAgentInvocation:
     """Convert a Slack `app_mention` payload into the internal routing shape.
 
     Args:
@@ -181,18 +172,15 @@ def build_agent_invocation_from_mention(
     thread_ts = _optional_text_field(event, "thread_ts") or message_ts
     raw_text = _optional_text_field(event, "text") or ""
 
-    invocation: AgentInvocation = {
-        "team_id": _require_text_field(body, "team_id"),
-        "user_id": _require_text_field(event, "user"),
-        "channel_id": channel_id,
-        "viewer_context_channel_ids": (channel_id,),
-        "text": _strip_leading_mentions(raw_text),
-    }
-    if thread_ts is not None:
-        invocation["thread_ts"] = thread_ts
-    if message_ts is not None:
-        invocation["message_ts"] = message_ts
-    return invocation
+    return SlackAgentInvocation(
+        team_id=_require_text_field(body, "team_id"),
+        user_id=_require_text_field(event, "user"),
+        channel_id=channel_id,
+        viewer_context_channel_ids=[channel_id],
+        text=_strip_leading_mentions(raw_text),
+        thread_ts=thread_ts,
+        message_ts=message_ts,
+    )
 
 
 def _build_repository() -> SlackAgentRepository | None:
@@ -221,82 +209,55 @@ def _build_repository() -> SlackAgentRepository | None:
     )
 
 
-def _build_selector_candidates(
-    agents: list[AgentDocument],
-) -> list[AgentSelectorCandidate]:
-    """Project stored agent documents into selector candidate payloads.
-
-    Args:
-        agents: Stored agent documents eligible for selector fallback.
-
-    Returns:
-        Selector candidate payloads derived from the stored agents.
-    """
-    return [
-        AgentSelectorCandidate(
-            agent_id=agent.agent_id,
-            name=agent.name,
-            description=agent.description or agent.name,
-            when_to_use=agent.when_to_use,
-            supported_skill_names=agent.supported_skill_names,
-            enabled=agent.enabled,
-        )
-        for agent in agents
-    ]
-
-
 async def invoke_routed_agent(
-    invocation: AgentInvocation,
+    invocation: Mapping[str, Any] | SlackAgentInvocation,
     repository: SlackAgentRepository | None = None,
+    work_item_repository: WorkItemRepository | None = None,
 ) -> str:
-    """Resolve a configured route, then fall back to selector-based agent choice.
+    """Resolve a route, then execute the registered runtime for the selected agent.
 
     Args:
-        invocation: Internal routing payload derived from the Slack mention.
+        invocation: Raw or validated routing payload derived from the Slack mention.
         repository: Optional repository override used for routing lookup.
+        work_item_repository: Optional repository override for executable runtimes.
 
     Returns:
-        Slack response text describing the selected route or fallback outcome.
+        Slack response text produced by the selected runtime or routing fallback.
     """
+    parsed_invocation = (
+        invocation
+        if isinstance(invocation, SlackAgentInvocation)
+        else SlackAgentInvocation.from_mapping(invocation)
+    )
     resolved_repository = repository or _build_repository()
     if resolved_repository is None:
-        return build_agent_unconfigured_message(invocation["user_id"])
+        return build_agent_unconfigured_message(parsed_invocation.user_id)
 
-    route = resolved_repository.resolve_agent(
-        team_id=invocation["team_id"],
-        channel_id=invocation["channel_id"],
-        thread_ts=invocation.get("thread_ts"),
+    decision = await resolve_routed_agent(
+        parsed_invocation,
+        repository=resolved_repository,
     )
-    if route is None:
-        candidates = resolved_repository.list_enabled_agents(
-            team_id=invocation["team_id"],
-            channel_id=invocation["channel_id"],
-            thread_ts=invocation.get("thread_ts"),
+    if decision.action == RoutedAgentDecisionAction.CLARIFICATION_NEEDED:
+        return (
+            decision.follow_up_question
+            or decision.reasoning_summary
+            or build_agent_help_message(parsed_invocation.user_id)
         )
-        if not candidates:
-            return build_agent_unconfigured_message(invocation["user_id"])
+    if decision.action != RoutedAgentDecisionAction.EXECUTE or decision.agent is None:
+        return build_agent_unconfigured_message(parsed_invocation.user_id)
 
-        selection = await run_agent_selector(
-            {
-                "text": invocation["text"],
-                "team_id": invocation["team_id"],
-                "channel_id": invocation["channel_id"],
-                "thread_ts": invocation.get("thread_ts"),
-                "candidates": _build_selector_candidates(candidates),
-            }
-        )
-        if (
-            selection.action == AgentSelectorAction.SELECTED
-            and selection.recommended_agent_id is not None
-        ):
-            return build_selector_selected_message(
-                selection.recommended_agent_id,
-                selection.reasoning_summary,
-            )
-        if selection.action == AgentSelectorAction.CLARIFICATION_NEEDED:
-            return selection.follow_up_question or selection.reasoning_summary
-        return build_agent_unconfigured_message(invocation["user_id"])
-    return build_agent_selected_message(route)
+    response_text = await execute_registered_agent(
+        parsed_invocation,
+        decision.agent,
+        work_item_repository=work_item_repository,
+    )
+    if response_text is not None:
+        return response_text
+    return build_unimplemented_agent_message(
+        decision.agent.agent_id,
+        route_scope=decision.route_scope,
+        reasoning_summary=decision.reasoning_summary,
+    )
 
 
 async def handle_agent_mention(
@@ -320,12 +281,12 @@ async def handle_agent_mention(
         await say(text=build_agent_help_message())
         return
 
-    if not invocation["text"].strip():
+    if not invocation.text.strip():
         await say(
-            text=build_agent_help_message(invocation["user_id"]),
-            thread_ts=invocation.get("thread_ts"),
+            text=build_agent_help_message(invocation.user_id),
+            thread_ts=invocation.thread_ts,
         )
         return
 
     response_text = await invoke_routed_agent(invocation)
-    await say(text=response_text, thread_ts=invocation.get("thread_ts"))
+    await say(text=response_text, thread_ts=invocation.thread_ts)

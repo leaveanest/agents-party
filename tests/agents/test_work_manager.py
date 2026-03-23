@@ -10,7 +10,7 @@ from pydantic_ai import RunContext
 from pydantic_ai import CodeExecutionTool, WebFetchTool, WebSearchTool
 from pydantic_ai.models.test import TestModel
 
-import agents_party.agents.work_manager as work_manager_module
+import agents_party.agents.work_manager.runtime as work_manager_runtime_module
 from agents_party.agents.work_manager import (
     WorkManagerAction,
     WorkManagerDeps,
@@ -480,12 +480,12 @@ async def test_run_work_manager_uses_builtin_preparer_for_google_string_model(
             )
 
     monkeypatch.setattr(
-        work_manager_module,
+        work_manager_runtime_module,
         "run_work_manager_preparer",
         fake_run_work_manager_preparer,
     )
     monkeypatch.setattr(
-        work_manager_module,
+        work_manager_runtime_module,
         "build_work_manager_executor_agent",
         lambda model: FakeExecutorAgent(),
     )

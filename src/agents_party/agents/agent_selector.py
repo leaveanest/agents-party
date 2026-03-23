@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from enum import StrEnum
-from inspect import isawaitable
 from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import KnownModelName, Model
 
+from agents_party.agents.request_preparation import (
+    RequestPreparer,
+    resolve_request_preparation,
+)
 from agents_party.agents.skills import build_builtin_skills_toolset
 from agents_party.config import settings
 
@@ -106,9 +109,9 @@ Keep the reasoning summary short and operational.
 """
 
 
-type AgentSelectorRequestPreparer = Callable[
-    [AgentSelectorInvocation],
-    AgentSelectorPreparedRequest | Awaitable[AgentSelectorPreparedRequest],
+type AgentSelectorRequestPreparer = RequestPreparer[
+    AgentSelectorInvocation,
+    AgentSelectorPreparedRequest,
 ]
 
 
@@ -322,13 +325,12 @@ async def _prepare_selector_request(
     Returns:
         Prepared selector request for the decision agent.
     """
-    if request_preparer is None:
-        return await prepare_agent_selector_request(invocation)
-
-    prepared_request = request_preparer(invocation)
-    if isawaitable(prepared_request):
-        return await cast(Awaitable[AgentSelectorPreparedRequest], prepared_request)
-    return prepared_request
+    prepared_request = await resolve_request_preparation(
+        invocation,
+        default_preparer=prepare_agent_selector_request,
+        request_preparer=request_preparer,
+    )
+    return cast(AgentSelectorPreparedRequest, prepared_request)
 
 
 async def run_agent_selector(

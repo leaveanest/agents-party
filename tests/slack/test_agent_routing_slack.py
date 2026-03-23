@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+import agents_party.agents.slack_runtime as slack_runtime_module
 from agents_party.domain import AgentDocument, AgentRouteScope, ResolvedAgentRoute
 from agents_party.slack.features import agent_routing
 
@@ -112,8 +113,8 @@ def test_build_agent_invocation_from_mention_strips_leading_mentions() -> None:
         },
     )
 
-    assert invocation["text"] == "follow up with finance"
-    assert invocation["thread_ts"] == "1712345678.000100"
+    assert invocation.text == "follow up with finance"
+    assert invocation.thread_ts == "1712345678.000100"
 
 
 @pytest.mark.asyncio
@@ -129,9 +130,7 @@ async def test_handle_agent_mention_routes_response_to_thread(
         None.
     """
 
-    async def fake_invoke_routed_agent(
-        invocation: Mapping[str, Any],
-    ) -> str:
+    async def fake_invoke_routed_agent(invocation: Any) -> str:
         """Return a deterministic routed-agent response for the test.
 
         Args:
@@ -140,7 +139,7 @@ async def test_handle_agent_mention_routes_response_to_thread(
         Returns:
             Fixed response text used by the assertion.
         """
-        assert invocation["text"] == "mark the checklist complete"
+        assert invocation.text == "mark the checklist complete"
         return "Completed `checklist`."
 
     monkeypatch.setattr(agent_routing, "invoke_routed_agent", fake_invoke_routed_agent)
@@ -174,22 +173,24 @@ async def test_invoke_routed_agent_skips_selector_when_route_is_configured(
         None.
     """
 
-    async def fail_selector(*args: Any, **kwargs: Any) -> Any:
-        """Fail the test if selector fallback is invoked unexpectedly.
+    async def fake_execute_registered_agent(*args: Any, **kwargs: Any) -> str:
+        """Return a deterministic runtime response for the configured route.
 
         Args:
-            *args: Positional arguments passed to the selector.
-            **kwargs: Keyword arguments passed to the selector.
+            *args: Positional arguments passed to the runtime executor.
+            **kwargs: Keyword arguments passed to the runtime executor.
 
         Returns:
-            This helper never returns because it always raises.
-
-        Raises:
-            AssertionError: Always raised to signal an unexpected selector call.
+            Fixed response text used by the assertion.
         """
-        raise AssertionError("selector should not run when a route is configured")
+        del args, kwargs
+        return "Tracked `channel task`."
 
-    monkeypatch.setattr(agent_routing, "run_agent_selector", fail_selector)
+    monkeypatch.setattr(
+        agent_routing,
+        "execute_registered_agent",
+        fake_execute_registered_agent,
+    )
     repository = StubSlackAgentRepository(
         route=ResolvedAgentRoute(
             scope=AgentRouteScope.CHANNEL,
@@ -215,7 +216,7 @@ async def test_invoke_routed_agent_skips_selector_when_route_is_configured(
         repository=repository,
     )
 
-    assert "Resolved agent `work-manager` from channel settings" in message
+    assert message == "Tracked `channel task`."
     assert repository.list_calls == 0
 
 
@@ -247,14 +248,18 @@ async def test_invoke_routed_agent_uses_selector_only_when_route_is_missing(
             "SelectorResult",
             (),
             {
-                "action": agent_routing.AgentSelectorAction.SELECTED,
+                "action": slack_runtime_module.AgentSelectorAction.SELECTED,
                 "recommended_agent_id": "handover-agent",
                 "reasoning_summary": "The request is a thread summary.",
                 "follow_up_question": None,
             },
         )()
 
-    monkeypatch.setattr(agent_routing, "run_agent_selector", fake_run_agent_selector)
+    monkeypatch.setattr(
+        slack_runtime_module,
+        "run_agent_selector",
+        fake_run_agent_selector,
+    )
     repository = StubSlackAgentRepository(
         agents=[
             AgentDocument(
@@ -281,5 +286,6 @@ async def test_invoke_routed_agent_uses_selector_only_when_route_is_missing(
         repository=repository,
     )
 
-    assert "Selected agent `handover-agent` from selector fallback" in message
+    assert "Selected agent `handover-agent` from selector fallback." in message
+    assert "No runtime is registered yet." in message
     assert repository.list_calls == 1
