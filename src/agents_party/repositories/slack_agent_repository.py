@@ -2,48 +2,26 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from agents_party.domain import AgentDocument, ResolvedAgentRoute, ThreadDocument
+from agents_party.domain import ThreadDocument
 
 
 class SlackAgentRepository(Protocol):
-    """Repository boundary for Slack agent routing and candidate lookup."""
+    """Repository boundary for Slack assistant channel enablement and thread state."""
 
-    def resolve_agent(
+    def is_channel_enabled(
         self,
         *,
         team_id: str,
         channel_id: str,
-        thread_ts: str | None = None,
-    ) -> ResolvedAgentRoute | None:
-        """Return the configured agent route for a Slack context.
+    ) -> bool:
+        """Return whether the Slack assistant is enabled for a channel.
 
         Args:
             team_id: Slack workspace id owning the conversation.
             channel_id: Slack channel id where the request was made.
-            thread_ts: Optional thread timestamp for thread-specific routing.
 
         Returns:
-            Resolved configured route, or `None` when nothing is configured.
-        """
-
-        ...
-
-    def list_enabled_agents(
-        self,
-        *,
-        team_id: str,
-        channel_id: str,
-        thread_ts: str | None = None,
-    ) -> list[AgentDocument]:
-        """List enabled agents that can be used as selector fallback.
-
-        Args:
-            team_id: Slack workspace id owning the conversation.
-            channel_id: Slack channel id where the request was made.
-            thread_ts: Optional thread timestamp for future thread-aware filtering.
-
-        Returns:
-            Enabled agents that are eligible in the supplied context.
+            `True` when the assistant should handle requests in this channel.
         """
 
         ...
@@ -78,13 +56,13 @@ class SlackAgentRepository(Protocol):
         root_message_ts: str,
         last_message_ts: str,
     ) -> ThreadDocument:
-        """Persist the active routed agent for a Slack thread.
+        """Persist the active assistant thread state for a Slack thread.
 
         Args:
             team_id: Slack workspace id owning the conversation.
             channel_id: Slack channel id where the thread lives.
             thread_ts: Thread timestamp identifying the Slack thread.
-            agent_id: Agent id that successfully handled the thread.
+            agent_id: Stored agent id for the active thread, currently `assistant`.
             root_message_ts: Root Slack message timestamp for the thread.
             last_message_ts: Latest Slack message timestamp included in execution.
 

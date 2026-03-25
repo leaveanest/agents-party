@@ -1,3 +1,5 @@
+"""Application configuration loaded from environment variables."""
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -20,9 +22,17 @@ class Settings(BaseSettings):
         default="google-gla:gemini-3-flash-preview",
         alias="AGENT_SELECTOR_MODEL",
     )
+    slack_assistant_model: str | None = Field(
+        default=None,
+        alias="SLACK_ASSISTANT_MODEL",
+    )
     work_manager_model: str | None = Field(
         default="google-gla:gemini-3-flash-preview",
         alias="WORK_MANAGER_MODEL",
+    )
+    web_research_model: str | None = Field(
+        default=None,
+        alias="WEB_RESEARCH_MODEL",
     )
 
     slack_bot_token: str | None = Field(default=None, alias="SLACK_BOT_TOKEN")

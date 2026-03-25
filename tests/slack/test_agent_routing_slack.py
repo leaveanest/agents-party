@@ -5,15 +5,12 @@ from typing import Any
 
 import pytest
 
-import agents_party.agents.slack_runtime as slack_runtime_module
 from agents_party.domain import (
-    AgentDocument,
-    AgentRouteScope,
     MessageRole,
-    ResolvedAgentRoute,
     ThreadDocument,
     ThreadStatus,
 )
+from agents_party.infrastructure import TranslationResponse
 from agents_party.slack.features import agent_routing
 
 
@@ -44,20 +41,25 @@ class FakeSlackClient:
         self,
         responses: list[Mapping[str, Any]] | None = None,
         *,
+        history_responses: list[Mapping[str, Any]] | None = None,
         error: Exception | None = None,
     ) -> None:
-        """Initialize a fake Slack client for thread history calls.
+        """Initialize a fake Slack client for history, replies, and post calls.
 
         Args:
             responses: Ordered paginated responses returned by `conversations_replies`.
+            history_responses: Ordered responses returned by `conversations_history`.
             error: Optional exception raised instead of returning a response.
 
         Returns:
             None.
         """
         self._responses = list(responses or [])
+        self._history_responses = list(history_responses or [])
         self._error = error
         self.calls: list[dict[str, Any]] = []
+        self.history_calls: list[dict[str, Any]] = []
+        self.post_calls: list[dict[str, str | None]] = []
 
     async def conversations_replies(
         self,
@@ -88,98 +90,116 @@ class FakeSlackClient:
         )
         if self._error is not None:
             raise self._error
-
         if not self._responses:
             return {"ok": True, "messages": []}
         return self._responses.pop(0)
+
+    async def conversations_history(
+        self,
+        *,
+        channel: str,
+        latest: str,
+        oldest: str,
+        inclusive: bool,
+        limit: int | None = None,
+    ) -> Mapping[str, Any]:
+        """Return a fake history lookup response for a specific message timestamp.
+
+        Args:
+            channel: Slack channel id requested by the caller.
+            latest: Inclusive upper-bound timestamp requested by the caller.
+            oldest: Inclusive lower-bound timestamp requested by the caller.
+            inclusive: Whether Slack should include boundary timestamps.
+            limit: Optional page size requested by the caller.
+
+        Returns:
+            Fake Slack API response payload.
+        """
+        self.history_calls.append(
+            {
+                "channel": channel,
+                "latest": latest,
+                "oldest": oldest,
+                "inclusive": inclusive,
+                "limit": limit,
+            }
+        )
+        if self._error is not None:
+            raise self._error
+        if not self._history_responses:
+            return {"ok": True, "messages": []}
+        return self._history_responses.pop(0)
+
+    async def chat_postMessage(
+        self,
+        *,
+        channel: str,
+        text: str,
+        thread_ts: str | None = None,
+    ) -> Mapping[str, Any]:
+        """Record posted Slack messages for later assertions.
+
+        Args:
+            channel: Slack channel id requested by the caller.
+            text: Message text posted by the handler.
+            thread_ts: Optional root thread timestamp for the reply.
+
+        Returns:
+            Fake Slack API response payload.
+        """
+        self.post_calls.append(
+            {
+                "channel": channel,
+                "text": text,
+                "thread_ts": thread_ts,
+            }
+        )
+        if self._error is not None:
+            raise self._error
+        return {"ok": True, "channel": channel, "ts": thread_ts or "posted"}
 
 
 class StubSlackAgentRepository:
     def __init__(
         self,
         *,
-        route: ResolvedAgentRoute | None = None,
-        agents: list[AgentDocument] | None = None,
+        channel_enabled: bool = True,
         thread_document: ThreadDocument | None = None,
         auto_reply_enabled: bool = True,
     ) -> None:
-        """Initialize the fake repository with optional route, candidates, and thread state.
+        """Initialize the fake repository with channel and thread state.
 
         Args:
-            route: Optional route returned by `resolve_agent`.
-            agents: Optional candidate agents returned by `list_enabled_agents`.
+            channel_enabled: Whether the assistant is enabled for the channel.
             thread_document: Optional stored thread document returned by thread lookups.
             auto_reply_enabled: Whether follow-up thread messages should auto-route.
 
         Returns:
             None.
         """
-        self.route = route
-        self.agents = agents or []
+        self.channel_enabled = channel_enabled
         self.thread_document = thread_document
         self.auto_reply_enabled = auto_reply_enabled
-        self.resolve_calls = 0
-        self.list_calls = 0
         self.activate_calls: list[dict[str, str]] = []
         self.thread_reads = 0
-        self.auto_reply_reads = 0
 
-    def resolve_agent(
+    def is_channel_enabled(
         self,
         *,
         team_id: str,
         channel_id: str,
-        thread_ts: str | None = None,
-    ) -> ResolvedAgentRoute | None:
-        """Return the configured fake route and count calls.
-
-        Args:
-            team_id: Workspace id used to build a fallback thread route.
-            channel_id: Channel id used to build a fallback thread route.
-            thread_ts: Thread timestamp used to build a fallback thread route.
-
-        Returns:
-            Configured fake route, or a derived thread route when thread state exists.
-        """
-        self.resolve_calls += 1
-        if self.route is not None:
-            return self.route
-        if (
-            self.thread_document is not None
-            and self.thread_document.agent_id is not None
-            and thread_ts == self.thread_document.thread_ts
-        ):
-            for agent in self.agents:
-                if agent.agent_id == self.thread_document.agent_id:
-                    return ResolvedAgentRoute(
-                        scope=AgentRouteScope.THREAD,
-                        agent=agent,
-                        team_id=team_id,
-                        channel_id=channel_id,
-                        thread_ts=thread_ts,
-                    )
-        return None
-
-    def list_enabled_agents(
-        self,
-        *,
-        team_id: str,
-        channel_id: str,
-        thread_ts: str | None = None,
-    ) -> list[AgentDocument]:
-        """Return configured fake selector candidates and count calls.
+    ) -> bool:
+        """Return the configured assistant enablement for the channel.
 
         Args:
             team_id: Workspace id, unused by the fake.
             channel_id: Channel id, unused by the fake.
-            thread_ts: Thread timestamp, unused by the fake.
 
         Returns:
-            Copy of the configured fake agent list.
+            Configured channel enablement.
         """
-        del team_id, channel_id, thread_ts
-        self.list_calls += 1
-        return list(self.agents)
+        del team_id, channel_id
+        return self.channel_enabled
 
     def get_thread_document(
         self,
@@ -254,7 +274,7 @@ class StubSlackAgentRepository:
         team_id: str,
         channel_id: str,
     ) -> bool:
-        """Return the configured fake auto-reply value and count reads.
+        """Return the configured fake auto-reply value.
 
         Args:
             team_id: Workspace id, unused by the fake.
@@ -264,22 +284,7 @@ class StubSlackAgentRepository:
             Configured auto-reply boolean.
         """
         del team_id, channel_id
-        self.auto_reply_reads += 1
         return self.auto_reply_enabled
-
-
-def _work_manager_agent() -> AgentDocument:
-    """Build a representative registered work-manager agent document.
-
-    Returns:
-        Configured work-manager agent document for tests.
-    """
-    return AgentDocument(
-        agent_id="work-manager",
-        name="Work Manager",
-        model_provider="google-gla",
-        model_name="gemini-3-flash-preview",
-    )
 
 
 def test_build_agent_invocation_from_mention_strips_leading_mentions() -> None:
@@ -325,55 +330,43 @@ def test_build_agent_invocation_from_message_preserves_follow_up_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_handle_agent_message_routes_explicit_mention_and_activates_thread(
+async def test_handle_agent_mention_runs_assistant_and_activates_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify explicit mentions are handled from `message` events and activate the thread.
+    """Verify explicit mentions execute the assistant and activate the thread.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to stub runtime execution.
+        monkeypatch: Pytest monkeypatch fixture used to stub assistant execution.
 
     Returns:
         None.
     """
 
-    async def fake_execute_registered_agent(
-        invocation: Any,
-        agent: AgentDocument,
-        work_item_repository: Any | None = None,
-    ) -> str:
-        """Return a deterministic routed-agent response for the test.
+    async def fake_run_slack_assistant(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic assistant result for mention routing tests.
 
         Args:
-            invocation: Routing invocation received by the runtime layer.
-            agent: Routed agent selected for execution.
-            work_item_repository: Optional repository override, unused by the fake.
+            invocation: Slack invocation received from the routing layer.
+            **_: Unused keyword arguments.
 
         Returns:
-            Fixed response text used by the assertion.
+            Lightweight assistant result object with a fixed message.
         """
-        del work_item_repository
-        assert agent.agent_id == "work-manager"
         assert [message.role for message in invocation.thread_messages] == [
             MessageRole.USER
         ]
-        return "Completed `checklist`."
+        return type(
+            "SlackAssistantResult",
+            (),
+            {
+                "message": "Completed `checklist`.",
+                "follow_up_question": None,
+            },
+        )()
 
-    monkeypatch.setattr(
-        agent_routing,
-        "execute_registered_agent",
-        fake_execute_registered_agent,
-    )
+    monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
     responder = SayResponder()
-    repository = StubSlackAgentRepository(
-        route=ResolvedAgentRoute(
-            scope=AgentRouteScope.CHANNEL,
-            agent=_work_manager_agent(),
-            team_id="T1",
-            channel_id="C123",
-            thread_ts="1712345678.000100",
-        )
-    )
+    repository = StubSlackAgentRepository()
     client = FakeSlackClient(
         [
             {
@@ -389,7 +382,7 @@ async def test_handle_agent_message_routes_explicit_mention_and_activates_thread
         ]
     )
 
-    await agent_routing.handle_agent_message(
+    await agent_routing.handle_agent_mention(
         {"team_id": "T1"},
         {
             "user": "U1",
@@ -399,7 +392,6 @@ async def test_handle_agent_message_routes_explicit_mention_and_activates_thread
         },
         responder,
         client,
-        bot_user_id="Ubot",
         repository=repository,
     )
 
@@ -409,7 +401,7 @@ async def test_handle_agent_message_routes_explicit_mention_and_activates_thread
             "team_id": "T1",
             "channel_id": "C123",
             "thread_ts": "1712345678.000100",
-            "agent_id": "work-manager",
+            "agent_id": "assistant",
             "root_message_ts": "1712345678.000100",
             "last_message_ts": "1712345678.000100",
         }
@@ -417,72 +409,48 @@ async def test_handle_agent_message_routes_explicit_mention_and_activates_thread
 
 
 @pytest.mark.asyncio
-async def test_selector_fallback_activation_is_reused_for_follow_up_messages(
+async def test_handle_agent_message_routes_active_thread_follow_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify selector fallback activates the thread and later follow-ups reuse it.
+    """Verify active assistant threads auto-route follow-up messages.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to stub selector and runtime execution.
+        monkeypatch: Pytest monkeypatch fixture used to stub assistant execution.
 
     Returns:
         None.
     """
-    responses = iter(["Handled initial request.", "Handled follow-up request."])
 
-    async def fake_run_agent_selector(invocation: Mapping[str, Any]) -> Any:
-        """Return a deterministic selector result for the routing fallback test.
+    async def fake_run_slack_assistant(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic assistant result for follow-up routing tests.
 
         Args:
-            invocation: Selector invocation payload built by routing.
+            invocation: Slack invocation received from the routing layer.
+            **_: Unused keyword arguments.
 
         Returns:
-            Lightweight object emulating a selector result.
+            Lightweight assistant result object with a fixed message.
         """
-        assert invocation["candidates"][0].agent_id == "work-manager"
+        assert invocation.text == "please also tag finance"
         return type(
-            "SelectorResult",
+            "SlackAssistantResult",
             (),
-            {
-                "action": slack_runtime_module.AgentSelectorAction.SELECTED,
-                "recommended_agent_id": "work-manager",
-                "reasoning_summary": "The request matches the work manager.",
-                "follow_up_question": None,
-            },
+            {"message": "Tagged finance.", "follow_up_question": None},
         )()
 
-    async def fake_execute_registered_agent(
-        invocation: Any,
-        agent: AgentDocument,
-        work_item_repository: Any | None = None,
-    ) -> str:
-        """Return a deterministic response for each invocation.
-
-        Args:
-            invocation: Routing invocation received by the runtime layer.
-            agent: Routed agent selected for execution.
-            work_item_repository: Optional repository override, unused by the fake.
-
-        Returns:
-            Next deterministic response string from the iterator.
-        """
-        del work_item_repository
-        assert agent.agent_id == "work-manager"
-        assert invocation.thread_messages[-1].role == MessageRole.USER
-        return next(responses)
-
-    monkeypatch.setattr(
-        slack_runtime_module,
-        "run_agent_selector",
-        fake_run_agent_selector,
-    )
-    monkeypatch.setattr(
-        agent_routing,
-        "execute_registered_agent",
-        fake_execute_registered_agent,
-    )
-    repository = StubSlackAgentRepository(agents=[_work_manager_agent()])
+    monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
     responder = SayResponder()
+    repository = StubSlackAgentRepository(
+        thread_document=ThreadDocument(
+            thread_ts="1712345678.000100",
+            root_message_ts="1712345678.000100",
+            channel_id="C123",
+            team_id="T1",
+            status=ThreadStatus.ACTIVE,
+            agent_id="assistant",
+            last_message_ts="1712345678.000100",
+        )
+    )
     client = FakeSlackClient(
         [
             {
@@ -491,43 +459,18 @@ async def test_selector_fallback_activation_is_reused_for_follow_up_messages(
                     {
                         "ts": "1712345678.000100",
                         "user": "U1",
-                        "text": "<@Ubot> capture a task",
-                    }
-                ],
-            },
-            {
-                "ok": True,
-                "messages": [
-                    {
-                        "ts": "1712345678.000100",
-                        "user": "U1",
-                        "text": "<@Ubot> capture a task",
+                        "text": "<@Ubot> summarize this thread",
                     },
                     {
                         "ts": "1712345680.000100",
                         "user": "U1",
-                        "text": "also assign it to finance",
+                        "text": "please also tag finance",
                     },
                 ],
-            },
+            }
         ]
     )
 
-    await agent_routing.handle_agent_message(
-        {"team_id": "T1"},
-        {
-            "user": "U1",
-            "channel": "C123",
-            "ts": "1712345678.000100",
-            "text": "<@Ubot> capture a task",
-        },
-        responder,
-        client,
-        bot_user_id="Ubot",
-        repository=repository,
-    )
-
-    selector_list_calls = repository.list_calls
     await agent_routing.handle_agent_message(
         {"team_id": "T1"},
         {
@@ -535,7 +478,7 @@ async def test_selector_fallback_activation_is_reused_for_follow_up_messages(
             "channel": "C123",
             "ts": "1712345680.000100",
             "thread_ts": "1712345678.000100",
-            "text": "also assign it to finance",
+            "text": "please also tag finance",
         },
         responder,
         client,
@@ -543,389 +486,126 @@ async def test_selector_fallback_activation_is_reused_for_follow_up_messages(
         repository=repository,
     )
 
-    assert responder.calls == [
-        ("Handled initial request.", "1712345678.000100"),
-        ("Handled follow-up request.", "1712345678.000100"),
-    ]
-    assert selector_list_calls == 1
-    assert repository.list_calls == selector_list_calls
-    assert repository.thread_document is not None
-    assert repository.thread_document.agent_id == "work-manager"
+    assert responder.calls == [("Tagged finance.", "1712345678.000100")]
+    assert repository.activate_calls[-1]["agent_id"] == "assistant"
 
 
-@pytest.mark.parametrize(
-    ("event", "thread_document", "auto_reply_enabled"),
-    [
-        (
-            {
-                "user": "U1",
-                "channel": "C123",
-                "ts": "1712345680.000100",
-                "thread_ts": "1712345678.000100",
-                "text": "   ",
-            },
-            ThreadDocument(
-                thread_ts="1712345678.000100",
-                root_message_ts="1712345678.000100",
-                channel_id="C123",
-                team_id="T1",
-                status=ThreadStatus.ACTIVE,
-                agent_id="work-manager",
-            ),
-            True,
-        ),
-        (
-            {
-                "user": "U1",
-                "channel": "C123",
-                "ts": "1712345680.000100",
-                "text": "outside the thread",
-            },
-            ThreadDocument(
-                thread_ts="1712345678.000100",
-                root_message_ts="1712345678.000100",
-                channel_id="C123",
-                team_id="T1",
-                status=ThreadStatus.ACTIVE,
-                agent_id="work-manager",
-            ),
-            True,
-        ),
-        (
-            {
-                "user": "U1",
-                "channel": "C123",
-                "ts": "1712345680.000100",
-                "thread_ts": "1712345678.000100",
-                "text": "edited",
-                "subtype": "message_changed",
-            },
-            ThreadDocument(
-                thread_ts="1712345678.000100",
-                root_message_ts="1712345678.000100",
-                channel_id="C123",
-                team_id="T1",
-                status=ThreadStatus.ACTIVE,
-                agent_id="work-manager",
-            ),
-            True,
-        ),
-        (
-            {
-                "user": "U1",
-                "channel": "C123",
-                "ts": "1712345680.000100",
-                "thread_ts": "1712345678.000100",
-                "text": "bot authored",
-                "bot_id": "B1",
-            },
-            ThreadDocument(
-                thread_ts="1712345678.000100",
-                root_message_ts="1712345678.000100",
-                channel_id="C123",
-                team_id="T1",
-                status=ThreadStatus.ACTIVE,
-                agent_id="work-manager",
-            ),
-            True,
-        ),
-        (
-            {
-                "user": "U1",
-                "channel": "C123",
-                "ts": "1712345680.000100",
-                "thread_ts": "1712345678.000100",
-                "text": "inactive thread",
-            },
-            ThreadDocument(
-                thread_ts="1712345678.000100",
-                root_message_ts="1712345678.000100",
-                channel_id="C123",
-                team_id="T1",
-                status=ThreadStatus.CLOSED,
-                agent_id="work-manager",
-            ),
-            True,
-        ),
-        (
-            {
-                "user": "U1",
-                "channel": "C123",
-                "ts": "1712345680.000100",
-                "thread_ts": "1712345678.000100",
-                "text": "auto reply disabled",
-            },
-            ThreadDocument(
-                thread_ts="1712345678.000100",
-                root_message_ts="1712345678.000100",
-                channel_id="C123",
-                team_id="T1",
-                status=ThreadStatus.ACTIVE,
-                agent_id="work-manager",
-            ),
-            False,
-        ),
-    ],
-)
 @pytest.mark.asyncio
-async def test_handle_agent_message_ignores_unsupported_follow_up_events(
-    monkeypatch: pytest.MonkeyPatch,
-    event: dict[str, str],
-    thread_document: ThreadDocument,
-    auto_reply_enabled: bool,
-) -> None:
-    """Verify invalid follow-up message events do not trigger auto-routing.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture used to guard against invocation.
-        event: Slack event payload under test.
-        thread_document: Stored thread document returned by the fake repository.
-        auto_reply_enabled: Effective thread auto-reply setting for the fake repository.
+async def test_handle_agent_mention_returns_unconfigured_for_disabled_channel() -> None:
+    """Verify disabled channels do not run the assistant for new mentions.
 
     Returns:
         None.
     """
-
-    async def fail_invoke_routed_agent(*args: Any, **kwargs: Any) -> str:
-        """Fail the test if follow-up routing runs unexpectedly.
-
-        Args:
-            *args: Positional invocation arguments, unused.
-            **kwargs: Keyword invocation arguments, unused.
-
-        Returns:
-            Never returns because the test fails first.
-        """
-        del args, kwargs
-        raise AssertionError("invoke_routed_agent should not run for ignored events")
-
-    monkeypatch.setattr(agent_routing, "invoke_routed_agent", fail_invoke_routed_agent)
     responder = SayResponder()
-    repository = StubSlackAgentRepository(
-        agents=[_work_manager_agent()],
-        thread_document=thread_document,
-        auto_reply_enabled=auto_reply_enabled,
-    )
+    repository = StubSlackAgentRepository(channel_enabled=False)
 
-    await agent_routing.handle_agent_message(
+    await agent_routing.handle_agent_mention(
         {"team_id": "T1"},
-        event,
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> summarize this thread",
+        },
         responder,
-        FakeSlackClient(),
-        bot_user_id="Ubot",
         repository=repository,
     )
 
-    assert responder.calls == []
+    assert responder.calls == [
+        (
+            "The Slack assistant is not enabled for this workspace or channel.\n"
+            + agent_routing.build_agent_help_message("U1"),
+            "1712345678.000100",
+        )
+    ]
+    assert repository.activate_calls == []
 
 
 @pytest.mark.asyncio
-async def test_handle_agent_message_ignores_other_users_mentions_for_new_threads(
+async def test_handle_agent_message_ignores_disabled_channel_follow_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify message events do not start routing for mentions that target another user.
+    """Verify disabled channels do not auto-route active-thread follow-ups.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to guard against invocation.
+        monkeypatch: Pytest monkeypatch fixture used to assert assistant non-execution.
 
     Returns:
         None.
     """
 
-    async def fail_handle_agent_mention(*args: Any, **kwargs: Any) -> None:
-        """Fail the test if explicit-mention routing runs unexpectedly.
+    async def fail_run_slack_assistant(*_: Any, **__: Any) -> Any:
+        """Fail the test if the assistant is invoked unexpectedly.
 
         Args:
-            *args: Positional invocation arguments, unused.
-            **kwargs: Keyword invocation arguments, unused.
+            *_: Unused positional arguments.
+            **__: Unused keyword arguments.
 
         Returns:
-            Never returns because the test fails first.
+            Never returns because the function always raises.
         """
-        del args, kwargs
-        raise AssertionError(
-            "handle_agent_mention should not run for another user's mention"
-        )
+        raise AssertionError("run_slack_assistant should not run")
 
-    monkeypatch.setattr(
-        agent_routing, "handle_agent_mention", fail_handle_agent_mention
-    )
+    monkeypatch.setattr(agent_routing, "run_slack_assistant", fail_run_slack_assistant)
     responder = SayResponder()
+    repository = StubSlackAgentRepository(
+        channel_enabled=False,
+        thread_document=ThreadDocument(
+            thread_ts="1712345678.000100",
+            root_message_ts="1712345678.000100",
+            channel_id="C123",
+            team_id="T1",
+            status=ThreadStatus.ACTIVE,
+            agent_id="assistant",
+            last_message_ts="1712345678.000100",
+        ),
+    )
 
     await agent_routing.handle_agent_message(
         {"team_id": "T1"},
         {
             "user": "U1",
             "channel": "C123",
-            "ts": "1712345678.000100",
-            "text": "<@Uother> this should not route",
+            "ts": "1712345680.000100",
+            "thread_ts": "1712345678.000100",
+            "text": "please also tag finance",
         },
         responder,
-        FakeSlackClient(),
         bot_user_id="Ubot",
-        repository=StubSlackAgentRepository(),
+        repository=repository,
     )
 
     assert responder.calls == []
 
 
 @pytest.mark.asyncio
-async def test_invoke_routed_agent_fetches_thread_history_normalizes_and_activates(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify execution uses normalized full-thread context and activates the thread.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture used to stub runtime execution.
-
-    Returns:
-        None.
-    """
-
-    async def fake_execute_registered_agent(
-        invocation: Any,
-        agent: AgentDocument,
-        work_item_repository: Any | None = None,
-    ) -> str:
-        """Assert normalized transcript content before returning a fixed response.
-
-        Args:
-            invocation: Routing invocation received by the runtime layer.
-            agent: Routed agent selected for execution.
-            work_item_repository: Optional repository override, unused by the fake.
-
-        Returns:
-            Fixed response text used by the assertion.
-        """
-        del work_item_repository
-        assert agent.agent_id == "work-manager"
-        assert [message.role for message in invocation.thread_messages] == [
-            MessageRole.USER,
-            MessageRole.ASSISTANT,
-            MessageRole.USER,
-        ]
-        assert [message.text for message in invocation.thread_messages] == [
-            "initial request",
-            "ack",
-            "follow-up detail",
-        ]
-        return "Tracked `channel task`."
-
-    monkeypatch.setattr(
-        agent_routing,
-        "execute_registered_agent",
-        fake_execute_registered_agent,
-    )
-    repository = StubSlackAgentRepository(
-        route=ResolvedAgentRoute(
-            scope=AgentRouteScope.CHANNEL,
-            agent=_work_manager_agent(),
-            team_id="T1",
-            channel_id="C123",
-            thread_ts="1712345678.000100",
-        )
-    )
-    client = FakeSlackClient(
-        [
-            {
-                "ok": True,
-                "messages": [
-                    {
-                        "ts": "1712345678.000100",
-                        "user": "U1",
-                        "text": "initial request",
-                    },
-                    {
-                        "ts": "1712345678.000200",
-                        "subtype": "bot_message",
-                        "bot_id": "B1",
-                        "text": "ack",
-                    },
-                ],
-                "response_metadata": {"next_cursor": "cursor-1"},
-            },
-            {
-                "ok": True,
-                "messages": [
-                    {
-                        "ts": "1712345678.000300",
-                        "user": "U1",
-                        "text": "follow-up detail",
-                    }
-                ],
-                "response_metadata": {"next_cursor": ""},
-            },
-        ]
-    )
-
-    message = await agent_routing.invoke_routed_agent(
-        {
-            "team_id": "T1",
-            "user_id": "U1",
-            "channel_id": "C123",
-            "viewer_context_channel_ids": ("C123",),
-            "text": "track this",
-            "thread_ts": "1712345678.000100",
-            "message_ts": "1712345678.000300",
-        },
-        client=client,
-        repository=repository,
-    )
-
-    assert message == "Tracked `channel task`."
-    assert repository.activate_calls == [
-        {
-            "team_id": "T1",
-            "channel_id": "C123",
-            "thread_ts": "1712345678.000100",
-            "agent_id": "work-manager",
-            "root_message_ts": "1712345678.000100",
-            "last_message_ts": "1712345678.000300",
-        }
-    ]
-    assert client.calls[0]["cursor"] is None
-    assert client.calls[1]["cursor"] == "cursor-1"
-
-
-@pytest.mark.asyncio
 async def test_invoke_routed_agent_returns_context_error_for_unsupported_thread_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify unsupported thread history skips execution and leaves thread state unchanged.
+    """Verify invalid thread history prevents assistant execution.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to guard against runtime execution.
+        monkeypatch: Pytest monkeypatch fixture used to assert assistant non-execution.
 
     Returns:
         None.
     """
 
-    async def fail_execute_registered_agent(*args: Any, **kwargs: Any) -> str:
-        """Fail the test if runtime execution runs unexpectedly.
+    async def fail_run_slack_assistant(*_: Any, **__: Any) -> Any:
+        """Fail the test if the assistant is invoked unexpectedly.
 
         Args:
-            *args: Positional invocation arguments, unused.
-            **kwargs: Keyword invocation arguments, unused.
+            *_: Unused positional arguments.
+            **__: Unused keyword arguments.
 
         Returns:
-            Never returns because the test fails first.
+            Never returns because the function always raises.
         """
-        del args, kwargs
-        raise AssertionError("execute_registered_agent should not run")
+        raise AssertionError("run_slack_assistant should not run")
 
-    monkeypatch.setattr(
-        agent_routing,
-        "execute_registered_agent",
-        fail_execute_registered_agent,
-    )
-    repository = StubSlackAgentRepository(
-        route=ResolvedAgentRoute(
-            scope=AgentRouteScope.CHANNEL,
-            agent=_work_manager_agent(),
-            team_id="T1",
-            channel_id="C123",
-        )
-    )
+    monkeypatch.setattr(agent_routing, "run_slack_assistant", fail_run_slack_assistant)
+    repository = StubSlackAgentRepository()
     client = FakeSlackClient(
         [
             {
@@ -933,79 +613,19 @@ async def test_invoke_routed_agent_returns_context_error_for_unsupported_thread_
                 "messages": [
                     {
                         "ts": "1712345678.000100",
-                        "user": "U1",
-                        "text": "initial request",
-                    },
-                    {
-                        "ts": "1712345678.000200",
-                        "subtype": "message_changed",
-                        "text": "edited",
-                    },
-                ],
-            }
-        ]
-    )
-
-    message = await agent_routing.invoke_routed_agent(
-        {
-            "team_id": "T1",
-            "user_id": "U1",
-            "channel_id": "C123",
-            "viewer_context_channel_ids": ("C123",),
-            "text": "track this",
-            "thread_ts": "1712345678.000100",
-            "message_ts": "1712345678.000100",
-        },
-        client=client,
-        repository=repository,
-    )
-
-    assert "I couldn't load the full Slack thread context" in message
-    assert repository.activate_calls == []
-
-
-@pytest.mark.asyncio
-async def test_invoke_routed_agent_does_not_activate_for_unimplemented_agent() -> None:
-    """Verify unsupported runtimes do not mark the thread as active.
-
-    Returns:
-        None.
-    """
-    repository = StubSlackAgentRepository(
-        route=ResolvedAgentRoute(
-            scope=AgentRouteScope.THREAD,
-            agent=AgentDocument(
-                agent_id="handover-agent",
-                name="Handover Agent",
-                model_provider="google-gla",
-                model_name="gemini-3-flash-preview",
-            ),
-            team_id="T1",
-            channel_id="C123",
-            thread_ts="1712345678.000100",
-        )
-    )
-    client = FakeSlackClient(
-        [
-            {
-                "ok": True,
-                "messages": [
-                    {
-                        "ts": "1712345678.000100",
-                        "user": "U1",
-                        "text": "summarize this thread",
+                        "subtype": "channel_join",
+                        "text": "joined the channel",
                     }
                 ],
             }
         ]
     )
 
-    message = await agent_routing.invoke_routed_agent(
+    response_text = await agent_routing.invoke_routed_agent(
         {
             "team_id": "T1",
             "user_id": "U1",
             "channel_id": "C123",
-            "viewer_context_channel_ids": ("C123",),
             "text": "summarize this thread",
             "thread_ts": "1712345678.000100",
             "message_ts": "1712345678.000100",
@@ -1014,5 +634,71 @@ async def test_invoke_routed_agent_does_not_activate_for_unimplemented_agent() -
         repository=repository,
     )
 
-    assert "No runtime is registered yet." in message
-    assert repository.activate_calls == []
+    assert response_text == agent_routing.build_thread_context_error_message("U1")
+
+
+@pytest.mark.asyncio
+async def test_handle_translation_reaction_translates_flagged_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify flag reactions translate the reacted message in the message thread.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub translation service creation.
+
+    Returns:
+        None.
+    """
+
+    class FakeTranslationService:
+        def translate_text(self, **_: Any) -> TranslationResponse:
+            """Return a deterministic translation response for reaction tests.
+
+            Args:
+                **_: Unused keyword arguments.
+
+            Returns:
+                Fixed translated text payload.
+            """
+            return TranslationResponse(translated_text="こんにちは")
+
+    monkeypatch.setattr(
+        agent_routing,
+        "_build_translation_service",
+        lambda: FakeTranslationService(),
+    )
+    client = FakeSlackClient(
+        history_responses=[
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "text": "Hello",
+                    }
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_translation_reaction(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "reaction": "flag-jp",
+            "item": {
+                "type": "message",
+                "channel": "C123",
+                "ts": "1712345678.000100",
+            },
+        },
+        client=client,
+    )
+
+    assert client.post_calls == [
+        {
+            "channel": "C123",
+            "text": "こんにちは",
+            "thread_ts": "1712345678.000100",
+        }
+    ]

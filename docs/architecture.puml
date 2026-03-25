@@ -16,8 +16,10 @@ package "Google Cloud Project" {
       component "Slack Events Endpoint\nPOST /slack/events" as slack_events_endpoint
       component "App Home / Mention Handling" as slack_handlers
       component "Agent Routing" as agent_routing
-      component "Agent Selector" as agent_selector
+      component "Slack Assistant" as slack_assistant
       component "Work Manager" as work_manager
+      component "Web Research" as web_research
+      component "Translation" as translation
     }
   }
 
@@ -25,8 +27,6 @@ package "Google Cloud Project" {
   rectangle "Vertex AI" as vertex_ai
 
   database "Firestore" as firestore {
-    folder "agents/{agent_id}" as fs_agents
-
     folder "workspaces/{team_id}" as fs_workspace {
       folder "app_settings/default" as fs_workspace_settings
 
@@ -54,28 +54,29 @@ secret_manager --> cloud_run : Slack credentials\nruntime secret injection
 slack_events_endpoint --> slack_handlers
 slack_handlers --> agent_routing
 
-agent_routing --> fs_workspace_settings : workspace default agent
-agent_routing --> fs_channel_settings : channel default agent
-agent_routing --> fs_threads : thread-level route
-agent_routing --> fs_agents : load enabled agents
+agent_routing --> fs_workspace_settings : enabled channels\nthread auto-reply
+agent_routing --> fs_channel_settings : enabled channels\nthread auto-reply
+agent_routing --> fs_threads : active assistant thread
+agent_routing --> slack_assistant : execute with full thread context
 
-agent_routing --> agent_selector : fallback selection
-agent_selector --> vertex_ai : selection request
-
-agent_routing ..[#gray,dashed]> work_manager : selected agent execution\n(not wired yet)
+slack_assistant --> vertex_ai : assistant reasoning
+slack_assistant --> work_manager : explicit delegation
+slack_assistant --> web_research : explicit delegation
+slack_assistant --> translation : explicit delegation
 
 work_manager --> vertex_ai : task execution
 work_manager --> fs_work_item : create / read / update
 work_manager --> fs_participants : assignees / roles / attention
 work_manager --> fs_events : work item history
 work_manager --> fs_attention : per-user attention index
+web_research --> vertex_ai : source-backed research
+translation --> vertex_ai : translation execution
 
 note bottom of firestore
 Slack routing data:
 - workspace app settings
 - channel app settings
-- thread route overrides
-- global agent definitions
+- thread active state
 
 Work management data:
 - work items

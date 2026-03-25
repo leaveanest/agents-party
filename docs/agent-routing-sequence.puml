@@ -16,8 +16,8 @@ box "Google Cloud Project"
   participant "Mention Handler" as mention_handler
   participant "Message Handler" as message_handler
   participant "Agent Routing" as agent_routing
-  participant "Agent Selector" as agent_selector
-  participant "Selected Agent" as selected_agent
+  participant "Slack Assistant" as slack_assistant
+  participant "Specialist Agent" as specialist_agent
   database "Firestore\nthreads/{thread_ts}" as fs_threads
   participant "Vertex AI" as vertex_ai
 end box
@@ -27,24 +27,13 @@ alt Explicit agent invocation by mention
   slack -> slack_events_endpoint : app_mention event
   slack_events_endpoint -> mention_handler : Pass event payload
   mention_handler -> agent_routing : Build invocation\n(team, channel, thread, user text)
-  agent_routing -> fs_threads : Read thread setting\n(agent_id)
-  alt Agent already selected on the thread
-    fs_threads --> agent_routing : Existing agent_id
-  else Agent not selected on the thread
-    fs_threads --> agent_routing : No agent_id
-    agent_routing -> agent_selector : Select agent from user request\nand available agent candidates
-    agent_selector -> vertex_ai : Reason over the request
-    vertex_ai --> agent_selector : Recommended agent_id
-    agent_selector --> agent_routing : Selected agent_id
-    agent_routing -> fs_threads : Persist selected agent_id\nas thread setting
-  end
-else Follow-up message in an active agent thread
+else Follow-up message in an active assistant thread
   slack -> slack_events_endpoint : message event
   slack_events_endpoint -> message_handler : Pass event payload
   message_handler -> fs_threads : Read thread state\n(agent_id, status)
-  alt Thread has an active agent conversation
+  alt Thread has an active assistant conversation
     fs_threads --> message_handler : Existing agent_id and active status
-    message_handler -> agent_routing : Continue with thread agent\nwithout mention
+    message_handler -> agent_routing : Continue with assistant\nwithout mention
   else No active agent conversation
     fs_threads --> message_handler : No active thread agent
     message_handler --> slack : No response
@@ -53,24 +42,31 @@ end
 
 agent_routing -> slack_api : Fetch full thread history\nvia Slack API (conversations.replies)
 slack_api --> agent_routing : All thread messages\n(user posts + bot posts)
-agent_routing -> selected_agent : Execute with selected agent_id\nand full thread messages
-selected_agent -> vertex_ai : Generate reply from full thread context
-vertex_ai --> selected_agent : Response content
-selected_agent --> agent_routing : Agent output
+agent_routing -> slack_assistant : Execute with full thread context
+slack_assistant -> vertex_ai : Choose direct reply\nor delegation
+alt Specialist delegation needed
+  slack_assistant -> specialist_agent : Delegate request
+  specialist_agent -> vertex_ai : Execute specialist task
+  vertex_ai --> specialist_agent : Specialist response
+  specialist_agent --> slack_assistant : Slack-ready response
+else Assistant replies directly
+  vertex_ai --> slack_assistant : Direct response
+end
+slack_assistant --> agent_routing : Assistant output
+agent_routing -> fs_threads : Persist active agent_id=`assistant`
 agent_routing -> slack : Post reply to the thread
 slack --> slack_user : Show agent response
 
-note right of selected_agent
+note right of slack_assistant
 Basic behavior:
-the agent reads all posts in the thread,
+the assistant reads all posts in the thread,
 including user posts and bot posts,
-and generates the output from that full context.
+and either answers directly or delegates to one specialist.
 end note
 
 note over agent_routing, fs_threads
-Assumption for this diagram:
-if selector fallback chooses an agent, the result is stored on the thread
-so later mentions in the same thread reuse that agent directly.
+The routing layer stores `assistant` on the thread
+so later replies continue through the same public entrypoint.
 end note
 
 note over message_handler
@@ -80,11 +76,11 @@ Recommended guard conditions for message events:
 - limit auto-replies to threads with an active agent conversation
 end note
 
-note over slack_api, selected_agent
+note over slack_api, slack_assistant
 Context collection rule:
 retrieve the full thread from Slack API,
 including both user messages and bot messages,
-before running the selected agent.
+before running the assistant.
 end note
 
 @enduml

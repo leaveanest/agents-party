@@ -21,7 +21,7 @@ def _build_home_view() -> dict[str, Any]:
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": "Mention the app in a channel or thread to talk to the configured agent.",
+                    "text": "Mention the app in a channel or thread to talk to the assistant.",
                 },
             },
         ],

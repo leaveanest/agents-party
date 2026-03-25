@@ -6,13 +6,10 @@ from google.cloud import firestore
 from pydantic import BaseModel
 
 from agents_party.domain import (
-    AgentDocument,
     ChannelAppSettingsDocument,
-    ResolvedAgentRoute,
     ThreadDocument,
     ThreadStatus,
     WorkspaceAppSettingsDocument,
-    resolve_agent_id_for_slack_context,
     utc_now,
 )
 
@@ -21,7 +18,7 @@ DocumentT = TypeVar("DocumentT", bound=BaseModel)
 
 
 class FirestoreSlackAgentRepository:
-    """Firestore-backed repository for Slack agent routing settings."""
+    """Firestore-backed repository for Slack assistant channel and thread settings."""
 
     def __init__(
         self,
@@ -45,22 +42,20 @@ class FirestoreSlackAgentRepository:
             database=database,
         )
 
-    def resolve_agent(
+    def is_channel_enabled(
         self,
         *,
         team_id: str,
         channel_id: str,
-        thread_ts: str | None = None,
-    ) -> ResolvedAgentRoute | None:
-        """Resolve a configured agent using thread, channel, then workspace settings.
+    ) -> bool:
+        """Return whether the Slack assistant is enabled for a channel.
 
         Args:
             team_id: Slack workspace id owning the conversation.
             channel_id: Slack channel id where the request was made.
-            thread_ts: Optional thread timestamp for thread-level routing.
 
         Returns:
-            Resolved route containing the enabled agent, or `None` when none applies.
+            `True` when the assistant should handle requests in this channel.
         """
         workspace_settings = self._read_model(
             self._workspace_settings_ref(team_id),
@@ -71,86 +66,8 @@ class FirestoreSlackAgentRepository:
             and workspace_settings.enabled_channel_ids
             and channel_id not in workspace_settings.enabled_channel_ids
         ):
-            return None
-
-        channel_settings = self._read_model(
-            self._channel_settings_ref(team_id, channel_id),
-            ChannelAppSettingsDocument,
-        )
-        thread = (
-            self._read_model(
-                self._thread_ref(team_id, channel_id, thread_ts), ThreadDocument
-            )
-            if thread_ts is not None
-            else None
-        )
-
-        agent_id, scope = resolve_agent_id_for_slack_context(
-            thread_agent_id=thread.agent_id if thread is not None else None,
-            channel_agent_id=(
-                channel_settings.default_agent_id
-                if channel_settings is not None
-                else None
-            ),
-            workspace_agent_id=(
-                workspace_settings.default_agent_id
-                if workspace_settings is not None
-                else None
-            ),
-        )
-        if agent_id is None or scope is None:
-            return None
-
-        agent = self._read_model(self._agent_ref(agent_id), AgentDocument)
-        if agent is None or not agent.enabled:
-            return None
-
-        return ResolvedAgentRoute(
-            scope=scope,
-            agent=agent,
-            team_id=team_id,
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-        )
-
-    def list_enabled_agents(
-        self,
-        *,
-        team_id: str,
-        channel_id: str,
-        thread_ts: str | None = None,
-    ) -> list[AgentDocument]:
-        """Return enabled agent documents available for selector fallback.
-
-        Args:
-            team_id: Slack workspace id owning the conversation.
-            channel_id: Slack channel id where the request was made.
-            thread_ts: Optional thread timestamp, currently unused by the query.
-
-        Returns:
-            Enabled agent documents that are allowed in the supplied context.
-        """
-        del thread_ts
-        workspace_settings = self._read_model(
-            self._workspace_settings_ref(team_id),
-            WorkspaceAppSettingsDocument,
-        )
-        if (
-            workspace_settings is not None
-            and workspace_settings.enabled_channel_ids
-            and channel_id not in workspace_settings.enabled_channel_ids
-        ):
-            return []
-
-        agents: list[AgentDocument] = []
-        for snapshot in self._client.collection("agents").stream():
-            if not snapshot.exists:
-                continue
-            data = snapshot.to_dict() or {}
-            agent = AgentDocument.model_validate(cast(dict[str, Any], data))
-            if agent.enabled:
-                agents.append(agent)
-        return agents
+            return False
+        return True
 
     def get_thread_document(
         self,
@@ -184,13 +101,13 @@ class FirestoreSlackAgentRepository:
         root_message_ts: str,
         last_message_ts: str,
     ) -> ThreadDocument:
-        """Persist the active routed agent for a Slack thread.
+        """Persist the active assistant state for a Slack thread.
 
         Args:
             team_id: Slack workspace id owning the conversation.
             channel_id: Slack channel id where the thread lives.
             thread_ts: Thread timestamp identifying the Slack thread.
-            agent_id: Agent id that successfully handled the thread.
+            agent_id: Stored agent id that handled the thread.
             root_message_ts: Root Slack message timestamp for the thread.
             last_message_ts: Latest Slack message timestamp included in execution.
 
@@ -341,17 +258,6 @@ class FirestoreSlackAgentRepository:
             .collection("threads")
             .document(thread_ts)
         )
-
-    def _agent_ref(self, agent_id: str) -> Any:
-        """Return the global agent definition document reference.
-
-        Args:
-            agent_id: Agent identifier stored in the global agents collection.
-
-        Returns:
-            Firestore document reference for the agent definition.
-        """
-        return self._client.collection("agents").document(agent_id)
 
     def _read_model(
         self,

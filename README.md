@@ -24,11 +24,11 @@ The repository currently includes:
 - async Slack Bolt handlers
 - basic handlers for:
   - `app_home_opened`
-  - `app_mention`
+  - `reaction_added`
 
-The agent that responds to an `app_mention` is intended to be selected by workspace, channel,
-and thread settings. The repository may contain multiple agent implementations even though the
-Slack app itself is a single app.
+The current Slack translation flow is triggered by country flag reactions such as
+`:flag-jp:` or `:flag-us:` on Slack messages. The app reads the reacted message and
+posts the translation into that message's thread.
 
 ## Setup
 

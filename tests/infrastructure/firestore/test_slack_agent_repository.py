@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from agents_party.domain import AgentRouteScope, ThreadStatus
+from agents_party.domain import ThreadStatus
 from agents_party.infrastructure.firestore import FirestoreSlackAgentRepository
 
 
@@ -110,19 +110,6 @@ class FakeCollectionReference:
         assert document_id is not None
         return FakeDocumentReference(self._client, (*self._path, document_id))
 
-    def stream(self) -> list[FakeSnapshot]:
-        """Stream fake snapshots directly under the collection path.
-
-        Returns:
-            Snapshots for documents stored immediately under this collection.
-        """
-        target_length = len(self._path) + 1
-        return [
-            FakeSnapshot(path, data)
-            for path, data in sorted(self._client.documents.items())
-            if len(path) == target_length and path[:-1] == self._path
-        ]
-
 
 class FakeFirestoreClient:
     def __init__(self) -> None:
@@ -145,108 +132,48 @@ class FakeFirestoreClient:
         return FakeCollectionReference(self, (name,))
 
 
-def test_resolve_agent_prefers_thread_over_channel_and_workspace() -> None:
-    """Verify thread routing overrides channel and workspace defaults.
+def test_is_channel_enabled_returns_false_outside_workspace_enablement() -> None:
+    """Verify the assistant is disabled when the channel is not workspace-enabled.
 
     Returns:
         None.
     """
     client = FakeFirestoreClient()
-    client.documents[("agents", "thread-agent")] = {
-        "agent_id": "thread-agent",
-        "name": "Thread Agent",
-        "model_provider": "google-gla",
-        "model_name": "gemini-3-flash-preview",
-        "enabled": True,
-    }
     client.documents[("workspaces", "T1", "app_settings", "default")] = {
-        "default_agent_id": "workspace-agent",
-        "enabled_channel_ids": ["C123"],
-    }
-    client.documents[
-        ("workspaces", "T1", "channels", "C123", "app_settings", "default")
-    ] = {
-        "default_agent_id": "channel-agent",
-    }
-    client.documents[
-        ("workspaces", "T1", "channels", "C123", "threads", "1712345678.000100")
-    ] = {
-        "thread_ts": "1712345678.000100",
-        "root_message_ts": "1712345678.000100",
-        "channel_id": "C123",
-        "team_id": "T1",
-        "agent_id": "thread-agent",
-    }
-
-    repository = FirestoreSlackAgentRepository(client=client)
-    route = repository.resolve_agent(
-        team_id="T1",
-        channel_id="C123",
-        thread_ts="1712345678.000100",
-    )
-
-    assert route is not None
-    assert route.agent.agent_id == "thread-agent"
-    assert route.scope == AgentRouteScope.THREAD
-
-
-def test_resolve_agent_returns_none_for_channel_outside_workspace_enablement() -> None:
-    """Verify routing is disabled when the channel is not workspace-enabled.
-
-    Returns:
-        None.
-    """
-    client = FakeFirestoreClient()
-    client.documents[("agents", "workspace-agent")] = {
-        "agent_id": "workspace-agent",
-        "name": "Workspace Agent",
-        "model_provider": "google-gla",
-        "model_name": "gemini-3-flash-preview",
-        "enabled": True,
-    }
-    client.documents[("workspaces", "T1", "app_settings", "default")] = {
-        "default_agent_id": "workspace-agent",
         "enabled_channel_ids": ["C999"],
     }
 
     repository = FirestoreSlackAgentRepository(client=client)
 
-    assert repository.resolve_agent(team_id="T1", channel_id="C123") is None
+    assert repository.is_channel_enabled(team_id="T1", channel_id="C123") is False
 
 
-def test_list_enabled_agents_returns_only_enabled_candidates() -> None:
-    """Verify selector fallback only returns enabled agents.
+def test_is_channel_enabled_returns_true_for_allowed_channel() -> None:
+    """Verify the assistant remains enabled when the channel is allowed.
 
     Returns:
         None.
     """
     client = FakeFirestoreClient()
-    client.documents[("agents", "enabled-agent")] = {
-        "agent_id": "enabled-agent",
-        "name": "Enabled Agent",
-        "description": "Handles summaries.",
-        "when_to_use": "Use for thread summaries.",
-        "supported_skill_names": ["handover-brief-builder"],
+    client.documents[("workspaces", "T1", "app_settings", "default")] = {
+        "enabled_channel_ids": ["C123"],
+        "default_agent_id": "legacy-agent",
+    }
+    client.documents[("agents", "legacy-agent")] = {
+        "agent_id": "legacy-agent",
+        "name": "Legacy Agent",
         "model_provider": "google-gla",
         "model_name": "gemini-3-flash-preview",
         "enabled": True,
     }
-    client.documents[("agents", "disabled-agent")] = {
-        "agent_id": "disabled-agent",
-        "name": "Disabled Agent",
-        "model_provider": "google-gla",
-        "model_name": "gemini-3-flash-preview",
-        "enabled": False,
-    }
 
     repository = FirestoreSlackAgentRepository(client=client)
-    agents = repository.list_enabled_agents(team_id="T1", channel_id="C123")
 
-    assert [agent.agent_id for agent in agents] == ["enabled-agent"]
+    assert repository.is_channel_enabled(team_id="T1", channel_id="C123") is True
 
 
 def test_activate_thread_agent_upserts_minimal_state_only() -> None:
-    """Verify thread activation writes only routing state fields.
+    """Verify thread activation writes only assistant thread state fields.
 
     Returns:
         None.
@@ -258,7 +185,7 @@ def test_activate_thread_agent_upserts_minimal_state_only() -> None:
         team_id="T1",
         channel_id="C123",
         thread_ts="1712345678.000100",
-        agent_id="work-manager",
+        agent_id="assistant",
         root_message_ts="1712345678.000100",
         last_message_ts="1712345680.000200",
     )
@@ -267,7 +194,7 @@ def test_activate_thread_agent_upserts_minimal_state_only() -> None:
         ("workspaces", "T1", "channels", "C123", "threads", "1712345678.000100")
     ]
     assert thread.status == ThreadStatus.ACTIVE
-    assert stored["agent_id"] == "work-manager"
+    assert stored["agent_id"] == "assistant"
     assert stored["status"] == ThreadStatus.ACTIVE
     assert stored["root_message_ts"] == "1712345678.000100"
     assert stored["last_message_ts"] == "1712345680.000200"
