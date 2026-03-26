@@ -52,6 +52,8 @@ Repository-local Codex skills live under `.agents/skills/`.
   - guidance and helper scripts for creating Codex skills in this repository
 - `pydantic-ai-agent-development`
   - guidance and helper scripts for adding `pydantic-ai` agents in this repository
+- `review-agent`
+  - guidance for post-implementation code review focused on bugs, regressions, and boundary violations
 
 ## Environment Variables
 

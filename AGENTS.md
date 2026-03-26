@@ -62,6 +62,8 @@ If `ruff`, `ty`, or test tooling is missing from the project, add it through `uv
 - After editing Python files, run `ruff` and `ty` on the changed paths.
 - Run project-wide validation when changes affect shared configuration, import structure, or multiple packages.
 - Prefer file-scoped validation first because it is faster and keeps feedback tight.
+- After implementation work, ask the review agent to review the change before considering the task complete.
+- If the review agent is unavailable, state that explicitly in the final handoff.
 
 ## When Unsure
 

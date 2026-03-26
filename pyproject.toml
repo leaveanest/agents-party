@@ -8,9 +8,12 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "cryptography>=46.0.5",
     "fastapi>=0.135.1",
+    "google-auth>=2.49.1",
     "google-cloud-firestore>=2.25.0",
     "google-cloud-translate>=3.24.0",
+    "httpx>=0.28.1",
     "pydantic-ai>=1.70.0",
     "pydantic-ai-skills>=0.5.1",
     "pydantic-settings>=2.13.1",

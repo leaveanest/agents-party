@@ -24,9 +24,12 @@ name = "agents-party"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
+    { name = "google-auth" },
     { name = "google-cloud-firestore" },
     { name = "google-cloud-translate" },
+    { name = "httpx" },
     { name = "pydantic-ai" },
     { name = "pydantic-ai-skills" },
     { name = "pydantic-settings" },
@@ -46,9 +49,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=46.0.5" },
     { name = "fastapi", specifier = ">=0.135.1" },
+    { name = "google-auth", specifier = ">=2.49.1" },
     { name = "google-cloud-firestore", specifier = ">=2.25.0" },
     { name = "google-cloud-translate", specifier = ">=3.24.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic-ai", specifier = ">=1.70.0" },
     { name = "pydantic-ai-skills", specifier = ">=0.5.1" },
     { name = "pydantic-settings", specifier = ">=2.13.1" },
