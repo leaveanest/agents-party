@@ -42,7 +42,15 @@ class Settings(BaseSettings):
     slack_app_token: str | None = Field(default=None, alias="SLACK_APP_TOKEN")
 
     google_cloud_project: str | None = Field(default=None, alias="GOOGLE_CLOUD_PROJECT")
+    google_cloud_location: str = Field(
+        default="global",
+        alias="GOOGLE_CLOUD_LOCATION",
+    )
     firestore_database: str = Field(default="(default)", alias="FIRESTORE_DATABASE")
+    image_generation_model: str = Field(
+        default="gemini-2.5-flash-image",
+        alias="IMAGE_GENERATION_MODEL",
+    )
     google_oauth_client_id: str | None = Field(
         default=None,
         alias="GOOGLE_OAUTH_CLIENT_ID",

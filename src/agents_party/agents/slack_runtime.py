@@ -10,6 +10,30 @@ from pydantic import BaseModel, ConfigDict, Field
 from agents_party.domain import ThreadMessage
 
 
+class SlackReferenceImage(BaseModel):
+    """Binary reference image extracted from a Slack conversation.
+
+    Attributes:
+        identifier: Stable identifier used when attaching the image to a model prompt.
+        data: Raw image bytes downloaded from Slack or an image URL in the thread.
+        media_type: MIME type associated with the downloaded image.
+        title: Optional title recovered from Slack metadata.
+        alt_text: Optional alt or fallback text recovered from Slack metadata.
+        source: Slack payload source such as `file`, `block`, or `attachment`.
+        message_ts: Slack message timestamp that supplied the image.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    identifier: str
+    data: bytes = Field(repr=False)
+    media_type: str
+    title: str | None = None
+    alt_text: str | None = None
+    source: str | None = None
+    message_ts: str | None = None
+
+
 class SlackAgentInvocation(BaseModel):
     """Common Slack request envelope used by executable agents.
 
@@ -22,6 +46,7 @@ class SlackAgentInvocation(BaseModel):
         thread_ts: Optional thread timestamp for thread-aware routing and replies.
         message_ts: Optional originating message timestamp.
         thread_messages: Normalized Slack thread transcript used for execution.
+        reference_images: Binary reference images downloaded from the Slack thread.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -34,6 +59,7 @@ class SlackAgentInvocation(BaseModel):
     thread_ts: str | None = None
     message_ts: str | None = None
     thread_messages: list[ThreadMessage] = Field(default_factory=list)
+    reference_images: list[SlackReferenceImage] = Field(default_factory=list)
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> Self:
@@ -48,4 +74,4 @@ class SlackAgentInvocation(BaseModel):
         return cls.model_validate(data)
 
 
-__all__ = ["SlackAgentInvocation"]
+__all__ = ["SlackAgentInvocation", "SlackReferenceImage"]

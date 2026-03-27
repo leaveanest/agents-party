@@ -1,12 +1,17 @@
+"""Tests for Slack mention routing, follow-up routing, and translation reactions."""
+
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
+from pydantic_ai import BinaryImage
 
+from agents_party.agents.slack_runtime import SlackReferenceImage
 from agents_party.domain import (
     MessageRole,
+    ThreadMessage,
     ThreadDocument,
     ThreadStatus,
 )
@@ -21,19 +26,32 @@ class SayResponder:
         Returns:
             None.
         """
-        self.calls: list[tuple[str, str | None]] = []
+        self.calls: list[dict[str, Any]] = []
 
-    async def __call__(self, *, text: str, thread_ts: str | None = None) -> None:
+    async def __call__(
+        self,
+        *,
+        text: str,
+        thread_ts: str | None = None,
+        blocks: Sequence[Mapping[str, Any]] | None = None,
+    ) -> None:
         """Record a Slack reply for later assertions.
 
         Args:
             text: Response text sent by the routing handler.
             thread_ts: Optional thread timestamp used for the reply.
+            blocks: Optional Slack Block Kit payload sent with the reply.
 
         Returns:
             None.
         """
-        self.calls.append((text, thread_ts))
+        self.calls.append(
+            {
+                "text": text,
+                "thread_ts": thread_ts,
+                "blocks": blocks,
+            }
+        )
 
 
 class FakeSlackClient:
@@ -43,6 +61,7 @@ class FakeSlackClient:
         *,
         history_responses: list[Mapping[str, Any]] | None = None,
         error: Exception | None = None,
+        token: str | None = "xoxb-test-token",
     ) -> None:
         """Initialize a fake Slack client for history, replies, and post calls.
 
@@ -50,6 +69,7 @@ class FakeSlackClient:
             responses: Ordered paginated responses returned by `conversations_replies`.
             history_responses: Ordered responses returned by `conversations_history`.
             error: Optional exception raised instead of returning a response.
+            token: Optional Slack token exposed for private file downloads.
 
         Returns:
             None.
@@ -57,9 +77,11 @@ class FakeSlackClient:
         self._responses = list(responses or [])
         self._history_responses = list(history_responses or [])
         self._error = error
+        self.token = token
         self.calls: list[dict[str, Any]] = []
         self.history_calls: list[dict[str, Any]] = []
         self.post_calls: list[dict[str, str | None]] = []
+        self.upload_calls: list[dict[str, Any]] = []
 
     async def conversations_replies(
         self,
@@ -157,6 +179,20 @@ class FakeSlackClient:
         if self._error is not None:
             raise self._error
         return {"ok": True, "channel": channel, "ts": thread_ts or "posted"}
+
+    async def files_upload_v2(self, **kwargs: Any) -> Mapping[str, Any]:
+        """Record uploaded files for later assertions.
+
+        Args:
+            **kwargs: Upload keyword arguments passed by the routing handler.
+
+        Returns:
+            Fake Slack API response payload.
+        """
+        self.upload_calls.append(kwargs)
+        if self._error is not None:
+            raise self._error
+        return {"ok": True, "file": {"id": "F123"}}
 
 
 class StubSlackAgentRepository:
@@ -329,6 +365,159 @@ def test_build_agent_invocation_from_message_preserves_follow_up_text() -> None:
     assert invocation.thread_ts == "1712345678.000100"
 
 
+def test_normalize_thread_message_preserves_image_metadata() -> None:
+    """Verify Slack thread normalization retains lightweight image metadata.
+
+    Returns:
+        None.
+    """
+    message = agent_routing._normalize_thread_message(
+        {
+            "ts": "1712345678.000100",
+            "user": "U1",
+            "text": "Use this as a reference",
+            "files": [
+                {
+                    "title": "wireframe",
+                    "mimetype": "image/png",
+                    "alt_txt": "homepage wireframe with hero image",
+                    "url_private_download": "https://files.slack.com/files-pri/T1-F1/wireframe.png",
+                }
+            ],
+            "blocks": [
+                {
+                    "type": "image",
+                    "title": {"type": "plain_text", "text": "moodboard"},
+                    "alt_text": "earth-tone product photography",
+                    "image_url": "https://example.com/moodboard.png",
+                }
+            ],
+        }
+    )
+
+    assert message.role == MessageRole.USER
+    assert message.metadata == {
+        "slack_images": [
+            {
+                "source": "file",
+                "title": "wireframe",
+                "alt_text": "homepage wireframe with hero image",
+                "mime_type": "image/png",
+                "download_url": "https://files.slack.com/files-pri/T1-F1/wireframe.png",
+            },
+            {
+                "source": "block",
+                "title": "moodboard",
+                "alt_text": "earth-tone product photography",
+                "download_url": "https://example.com/moodboard.png",
+            },
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_download_thread_reference_images_downloads_binary_images(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify thread image metadata is converted into binary reference images.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub HTTP downloads.
+
+    Returns:
+        None.
+    """
+
+    class FakeHttpClient:
+        """Fake async HTTP client used to stub image downloads."""
+
+        async def __aenter__(self) -> FakeHttpClient:
+            """Enter the async context manager.
+
+            Returns:
+                This fake client.
+            """
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            """Exit the async context manager.
+
+            Args:
+                *args: Unused context manager arguments.
+
+            Returns:
+                None.
+            """
+            del args
+
+        async def get(self, url: str, *, headers: Mapping[str, str]) -> Any:
+            """Return a deterministic HTTP response for the requested image.
+
+            Args:
+                url: Requested image URL.
+                headers: Request headers used for authorization.
+
+            Returns:
+                Lightweight response object with PNG content.
+            """
+            assert url == "https://files.slack.com/files-pri/T1-F1/reference.png"
+            assert headers["Authorization"] == "Bearer xoxb-test-token"
+
+            class FakeResponse:
+                """Fake HTTP response carrying image bytes."""
+
+                headers = {"content-type": "image/png"}
+                content = b"reference-bytes"
+
+                def raise_for_status(self) -> None:
+                    """Pretend the HTTP response succeeded.
+
+                    Returns:
+                        None.
+                    """
+
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        agent_routing.httpx, "AsyncClient", lambda **_: FakeHttpClient()
+    )
+
+    reference_images = await agent_routing._download_thread_reference_images(
+        FakeSlackClient(),
+        [
+            ThreadMessage(
+                ts="1712345678.000100",
+                role=MessageRole.USER,
+                text="Use this reference.",
+                user_id="U1",
+                metadata={
+                    "slack_images": [
+                        {
+                            "source": "file",
+                            "title": "reference",
+                            "alt_text": "landing page wireframe",
+                            "mime_type": "image/png",
+                            "download_url": "https://files.slack.com/files-pri/T1-F1/reference.png",
+                        }
+                    ]
+                },
+            )
+        ],
+    )
+
+    assert reference_images == [
+        SlackReferenceImage(
+            identifier="thread-image-1712345678-000100-1",
+            data=b"reference-bytes",
+            media_type="image/png",
+            title="reference",
+            alt_text="landing page wireframe",
+            source="file",
+            message_ts="1712345678.000100",
+        )
+    ]
+
+
 @pytest.mark.asyncio
 async def test_handle_agent_mention_runs_assistant_and_activates_thread(
     monkeypatch: pytest.MonkeyPatch,
@@ -355,12 +544,14 @@ async def test_handle_agent_mention_runs_assistant_and_activates_thread(
         assert [message.role for message in invocation.thread_messages] == [
             MessageRole.USER
         ]
+        assert invocation.reference_images == []
         return type(
             "SlackAssistantResult",
             (),
             {
                 "message": "Completed `checklist`.",
                 "follow_up_question": None,
+                "generated_image": None,
             },
         )()
 
@@ -395,7 +586,13 @@ async def test_handle_agent_mention_runs_assistant_and_activates_thread(
         repository=repository,
     )
 
-    assert responder.calls == [("Completed `checklist`.", "1712345678.000100")]
+    assert responder.calls == [
+        {
+            "text": "Completed `checklist`.",
+            "thread_ts": "1712345678.000100",
+            "blocks": None,
+        }
+    ]
     assert repository.activate_calls == [
         {
             "team_id": "T1",
@@ -435,7 +632,11 @@ async def test_handle_agent_message_routes_active_thread_follow_up(
         return type(
             "SlackAssistantResult",
             (),
-            {"message": "Tagged finance.", "follow_up_question": None},
+            {
+                "message": "Tagged finance.",
+                "follow_up_question": None,
+                "generated_image": None,
+            },
         )()
 
     monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
@@ -486,7 +687,13 @@ async def test_handle_agent_message_routes_active_thread_follow_up(
         repository=repository,
     )
 
-    assert responder.calls == [("Tagged finance.", "1712345678.000100")]
+    assert responder.calls == [
+        {
+            "text": "Tagged finance.",
+            "thread_ts": "1712345678.000100",
+            "blocks": None,
+        }
+    ]
     assert repository.activate_calls[-1]["agent_id"] == "assistant"
 
 
@@ -513,13 +720,188 @@ async def test_handle_agent_mention_returns_unconfigured_for_disabled_channel() 
     )
 
     assert responder.calls == [
-        (
-            "The Slack assistant is not enabled for this workspace or channel.\n"
+        {
+            "text": "The Slack assistant is not enabled for this workspace or channel.\n"
             + agent_routing.build_agent_help_message("U1"),
-            "1712345678.000100",
-        )
+            "thread_ts": "1712345678.000100",
+            "blocks": None,
+        }
     ]
     assert repository.activate_calls == []
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_returns_thread_menu_for_textless_mention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify textless mentions show the thread menu instead of routing to AI.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to assert assistant non-execution.
+
+    Returns:
+        None.
+    """
+
+    async def fail_run_slack_assistant(*_: Any, **__: Any) -> Any:
+        """Fail the test if the assistant is invoked unexpectedly.
+
+        Args:
+            *_: Unused positional arguments.
+            **__: Unused keyword arguments.
+
+        Returns:
+            Never returns because the function always raises.
+        """
+        raise AssertionError("run_slack_assistant should not run")
+
+    monkeypatch.setattr(agent_routing, "run_slack_assistant", fail_run_slack_assistant)
+    responder = SayResponder()
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot>",
+        },
+        responder,
+    )
+
+    assert responder.calls == [
+        {
+            "text": agent_routing.build_thread_menu_message("U1"),
+            "thread_ts": "1712345678.000100",
+            "blocks": agent_routing.build_thread_menu_blocks("U1"),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_uploads_generated_image_into_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify image-generation delegation uploads the image instead of sending text.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub assistant execution.
+
+    Returns:
+        None.
+    """
+
+    async def fake_run_slack_assistant(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic image-generation result for routing tests.
+
+        Args:
+            invocation: Slack invocation received from the routing layer.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Lightweight assistant result object carrying a generated image.
+        """
+        assert invocation.text == "generate a fox poster"
+        assert invocation.reference_images == [
+            SlackReferenceImage(
+                identifier="thread-image-1712345678-000100-1",
+                data=b"thread-reference-bytes",
+                media_type="image/png",
+                title="reference",
+                alt_text="orange fox poster sketch",
+                source="file",
+                message_ts="1712345678.000100",
+            )
+        ]
+        return type(
+            "SlackAssistantResult",
+            (),
+            {
+                "message": "Generated image for prompt:\ngenerate a fox poster",
+                "follow_up_question": None,
+                "generated_image": BinaryImage(
+                    data=b"png-bytes",
+                    media_type="image/png",
+                ),
+            },
+        )()
+
+    monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
+
+    async def fake_download_thread_reference_images(
+        client: Any,
+        thread_messages: Any,
+    ) -> list[SlackReferenceImage]:
+        """Return a deterministic binary reference image for routing tests.
+
+        Args:
+            client: Slack client received by the routing layer.
+            thread_messages: Thread transcript received by the routing layer.
+
+        Returns:
+            Single downloaded reference image.
+        """
+        del client, thread_messages
+        return [
+            SlackReferenceImage(
+                identifier="thread-image-1712345678-000100-1",
+                data=b"thread-reference-bytes",
+                media_type="image/png",
+                title="reference",
+                alt_text="orange fox poster sketch",
+                source="file",
+                message_ts="1712345678.000100",
+            )
+        ]
+
+    monkeypatch.setattr(
+        agent_routing,
+        "_download_thread_reference_images",
+        fake_download_thread_reference_images,
+    )
+    responder = SayResponder()
+    repository = StubSlackAgentRepository()
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "text": "<@Ubot> generate a fox poster",
+                    }
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> generate a fox poster",
+        },
+        responder,
+        client,
+        repository=repository,
+    )
+
+    assert responder.calls == []
+    assert client.upload_calls == [
+        {
+            "channel": "C123",
+            "file": b"png-bytes",
+            "filename": "generated-image.png",
+            "title": "Generated image",
+            "alt_txt": "Generated image for prompt:\ngenerate a fox poster",
+            "initial_comment": "Generated image for prompt:\ngenerate a fox poster",
+            "thread_ts": "1712345678.000100",
+        }
+    ]
+    assert repository.activate_calls[-1]["agent_id"] == "assistant"
 
 
 @pytest.mark.asyncio

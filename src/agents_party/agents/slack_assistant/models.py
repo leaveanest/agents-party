@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from pydantic_ai import BinaryImage
 from pydantic import BaseModel, ConfigDict
 
 from agents_party.agents.slack_runtime import SlackAgentInvocation
@@ -28,6 +29,7 @@ class SlackAssistantResult(BaseModel):
     message: str = ""
     delegated_agent_id: str | None = None
     follow_up_question: str | None = None
+    generated_image: BinaryImage | None = None
 
 
 @dataclass(slots=True)
@@ -40,6 +42,7 @@ class SlackAssistantDeps:
         last_delegated_agent_id: Specialist agent id used by the latest tool call.
         last_delegated_message: Slack-ready response returned by the latest tool call.
         last_follow_up_question: Optional clarification returned by the latest tool call.
+        last_generated_image: Optional binary image returned by the latest tool call.
     """
 
     invocation: SlackAgentInvocation
@@ -47,6 +50,7 @@ class SlackAssistantDeps:
     last_delegated_agent_id: str | None = None
     last_delegated_message: str | None = None
     last_follow_up_question: str | None = None
+    last_generated_image: BinaryImage | None = None
 
 
 __all__ = [

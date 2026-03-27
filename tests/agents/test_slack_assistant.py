@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic_ai import BinaryImage
 from pydantic_ai.models.test import TestModel
 
 import agents_party.agents.slack_assistant.runtime as slack_assistant_runtime
@@ -12,6 +13,7 @@ from agents_party.agents.slack_assistant import (
     SlackAssistantAction,
     SlackAssistantDeps,
     build_slack_assistant_agent,
+    build_slack_assistant_instructions,
     build_slack_assistant_prompt,
     run_slack_assistant,
 )
@@ -71,10 +73,24 @@ async def test_build_slack_assistant_agent_registers_expected_tools() -> None:
     params = model.last_model_request_parameters
     assert params is not None
     assert {tool.name for tool in params.function_tools} == {
+        "delegate_image_generation",
         "delegate_translation",
         "delegate_web_research",
         "delegate_work_manager",
     }
+
+
+def test_build_slack_assistant_instructions_include_indirect_image_examples() -> None:
+    """Verify assistant instructions explicitly call out indirect image requests.
+
+    Returns:
+        None.
+    """
+    instructions = "\n".join(build_slack_assistant_instructions())
+
+    assert "turn this into a visual" in instructions
+    assert "図にして" in instructions
+    assert "この案をビジュアル化して" in instructions
 
 
 @pytest.mark.asyncio
@@ -235,6 +251,106 @@ async def test_run_slack_assistant_delegates_translation(
     assert result.action == SlackAssistantAction.DELEGATED
     assert result.delegated_agent_id == "translation"
     assert result.message == "財務部門にフォローアップしてください。"
+
+
+@pytest.mark.asyncio
+async def test_run_slack_assistant_delegates_image_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify image requests delegate through the image-generation tool.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub image generation.
+
+    Returns:
+        None.
+    """
+
+    async def fake_run_image_generation(invocation: Any, **_: Any) -> BinaryImage:
+        """Return a deterministic image result for delegation tests.
+
+        Args:
+            invocation: Image-generation invocation received from the assistant.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Binary image payload for the generated image.
+        """
+        assert invocation.prompt == "follow up with finance"
+        assert invocation.user_id == "U1"
+        assert len(invocation.thread_messages) == 1
+        assert invocation.thread_messages[0].text == "follow up with finance"
+        assert invocation.reference_images == []
+        return BinaryImage(data=b"png-bytes", media_type="image/png")
+
+    monkeypatch.setattr(
+        slack_assistant_runtime,
+        "run_image_generation",
+        fake_run_image_generation,
+    )
+    model = TestModel(
+        call_tools=["delegate_image_generation"],
+        custom_output_args={
+            "action": "responded",
+            "message": "",
+            "delegated_agent_id": None,
+            "follow_up_question": None,
+        },
+    )
+
+    result = await run_slack_assistant(make_invocation(), model=model)
+
+    assert result.action == SlackAssistantAction.DELEGATED
+    assert result.delegated_agent_id == "image-generation"
+    assert result.message == "Generated image for prompt:\nfollow up with finance"
+    assert result.generated_image == BinaryImage(
+        data=b"png-bytes", media_type="image/png"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_slack_assistant_short_circuits_indirect_visual_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify strong visual-deliverable phrasing routes to image generation directly.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub image generation.
+
+    Returns:
+        None.
+    """
+    invocation = make_invocation().model_copy(
+        update={"text": "この案をモックアップにして"}
+    )
+
+    async def fake_run_image_generation(invocation: Any, **_: Any) -> BinaryImage:
+        """Return a deterministic image result for direct routing tests.
+
+        Args:
+            invocation: Image-generation invocation received from the assistant.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Binary image payload for the generated image.
+        """
+        assert invocation.prompt == "この案をモックアップにして"
+        return BinaryImage(data=b"png-bytes", media_type="image/png")
+
+    monkeypatch.setattr(
+        slack_assistant_runtime,
+        "run_image_generation",
+        fake_run_image_generation,
+    )
+
+    result = await run_slack_assistant(invocation, model=None)
+
+    assert result.action == SlackAssistantAction.DELEGATED
+    assert result.delegated_agent_id == "image-generation"
+    assert result.message == "Generated image for prompt:\nこの案をモックアップにして"
+    assert result.generated_image == BinaryImage(
+        data=b"png-bytes", media_type="image/png"
+    )
 
 
 @pytest.mark.asyncio

@@ -1,11 +1,16 @@
+"""Slack routing helpers for assistant mentions, thread follow-ups, and reactions."""
+
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from importlib import import_module
+from urllib.parse import urlparse
 from typing import Any, Protocol, cast
 
+import httpx
+from pydantic_ai import BinaryImage
 from agents_party.agents.slack_assistant import run_slack_assistant
-from agents_party.agents.slack_runtime import SlackAgentInvocation
+from agents_party.agents.slack_runtime import SlackAgentInvocation, SlackReferenceImage
 from agents_party.config import settings
 from agents_party.domain import (
     MessageRole,
@@ -16,17 +21,26 @@ from agents_party.infrastructure import CloudTranslationError, CloudTranslationS
 from agents_party.repositories import SlackAgentRepository, WorkItemRepository
 
 _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES = frozenset({"bot_message"})
+_MAX_REFERENCE_IMAGES = 3
+_MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 class SayResponder(Protocol):
     """Protocol for Slack `say` responders used by routing handlers."""
 
-    async def __call__(self, *, text: str, thread_ts: str | None = None) -> Any:
+    async def __call__(
+        self,
+        *,
+        text: str,
+        thread_ts: str | None = None,
+        blocks: Sequence[Mapping[str, Any]] | None = None,
+    ) -> Any:
         """Send a Slack message in response to routed execution.
 
         Args:
             text: Message text to send back to Slack.
             thread_ts: Optional thread timestamp to reply into.
+            blocks: Optional Slack Block Kit payload attached to the message.
 
         Returns:
             Slack responder-specific response payload.
@@ -36,6 +50,8 @@ class SayResponder(Protocol):
 
 class SlackConversationsClient(Protocol):
     """Protocol for the subset of the Slack Web API used by routing."""
+
+    token: str | None
 
     async def chat_postMessage(
         self,
@@ -100,6 +116,33 @@ class SlackConversationsClient(Protocol):
         """
         ...
 
+    async def files_upload_v2(
+        self,
+        *,
+        channel: str,
+        file: bytes,
+        filename: str | None = None,
+        title: str | None = None,
+        alt_txt: str | None = None,
+        initial_comment: str | None = None,
+        thread_ts: str | None = None,
+    ) -> Mapping[str, Any]:
+        """Upload a generated file back into a Slack channel or thread.
+
+        Args:
+            channel: Slack channel id where the file should be uploaded.
+            file: Raw file bytes to upload.
+            filename: Optional upload filename.
+            title: Optional title shown by Slack for the uploaded file.
+            alt_txt: Optional alt text shown for image uploads.
+            initial_comment: Optional comment posted alongside the upload.
+            thread_ts: Optional thread timestamp for threaded uploads.
+
+        Returns:
+            Slack API response payload for the uploaded file.
+        """
+        ...
+
 
 class SlackThreadHistoryError(RuntimeError):
     """Raised when Slack thread history cannot be normalized safely."""
@@ -107,6 +150,285 @@ class SlackThreadHistoryError(RuntimeError):
 
 class SlackMessageLookupError(RuntimeError):
     """Raised when a Slack message cannot be read for reaction-triggered translation."""
+
+
+def _read_nested_plain_text(value: object) -> str | None:
+    """Read a plain-text field from either a raw string or Slack text object.
+
+    Args:
+        value: Slack payload value that may hold text directly or via a nested object.
+
+    Returns:
+        Trimmed text value, or `None` when no usable text is present.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, Mapping):
+        nested_text = cast(Mapping[str, Any], value).get("text")
+        if isinstance(nested_text, str):
+            text = nested_text.strip()
+            return text or None
+    return None
+
+
+def _is_image_like_slack_file(file_payload: Mapping[str, Any]) -> bool:
+    """Return whether a Slack file payload looks like an image attachment.
+
+    Args:
+        file_payload: Slack file payload embedded in a message.
+
+    Returns:
+        `True` when the file is an image or has an image-like file type.
+    """
+    mime_type = _optional_text_field(file_payload, "mimetype")
+    if mime_type is not None and mime_type.startswith("image/"):
+        return True
+    file_type = _optional_text_field(file_payload, "filetype")
+    return file_type in {"gif", "heic", "jpeg", "jpg", "png", "svg", "webp"}
+
+
+def _extract_slack_image_metadata(message: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Extract lightweight image metadata from a Slack message payload.
+
+    Args:
+        message: Raw Slack message payload that may contain image files or blocks.
+
+    Returns:
+        Ordered image descriptors suitable for thread-context prompts.
+    """
+    images: list[dict[str, str]] = []
+
+    raw_files = message.get("files")
+    if isinstance(raw_files, list):
+        for raw_file in raw_files:
+            if not isinstance(raw_file, Mapping) or not _is_image_like_slack_file(
+                raw_file
+            ):
+                continue
+            image: dict[str, str] = {"source": "file"}
+            title = _optional_text_field(raw_file, "title") or _optional_text_field(
+                raw_file, "name"
+            )
+            alt_text = _optional_text_field(raw_file, "alt_txt")
+            mime_type = _optional_text_field(raw_file, "mimetype")
+            download_url = _optional_text_field(
+                raw_file, "url_private_download"
+            ) or _optional_text_field(raw_file, "url_private")
+            if title is not None:
+                image["title"] = title
+            if alt_text is not None:
+                image["alt_text"] = alt_text
+            if mime_type is not None:
+                image["mime_type"] = mime_type
+            if download_url is not None:
+                image["download_url"] = download_url
+            images.append(image)
+
+    raw_blocks = message.get("blocks")
+    if isinstance(raw_blocks, list):
+        for raw_block in raw_blocks:
+            if not isinstance(raw_block, Mapping) or raw_block.get("type") != "image":
+                continue
+            image = {"source": "block"}
+            title = _read_nested_plain_text(raw_block.get("title"))
+            alt_text = _optional_text_field(raw_block, "alt_text")
+            download_url = _optional_text_field(raw_block, "image_url")
+            if title is not None:
+                image["title"] = title
+            if alt_text is not None:
+                image["alt_text"] = alt_text
+            if download_url is not None:
+                image["download_url"] = download_url
+            images.append(image)
+
+    raw_attachments = message.get("attachments")
+    if isinstance(raw_attachments, list):
+        for raw_attachment in raw_attachments:
+            if not isinstance(raw_attachment, Mapping):
+                continue
+            image_url = _optional_text_field(raw_attachment, "image_url")
+            thumb_url = _optional_text_field(raw_attachment, "thumb_url")
+            if image_url is None and thumb_url is None:
+                continue
+            image = {"source": "attachment"}
+            title = _optional_text_field(raw_attachment, "title")
+            alt_text = _optional_text_field(
+                raw_attachment, "fallback"
+            ) or _optional_text_field(raw_attachment, "text")
+            download_url = image_url or thumb_url
+            if title is not None:
+                image["title"] = title
+            if alt_text is not None:
+                image["alt_text"] = alt_text
+            if download_url is not None:
+                image["download_url"] = download_url
+            images.append(image)
+
+    return images
+
+
+def _collect_thread_image_specs(
+    thread_messages: Sequence[ThreadMessage],
+) -> list[dict[str, str]]:
+    """Collect downloadable image descriptors from normalized thread messages.
+
+    Args:
+        thread_messages: Normalized Slack thread transcript used for routing.
+
+    Returns:
+        Ordered downloadable image descriptors trimmed to the most recent images.
+    """
+    specs: list[dict[str, str]] = []
+    for message in thread_messages:
+        raw_images = message.metadata.get("slack_images")
+        if not isinstance(raw_images, list):
+            continue
+        for index, raw_image in enumerate(raw_images, start=1):
+            if not isinstance(raw_image, Mapping):
+                continue
+            image_payload = cast(Mapping[str, Any], raw_image)
+            download_url = str(image_payload.get("download_url") or "").strip()
+            if not download_url:
+                continue
+            spec = {
+                "identifier": f"thread-image-{message.ts.replace('.', '-')}-{index}",
+                "download_url": download_url,
+                "media_type": str(image_payload.get("mime_type") or "").strip(),
+                "title": str(image_payload.get("title") or "").strip(),
+                "alt_text": str(image_payload.get("alt_text") or "").strip(),
+                "source": str(image_payload.get("source") or "").strip(),
+                "message_ts": message.ts,
+            }
+            specs.append(spec)
+    if len(specs) <= _MAX_REFERENCE_IMAGES:
+        return specs
+    return specs[-_MAX_REFERENCE_IMAGES:]
+
+
+def _build_image_download_headers(url: str, token: str) -> dict[str, str]:
+    """Build safe headers for downloading a thread reference image.
+
+    Args:
+        url: Image download URL extracted from Slack metadata.
+        token: Slack bot token available on the current client.
+
+    Returns:
+        Request headers, including Slack bearer auth only for Slack-owned hosts.
+    """
+    hostname = urlparse(url).hostname or ""
+    if hostname.endswith("slack.com") or hostname.endswith("slack-files.com"):
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
+async def _download_thread_reference_images(
+    client: SlackConversationsClient | None,
+    thread_messages: Sequence[ThreadMessage],
+) -> list[SlackReferenceImage]:
+    """Download recent image attachments from a Slack thread for multimodal input.
+
+    Args:
+        client: Slack client whose token can authorize private Slack file downloads.
+        thread_messages: Normalized Slack thread transcript used for routing.
+
+    Returns:
+        Downloaded reference images suitable for passing to the image agent.
+    """
+    if client is None or not isinstance(client.token, str) or not client.token.strip():
+        return []
+
+    specs = _collect_thread_image_specs(thread_messages)
+    if not specs:
+        return []
+
+    token = client.token.strip()
+    reference_images: list[SlackReferenceImage] = []
+    async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as http_client:
+        for spec in specs:
+            try:
+                response = await http_client.get(
+                    spec["download_url"],
+                    headers=_build_image_download_headers(spec["download_url"], token),
+                )
+                response.raise_for_status()
+            except httpx.HTTPError:
+                continue
+
+            media_type = (
+                spec["media_type"]
+                or response.headers.get("content-type", "").split(";", 1)[0].strip()
+            )
+            if not media_type.startswith("image/"):
+                continue
+
+            data = response.content
+            if not data or len(data) > _MAX_REFERENCE_IMAGE_BYTES:
+                continue
+
+            reference_images.append(
+                SlackReferenceImage(
+                    identifier=spec["identifier"],
+                    data=data,
+                    media_type=media_type,
+                    title=spec["title"] or None,
+                    alt_text=spec["alt_text"] or None,
+                    source=spec["source"] or None,
+                    message_ts=spec["message_ts"] or None,
+                )
+            )
+    return reference_images
+
+
+def _filename_for_generated_image(media_type: str) -> str:
+    """Return a stable Slack upload filename for a generated image.
+
+    Args:
+        media_type: MIME type reported by the image-generation agent.
+
+    Returns:
+        Filename with an extension matching the MIME type when recognized.
+    """
+    if media_type == "image/jpeg":
+        return "generated-image.jpg"
+    if media_type == "image/webp":
+        return "generated-image.webp"
+    return "generated-image.png"
+
+
+async def _upload_generated_image_reply(
+    client: SlackConversationsClient | None,
+    *,
+    channel_id: str,
+    thread_ts: str,
+    image: BinaryImage,
+    initial_comment: str,
+) -> bool:
+    """Upload a generated image into the routed Slack thread.
+
+    Args:
+        client: Slack client used to upload the generated image.
+        channel_id: Slack channel id where the thread lives.
+        thread_ts: Root Slack thread timestamp for the upload.
+        image: Generated binary image payload.
+        initial_comment: Comment posted alongside the uploaded image.
+
+    Returns:
+        `True` when the upload succeeds, else `False`.
+    """
+    if client is None:
+        return False
+
+    await client.files_upload_v2(
+        channel=channel_id,
+        file=image.data,
+        filename=_filename_for_generated_image(image.media_type),
+        title="Generated image",
+        alt_txt=initial_comment,
+        initial_comment=initial_comment,
+        thread_ts=thread_ts,
+    )
+    return True
 
 
 _FLAG_REACTION_LANGUAGE_CODE_MAP = {
@@ -258,6 +580,77 @@ def build_agent_help_message(user_id: str | None = None) -> str:
         "- `@agents-party capture follow-up actions from this discussion`\n"
         "- `@agents-party verify the latest deployment policy`"
     )
+
+
+def build_thread_menu_message(user_id: str | None = None) -> str:
+    """Build the fallback text shown for a mention with no actionable prompt.
+
+    Args:
+        user_id: Optional Slack user id to mention in the menu message.
+
+    Returns:
+        Slack-formatted plain-text fallback that mirrors the menu blocks.
+    """
+    mention = f"<@{user_id}> " if user_id else ""
+    return (
+        f"{mention}choose what you want to do with this thread.\n"
+        "Try one of these mentions:\n"
+        "- `@agents-party summarize this thread`\n"
+        "- `@agents-party capture follow-up actions from this discussion`\n"
+        "- `@agents-party verify the latest deployment policy`"
+    )
+
+
+def build_thread_menu_blocks(user_id: str | None = None) -> list[dict[str, Any]]:
+    """Build the Block Kit menu shown for a textless assistant mention.
+
+    Args:
+        user_id: Optional Slack user id to mention in the menu prompt.
+
+    Returns:
+        Slack Block Kit payload presenting the thread menu choices.
+    """
+    mention = f"<@{user_id}> " if user_id else ""
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"{mention}What would you like to do with this thread?",
+            },
+        },
+        {
+            "type": "section",
+            "fields": [
+                {
+                    "type": "mrkdwn",
+                    "text": "*Summarize*\n`@agents-party summarize this thread`",
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Action Items*\n"
+                        "`@agents-party capture follow-up actions from this discussion`"
+                    ),
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Verify*\n`@agents-party verify the latest deployment policy`"
+                    ),
+                },
+            ],
+        },
+        {
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": "A mention without text stays in menu mode and does not run the AI route yet.",
+                }
+            ],
+        },
+    ]
 
 
 def build_agent_unconfigured_message(user_id: str | None = None) -> str:
@@ -463,6 +856,8 @@ def _normalize_thread_message(message: Mapping[str, Any]) -> ThreadMessage:
     bot_id = _optional_text_field(message, "bot_id")
     app_id = _optional_text_field(message, "app_id")
 
+    image_metadata = _extract_slack_image_metadata(message)
+
     if (
         subtype in _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES
         or bot_id is not None
@@ -475,6 +870,8 @@ def _normalize_thread_message(message: Mapping[str, Any]) -> ThreadMessage:
             metadata["slack_bot_id"] = bot_id
         if app_id is not None:
             metadata["slack_app_id"] = app_id
+        if image_metadata:
+            metadata["slack_images"] = image_metadata
         return ThreadMessage(
             ts=ts,
             role=MessageRole.ASSISTANT,
@@ -487,11 +884,15 @@ def _normalize_thread_message(message: Mapping[str, Any]) -> ThreadMessage:
         raise SlackThreadHistoryError(
             "Slack thread history contained a user-authored message without `user`."
         )
+    metadata: dict[str, Any] = {}
+    if image_metadata:
+        metadata["slack_images"] = image_metadata
     return ThreadMessage(
         ts=ts,
         role=MessageRole.USER,
         text=text,
         user_id=user_id,
+        metadata=metadata,
     )
 
 
@@ -811,7 +1212,8 @@ async def invoke_routed_agent(
 
     Args:
         invocation: Raw or validated routing payload derived from Slack.
-        client: Slack client used to fetch the full thread transcript.
+        client: Slack client used to fetch the full thread transcript and any
+            downloadable reference images.
         repository: Optional repository override used for channel checks and thread state.
         work_item_repository: Optional repository override for assistant delegation.
 
@@ -835,8 +1237,12 @@ async def invoke_routed_agent(
     except SlackThreadHistoryError:
         return build_thread_context_error_message(parsed_invocation.user_id)
 
+    reference_images = await _download_thread_reference_images(client, thread_messages)
     execution_invocation = parsed_invocation.model_copy(
-        update={"thread_messages": thread_messages}
+        update={
+            "thread_messages": thread_messages,
+            "reference_images": reference_images,
+        }
     )
     thread_ts = execution_invocation.thread_ts or execution_invocation.message_ts
     if thread_ts is None:
@@ -847,6 +1253,31 @@ async def invoke_routed_agent(
         work_item_repository=work_item_repository,
     )
     response_text = assistant_result.follow_up_question or assistant_result.message
+    if assistant_result.generated_image is not None:
+        initial_comment = response_text.strip() or (
+            f"Generated image for prompt:\n{execution_invocation.text}"
+        )
+        try:
+            uploaded = await _upload_generated_image_reply(
+                client,
+                channel_id=execution_invocation.channel_id,
+                thread_ts=thread_ts,
+                image=assistant_result.generated_image,
+                initial_comment=initial_comment,
+            )
+        except Exception:
+            return "Image generation succeeded, but uploading to Slack failed."
+        if not uploaded:
+            return "Image generation requires a Slack upload client for this route."
+        resolved_repository.activate_thread_agent(
+            team_id=execution_invocation.team_id,
+            channel_id=execution_invocation.channel_id,
+            thread_ts=thread_ts,
+            agent_id="assistant",
+            root_message_ts=thread_messages[0].ts,
+            last_message_ts=thread_messages[-1].ts,
+        )
+        return ""
     if response_text.strip():
         resolved_repository.activate_thread_agent(
             team_id=execution_invocation.team_id,
@@ -889,8 +1320,9 @@ async def handle_agent_mention(
 
     if not invocation.text.strip():
         await say(
-            text=build_agent_help_message(invocation.user_id),
+            text=build_thread_menu_message(invocation.user_id),
             thread_ts=invocation.thread_ts,
+            blocks=build_thread_menu_blocks(invocation.user_id),
         )
         return
 
@@ -900,7 +1332,8 @@ async def handle_agent_mention(
         repository=repository,
         work_item_repository=work_item_repository,
     )
-    await say(text=response_text, thread_ts=invocation.thread_ts)
+    if response_text.strip():
+        await say(text=response_text, thread_ts=invocation.thread_ts)
 
 
 async def handle_agent_message(
@@ -981,7 +1414,8 @@ async def handle_agent_message(
         repository=resolved_repository,
         work_item_repository=work_item_repository,
     )
-    await say(text=response_text, thread_ts=invocation.thread_ts)
+    if response_text.strip():
+        await say(text=response_text, thread_ts=invocation.thread_ts)
 
 
 __all__ = [
@@ -990,6 +1424,8 @@ __all__ = [
     "build_agent_help_message",
     "build_agent_invocation_from_mention",
     "build_agent_invocation_from_message",
+    "build_thread_menu_blocks",
+    "build_thread_menu_message",
     "build_agent_unconfigured_message",
     "build_thread_context_error_message",
     "build_translation_execution_error_message",

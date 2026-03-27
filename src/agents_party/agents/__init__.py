@@ -1,5 +1,14 @@
 """Public exports for repository agent packages and shared helpers."""
 
+from agents_party.agents.image_generation import (
+    DEFAULT_IMAGE_GENERATION_MODEL,
+    ImageGenerationInvocation,
+    build_image_generation_agent,
+    build_image_generation_instructions,
+    build_image_generation_prompt,
+    build_image_generation_user_prompt,
+    run_image_generation,
+)
 from agents_party.agents.prepared_agent_runner import (
     RepositoryBackedPreparedAgentRunner,
     ResolvedAgentModel,
@@ -22,7 +31,7 @@ from agents_party.agents.slack_assistant import (
     build_slack_assistant_prompt,
     run_slack_assistant,
 )
-from agents_party.agents.slack_runtime import SlackAgentInvocation
+from agents_party.agents.slack_runtime import SlackAgentInvocation, SlackReferenceImage
 from agents_party.agents.translation import (
     DEFAULT_TRANSLATION_MODEL,
     TranslationAction,
@@ -63,12 +72,15 @@ from agents_party.agents.work_manager import (
 )
 
 __all__ = [
+    "DEFAULT_IMAGE_GENERATION_MODEL",
     "DEFAULT_TRANSLATION_MODEL",
     "DEFAULT_WEB_RESEARCH_MODEL",
     "EXPECTED_BUILTIN_SKILL_NAMES",
+    "ImageGenerationInvocation",
     "RepositoryBackedPreparedAgentRunner",
     "ResolvedAgentModel",
     "SlackAgentInvocation",
+    "SlackReferenceImage",
     "SlackAssistantAction",
     "SlackAssistantDeps",
     "SlackAssistantResult",
@@ -84,6 +96,10 @@ __all__ = [
     "WorkManagerPreparedRequest",
     "WorkManagerRequestContext",
     "WorkManagerResult",
+    "build_image_generation_agent",
+    "build_image_generation_instructions",
+    "build_image_generation_prompt",
+    "build_image_generation_user_prompt",
     "build_builtin_skills_toolset",
     "build_slack_assistant_agent",
     "build_slack_assistant_instructions",
@@ -107,6 +123,7 @@ __all__ = [
     "render_web_research_response",
     "repository_root",
     "resolve_request_preparation",
+    "run_image_generation",
     "run_slack_assistant",
     "run_translation",
     "run_web_research",

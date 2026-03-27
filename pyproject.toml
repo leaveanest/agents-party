@@ -13,6 +13,7 @@ dependencies = [
     "google-auth>=2.49.1",
     "google-cloud-firestore>=2.25.0",
     "google-cloud-translate>=3.24.0",
+    "google-genai>=1.68.0",
     "httpx>=0.28.1",
     "pydantic-ai>=1.70.0",
     "pydantic-ai-skills>=0.5.1",
