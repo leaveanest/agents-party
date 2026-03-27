@@ -51,6 +51,14 @@ class Settings(BaseSettings):
         default="gemini-2.5-flash-image",
         alias="IMAGE_GENERATION_MODEL",
     )
+    video_generation_model: str = Field(
+        default="veo-3.1-fast-generate-001",
+        alias="VIDEO_GENERATION_MODEL",
+    )
+    video_generation_prompt_model: str | None = Field(
+        default="gemini-2.5-flash",
+        alias="VIDEO_GENERATION_PROMPT_MODEL",
+    )
     google_oauth_client_id: str | None = Field(
         default=None,
         alias="GOOGLE_OAUTH_CLIENT_ID",

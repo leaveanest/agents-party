@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
-from pydantic_ai import BinaryImage
+from pydantic_ai import BinaryContent, BinaryImage
 
 from agents_party.agents.slack_runtime import SlackReferenceImage
 from agents_party.domain import (
@@ -898,6 +898,88 @@ async def test_handle_agent_mention_uploads_generated_image_into_thread(
             "title": "Generated image",
             "alt_txt": "Generated image for prompt:\ngenerate a fox poster",
             "initial_comment": "Generated image for prompt:\ngenerate a fox poster",
+            "thread_ts": "1712345678.000100",
+        }
+    ]
+    assert repository.activate_calls[-1]["agent_id"] == "assistant"
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_uploads_generated_video_into_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify video-generation delegation uploads the video instead of sending text.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub assistant execution.
+
+    Returns:
+        None.
+    """
+
+    async def fake_run_slack_assistant(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic video-generation result for routing tests.
+
+        Args:
+            invocation: Slack invocation received from the routing layer.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Lightweight assistant result carrying a generated video.
+        """
+        assert invocation.text == "create a teaser video"
+        return type(
+            "SlackAssistantResult",
+            (),
+            {
+                "message": "Generated video for prompt:\ncreate a teaser video",
+                "follow_up_question": None,
+                "generated_video": BinaryContent(
+                    data=b"mp4-bytes",
+                    media_type="video/mp4",
+                ),
+            },
+        )()
+
+    monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
+    responder = SayResponder()
+    repository = StubSlackAgentRepository()
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "text": "<@Ubot> create a teaser video",
+                    }
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> create a teaser video",
+        },
+        responder,
+        client,
+        repository=repository,
+    )
+
+    assert responder.calls == []
+    assert client.upload_calls == [
+        {
+            "channel": "C123",
+            "file": b"mp4-bytes",
+            "filename": "generated-video.mp4",
+            "title": "Generated video",
+            "initial_comment": "Generated video for prompt:\ncreate a teaser video",
             "thread_ts": "1712345678.000100",
         }
     ]

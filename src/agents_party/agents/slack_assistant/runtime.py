@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import cast
 
-from pydantic_ai import Agent, BinaryImage, RunContext
+from pydantic_ai import Agent, BinaryContent, BinaryImage, RunContext
 from pydantic_ai.models import KnownModelName, Model
 
 from agents_party.agents.image_generation import (
@@ -14,6 +14,10 @@ from agents_party.agents.image_generation import (
 )
 from agents_party.agents.slack_runtime import SlackAgentInvocation
 from agents_party.agents.translation import TranslationInvocation, run_translation
+from agents_party.agents.video_generation import (
+    VideoGenerationInvocation,
+    run_video_generation,
+)
 from agents_party.agents.web_research import (
     WebResearchInvocation,
     render_web_research_response,
@@ -30,7 +34,7 @@ SLACK_ASSISTANT_SCOPE_SECTION = """
 You are the single public Slack assistant for this application.
 Answer greetings, help requests, and capability questions directly.
 Use exactly one delegation tool when the request clearly belongs to task management,
-web research/current information, translation, or image generation.
+web research/current information, translation, image generation, or video generation.
 """
 
 SLACK_ASSISTANT_DELEGATION_SECTION = """
@@ -41,6 +45,8 @@ verification, current facts, or cited research.
 Use `delegate_translation` for language translation or rewriting one language into another.
 Use `delegate_image_generation` when the user wants you to create or generate an image, illustration,
 concept art, mockup, diagram image, or visual from a prompt.
+Use `delegate_video_generation` when the user wants you to create or generate a video, animation,
+motion mockup, short clip, teaser, reel, or text-to-video output from a prompt.
 """
 
 SLACK_ASSISTANT_IMAGE_ROUTING_SECTION = """
@@ -58,6 +64,20 @@ If the user wants a poster, banner, thumbnail, logo, icon, wireframe, storyboard
 sketch, diagram image, concept art, or similar visual deliverable, prefer image generation.
 """
 
+SLACK_ASSISTANT_VIDEO_ROUTING_SECTION = """
+Treat motion-asset requests as video generation when the user explicitly asks for a video.
+Examples that should route to `delegate_video_generation` include:
+- "make a short video"
+- "create a teaser clip"
+- "animate this concept"
+- "turn this into a promo video"
+- "動画にして"
+- "ショート動画を作って"
+- "PV っぽい動画にして"
+If the user wants a reel, teaser, promo clip, short animation, motion mockup, or similar
+video deliverable, prefer video generation.
+"""
+
 SLACK_ASSISTANT_OUTPUT_SECTION = """
 If you answer directly, set `action` to `responded`.
 If you use a delegation tool, set `action` to `delegated`, keep the delegated reply in `message`,
@@ -66,8 +86,8 @@ If the request is missing a key detail, ask one short blocking question and set 
 """
 
 SLACK_ASSISTANT_DIRECT_HELP = (
-    "I can help with task management, web research, translation, and image generation.\n"
-    "Try asking me to summarize follow-up actions, verify a current fact, translate part of the thread, or generate an image."
+    "I can help with task management, web research, translation, image generation, and video generation.\n"
+    "Try asking me to summarize follow-up actions, verify a current fact, translate part of the thread, generate an image, or generate a short video."
 )
 
 _DIRECT_IMAGE_GENERATION_PHRASES = (
@@ -146,6 +166,60 @@ _IMAGE_GENERATION_VISUAL_NOUNS = (
     "絵",
 )
 
+_DIRECT_VIDEO_GENERATION_PHRASES = (
+    "generate a video",
+    "generate video",
+    "create a video",
+    "make a video",
+    "make a short video",
+    "create a teaser clip",
+    "animate this",
+    "turn this into a promo video",
+    "text to video",
+    "text-to-video",
+    "動画生成",
+    "動画を生成",
+    "動画にして",
+    "動画を作って",
+    "ショート動画を作って",
+    "ムービーにして",
+    "アニメーションにして",
+    "アニメ動画にして",
+    "PV っぽい動画にして",
+)
+
+_VIDEO_GENERATION_ACTION_PHRASES = (
+    "generate",
+    "create",
+    "make",
+    "animate",
+    "render",
+    "produce",
+    "生成",
+    "作って",
+    "作成",
+    "動画にして",
+    "アニメーションにして",
+)
+
+_VIDEO_GENERATION_VISUAL_NOUNS = (
+    "video",
+    "clip",
+    "animation",
+    "teaser",
+    "reel",
+    "promo",
+    "movie",
+    "short",
+    "trailer",
+    "動画",
+    "映像",
+    "ムービー",
+    "アニメーション",
+    "ショート動画",
+    "PV",
+)
+
 
 def _format_thread_transcript(thread_messages: list[ThreadMessage]) -> str:
     """Render Slack thread messages into a stable transcript block.
@@ -197,6 +271,25 @@ def _looks_like_image_generation_request(invocation: SlackAgentInvocation) -> bo
     ) and _contains_any_phrase(normalized_text, _IMAGE_GENERATION_VISUAL_NOUNS)
 
 
+def _looks_like_video_generation_request(invocation: SlackAgentInvocation) -> bool:
+    """Return whether a Slack request should route directly to video generation.
+
+    Args:
+        invocation: Slack invocation being evaluated for routing.
+
+    Returns:
+        `True` when the request strongly resembles a text-to-video request.
+    """
+    normalized_text = " ".join(invocation.text.casefold().split())
+    if not normalized_text:
+        return False
+    if _contains_any_phrase(normalized_text, _DIRECT_VIDEO_GENERATION_PHRASES):
+        return True
+    return _contains_any_phrase(
+        normalized_text, _VIDEO_GENERATION_ACTION_PHRASES
+    ) and _contains_any_phrase(normalized_text, _VIDEO_GENERATION_VISUAL_NOUNS)
+
+
 def _has_prior_thread_context(invocation: SlackAgentInvocation) -> bool:
     """Return whether the invocation includes earlier thread context.
 
@@ -235,6 +328,28 @@ async def _run_image_generation_for_invocation(
     return image, f"Generated image for prompt:\n{invocation.text}"
 
 
+async def _run_video_generation_for_invocation(
+    invocation: SlackAgentInvocation,
+) -> tuple[BinaryContent, str]:
+    """Generate a video directly from a Slack invocation.
+
+    Args:
+        invocation: Slack invocation containing the request and thread context.
+
+    Returns:
+        Generated video plus the Slack-ready completion message.
+    """
+    video = await run_video_generation(
+        VideoGenerationInvocation(
+            prompt=invocation.text,
+            user_id=invocation.user_id,
+            team_id=invocation.team_id,
+            thread_messages=invocation.thread_messages,
+        )
+    )
+    return video, f"Generated video for prompt:\n{invocation.text}"
+
+
 def build_slack_assistant_instructions() -> tuple[str, ...]:
     """Return the instruction blocks used by the Slack assistant.
 
@@ -246,6 +361,7 @@ def build_slack_assistant_instructions() -> tuple[str, ...]:
         SLACK_ASSISTANT_SCOPE_SECTION.strip(),
         SLACK_ASSISTANT_DELEGATION_SECTION.strip(),
         SLACK_ASSISTANT_IMAGE_ROUTING_SECTION.strip(),
+        SLACK_ASSISTANT_VIDEO_ROUTING_SECTION.strip(),
         SLACK_ASSISTANT_OUTPUT_SECTION.strip(),
     )
 
@@ -337,6 +453,8 @@ def build_slack_assistant_agent(
         ctx.deps.last_delegated_agent_id = "work-manager"
         ctx.deps.last_delegated_message = message
         ctx.deps.last_follow_up_question = result.follow_up_question
+        ctx.deps.last_generated_image = None
+        ctx.deps.last_generated_video = None
         return message
 
     @agent.tool
@@ -358,6 +476,8 @@ def build_slack_assistant_agent(
         ctx.deps.last_delegated_agent_id = "web-research"
         ctx.deps.last_delegated_message = message
         ctx.deps.last_follow_up_question = result.follow_up_question
+        ctx.deps.last_generated_image = None
+        ctx.deps.last_generated_video = None
         return message
 
     @agent.tool
@@ -379,6 +499,8 @@ def build_slack_assistant_agent(
         ctx.deps.last_delegated_agent_id = "translation"
         ctx.deps.last_delegated_message = message
         ctx.deps.last_follow_up_question = result.follow_up_question
+        ctx.deps.last_generated_image = None
+        ctx.deps.last_generated_video = None
         return message
 
     @agent.tool
@@ -397,6 +519,26 @@ def build_slack_assistant_agent(
         ctx.deps.last_delegated_message = message
         ctx.deps.last_follow_up_question = None
         ctx.deps.last_generated_image = image
+        ctx.deps.last_generated_video = None
+        return message
+
+    @agent.tool
+    async def delegate_video_generation(ctx: RunContext[SlackAssistantDeps]) -> str:
+        """Delegate the current Slack request to the video-generation specialist.
+
+        Args:
+            ctx: Runtime context containing the current Slack invocation and thread
+                transcript.
+
+        Returns:
+            Slack-ready status message describing the generated video result.
+        """
+        video, message = await _run_video_generation_for_invocation(ctx.deps.invocation)
+        ctx.deps.last_delegated_agent_id = "video-generation"
+        ctx.deps.last_delegated_message = message
+        ctx.deps.last_follow_up_question = None
+        ctx.deps.last_generated_image = None
+        ctx.deps.last_generated_video = video
         return message
 
     @agent.output_validator
@@ -417,11 +559,13 @@ def build_slack_assistant_agent(
         delegated_message = ctx.deps.last_delegated_message
         delegated_follow_up = ctx.deps.last_follow_up_question
         delegated_image = ctx.deps.last_generated_image
+        delegated_video = ctx.deps.last_generated_video
 
         if output.action == SlackAssistantAction.CLARIFICATION_NEEDED:
             output.message = ""
             output.delegated_agent_id = None
             output.generated_image = None
+            output.generated_video = None
             if not output.follow_up_question:
                 output.follow_up_question = "What would you like me to help with?"
             return output
@@ -431,6 +575,7 @@ def build_slack_assistant_agent(
             output.delegated_agent_id = delegated_agent_id
             output.follow_up_question = output.follow_up_question or delegated_follow_up
             output.generated_image = delegated_image
+            output.generated_video = delegated_video
             if not output.message.strip() and delegated_message is not None:
                 output.message = delegated_message
         else:
@@ -438,6 +583,7 @@ def build_slack_assistant_agent(
             output.delegated_agent_id = None
             output.follow_up_question = None
             output.generated_image = None
+            output.generated_video = None
 
         if not output.message.strip():
             output.message = SLACK_ASSISTANT_DIRECT_HELP
@@ -467,6 +613,18 @@ async def run_slack_assistant(
         if isinstance(invocation, SlackAgentInvocation)
         else SlackAgentInvocation.from_mapping(invocation)
     )
+    if _looks_like_video_generation_request(
+        parsed_invocation
+    ) and not _has_prior_thread_context(parsed_invocation):
+        generated_video, message = await _run_video_generation_for_invocation(
+            parsed_invocation
+        )
+        return SlackAssistantResult(
+            action=SlackAssistantAction.DELEGATED,
+            message=message,
+            delegated_agent_id="video-generation",
+            generated_video=generated_video,
+        )
     if _looks_like_image_generation_request(
         parsed_invocation
     ) and not _has_prior_thread_context(parsed_invocation):

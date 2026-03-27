@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from typing import Any, Protocol, cast
 
 import httpx
-from pydantic_ai import BinaryImage
+from pydantic_ai import BinaryContent, BinaryImage
 from agents_party.agents.slack_assistant import run_slack_assistant
 from agents_party.agents.slack_runtime import SlackAgentInvocation, SlackReferenceImage
 from agents_party.config import settings
@@ -396,6 +396,20 @@ def _filename_for_generated_image(media_type: str) -> str:
     return "generated-image.png"
 
 
+def _filename_for_generated_video(media_type: str) -> str:
+    """Return a stable Slack upload filename for a generated video.
+
+    Args:
+        media_type: MIME type reported by the video-generation runtime.
+
+    Returns:
+        Filename with an extension matching the MIME type when recognized.
+    """
+    if media_type == "video/quicktime":
+        return "generated-video.mov"
+    return "generated-video.mp4"
+
+
 async def _upload_generated_image_reply(
     client: SlackConversationsClient | None,
     *,
@@ -425,6 +439,40 @@ async def _upload_generated_image_reply(
         filename=_filename_for_generated_image(image.media_type),
         title="Generated image",
         alt_txt=initial_comment,
+        initial_comment=initial_comment,
+        thread_ts=thread_ts,
+    )
+    return True
+
+
+async def _upload_generated_video_reply(
+    client: SlackConversationsClient | None,
+    *,
+    channel_id: str,
+    thread_ts: str,
+    video: BinaryContent,
+    initial_comment: str,
+) -> bool:
+    """Upload a generated video into the routed Slack thread.
+
+    Args:
+        client: Slack client used to upload the generated video.
+        channel_id: Slack channel id where the thread lives.
+        thread_ts: Root Slack thread timestamp for the upload.
+        video: Generated binary video payload.
+        initial_comment: Comment posted alongside the uploaded video.
+
+    Returns:
+        `True` when the upload succeeds, else `False`.
+    """
+    if client is None:
+        return False
+
+    await client.files_upload_v2(
+        channel=channel_id,
+        file=video.data,
+        filename=_filename_for_generated_video(video.media_type),
+        title="Generated video",
         initial_comment=initial_comment,
         thread_ts=thread_ts,
     )
@@ -1252,8 +1300,37 @@ async def invoke_routed_agent(
         execution_invocation,
         work_item_repository=work_item_repository,
     )
-    response_text = assistant_result.follow_up_question or assistant_result.message
-    if assistant_result.generated_image is not None:
+    response_text = getattr(assistant_result, "follow_up_question", None) or getattr(
+        assistant_result, "message", ""
+    )
+    generated_video = getattr(assistant_result, "generated_video", None)
+    if generated_video is not None:
+        initial_comment = response_text.strip() or (
+            f"Generated video for prompt:\n{execution_invocation.text}"
+        )
+        try:
+            uploaded = await _upload_generated_video_reply(
+                client,
+                channel_id=execution_invocation.channel_id,
+                thread_ts=thread_ts,
+                video=generated_video,
+                initial_comment=initial_comment,
+            )
+        except Exception:
+            return "Video generation succeeded, but uploading to Slack failed."
+        if not uploaded:
+            return "Video generation requires a Slack upload client for this route."
+        resolved_repository.activate_thread_agent(
+            team_id=execution_invocation.team_id,
+            channel_id=execution_invocation.channel_id,
+            thread_ts=thread_ts,
+            agent_id="assistant",
+            root_message_ts=thread_messages[0].ts,
+            last_message_ts=thread_messages[-1].ts,
+        )
+        return ""
+    generated_image = getattr(assistant_result, "generated_image", None)
+    if generated_image is not None:
         initial_comment = response_text.strip() or (
             f"Generated image for prompt:\n{execution_invocation.text}"
         )
@@ -1262,7 +1339,7 @@ async def invoke_routed_agent(
                 client,
                 channel_id=execution_invocation.channel_id,
                 thread_ts=thread_ts,
-                image=assistant_result.generated_image,
+                image=generated_image,
                 initial_comment=initial_comment,
             )
         except Exception:

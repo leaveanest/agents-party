@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from pydantic_ai import BinaryImage
+from pydantic_ai import BinaryContent, BinaryImage
 from pydantic_ai.models.test import TestModel
 
 import agents_party.agents.slack_assistant.runtime as slack_assistant_runtime
@@ -75,6 +75,7 @@ async def test_build_slack_assistant_agent_registers_expected_tools() -> None:
     assert {tool.name for tool in params.function_tools} == {
         "delegate_image_generation",
         "delegate_translation",
+        "delegate_video_generation",
         "delegate_web_research",
         "delegate_work_manager",
     }
@@ -91,6 +92,8 @@ def test_build_slack_assistant_instructions_include_indirect_image_examples() ->
     assert "turn this into a visual" in instructions
     assert "図にして" in instructions
     assert "この案をビジュアル化して" in instructions
+    assert "animate this concept" in instructions
+    assert "動画にして" in instructions
 
 
 @pytest.mark.asyncio
@@ -309,6 +312,134 @@ async def test_run_slack_assistant_delegates_image_generation(
 
 
 @pytest.mark.asyncio
+async def test_run_slack_assistant_delegates_video_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify video requests delegate through the video-generation tool.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub video generation.
+
+    Returns:
+        None.
+    """
+
+    async def fake_run_video_generation(invocation: Any, **_: Any) -> BinaryContent:
+        """Return a deterministic video result for delegation tests.
+
+        Args:
+            invocation: Video-generation invocation received from the assistant.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Binary video payload for the generated video.
+        """
+        assert invocation.prompt == "follow up with finance"
+        assert invocation.user_id == "U1"
+        assert len(invocation.thread_messages) == 1
+        assert invocation.thread_messages[0].text == "follow up with finance"
+        return BinaryContent(data=b"mp4-bytes", media_type="video/mp4")
+
+    monkeypatch.setattr(
+        slack_assistant_runtime,
+        "run_video_generation",
+        fake_run_video_generation,
+    )
+    model = TestModel(
+        call_tools=["delegate_video_generation"],
+        custom_output_args={
+            "action": "responded",
+            "message": "",
+            "delegated_agent_id": None,
+            "follow_up_question": None,
+        },
+    )
+
+    result = await run_slack_assistant(make_invocation(), model=model)
+
+    assert result.action == SlackAssistantAction.DELEGATED
+    assert result.delegated_agent_id == "video-generation"
+    assert result.message == "Generated video for prompt:\nfollow up with finance"
+    assert result.generated_video == BinaryContent(
+        data=b"mp4-bytes", media_type="video/mp4"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_slack_assistant_clears_stale_generated_video_after_later_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify later delegated tools clear a previously generated video payload.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub delegated runtimes.
+
+    Returns:
+        None.
+    """
+
+    async def fake_run_video_generation(invocation: Any, **_: Any) -> BinaryContent:
+        """Return a deterministic video result for delegation tests.
+
+        Args:
+            invocation: Video-generation invocation received from the assistant.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Binary video payload for the generated video.
+        """
+        del invocation
+        return BinaryContent(data=b"mp4-bytes", media_type="video/mp4")
+
+    async def fake_run_translation(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic translation result for delegation tests.
+
+        Args:
+            invocation: Translation invocation received from the assistant.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Lightweight result object with a fixed translation.
+        """
+        del invocation
+        return type(
+            "TranslationResult",
+            (),
+            {
+                "translated_text": "財務部門にフォローアップしてください。",
+                "follow_up_question": None,
+            },
+        )()
+
+    monkeypatch.setattr(
+        slack_assistant_runtime,
+        "run_video_generation",
+        fake_run_video_generation,
+    )
+    monkeypatch.setattr(
+        slack_assistant_runtime,
+        "run_translation",
+        fake_run_translation,
+    )
+    model = TestModel(
+        call_tools=["delegate_video_generation", "delegate_translation"],
+        custom_output_args={
+            "action": "responded",
+            "message": "",
+            "delegated_agent_id": None,
+            "follow_up_question": None,
+        },
+    )
+
+    result = await run_slack_assistant(make_invocation(), model=model)
+
+    assert result.action == SlackAssistantAction.DELEGATED
+    assert result.delegated_agent_id == "translation"
+    assert result.message == "財務部門にフォローアップしてください。"
+    assert result.generated_video is None
+
+
+@pytest.mark.asyncio
 async def test_run_slack_assistant_short_circuits_indirect_visual_request_without_prior_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -350,6 +481,51 @@ async def test_run_slack_assistant_short_circuits_indirect_visual_request_withou
     assert result.message == "Generated image for prompt:\nこの案をモックアップにして"
     assert result.generated_image == BinaryImage(
         data=b"png-bytes", media_type="image/png"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_slack_assistant_short_circuits_video_request_without_prior_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify strong video phrasing short-circuits without prior thread context.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub video generation.
+
+    Returns:
+        None.
+    """
+    invocation = make_invocation().model_copy(
+        update={"text": "この案をショート動画にして"}
+    )
+
+    async def fake_run_video_generation(invocation: Any, **_: Any) -> BinaryContent:
+        """Return a deterministic video result for direct routing tests.
+
+        Args:
+            invocation: Video-generation invocation received from the assistant.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Binary video payload for the generated video.
+        """
+        assert invocation.prompt == "この案をショート動画にして"
+        return BinaryContent(data=b"mp4-bytes", media_type="video/mp4")
+
+    monkeypatch.setattr(
+        slack_assistant_runtime,
+        "run_video_generation",
+        fake_run_video_generation,
+    )
+
+    result = await run_slack_assistant(invocation, model=None)
+
+    assert result.action == SlackAssistantAction.DELEGATED
+    assert result.delegated_agent_id == "video-generation"
+    assert result.message == "Generated video for prompt:\nこの案をショート動画にして"
+    assert result.generated_video == BinaryContent(
+        data=b"mp4-bytes", media_type="video/mp4"
     )
 
 
