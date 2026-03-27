@@ -309,10 +309,10 @@ async def test_run_slack_assistant_delegates_image_generation(
 
 
 @pytest.mark.asyncio
-async def test_run_slack_assistant_short_circuits_indirect_visual_request(
+async def test_run_slack_assistant_short_circuits_indirect_visual_request_without_prior_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify strong visual-deliverable phrasing routes to image generation directly.
+    """Verify strong visual phrasing short-circuits only without prior context.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture used to stub image generation.
@@ -351,6 +351,72 @@ async def test_run_slack_assistant_short_circuits_indirect_visual_request(
     assert result.generated_image == BinaryImage(
         data=b"png-bytes", media_type="image/png"
     )
+
+
+@pytest.mark.asyncio
+async def test_run_slack_assistant_does_not_short_circuit_visual_request_with_prior_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify prior thread context prevents direct image-generation short-circuiting.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to assert non-execution.
+
+    Returns:
+        None.
+    """
+    invocation = make_invocation().model_copy(
+        update={
+            "text": "この案をモックアップにして",
+            "thread_messages": [
+                ThreadMessage(
+                    ts="1712345677.000100",
+                    role=MessageRole.USER,
+                    text="LP の構成をまず整理したい",
+                    user_id="U1",
+                ),
+                ThreadMessage(
+                    ts="1712345678.000100",
+                    role=MessageRole.USER,
+                    text="この案をモックアップにして",
+                    user_id="U1",
+                ),
+            ],
+        }
+    )
+
+    async def fail_run_image_generation(*_: Any, **__: Any) -> BinaryImage:
+        """Fail if direct image generation runs despite prior thread context.
+
+        Args:
+            *_: Unused positional arguments.
+            **__: Unused keyword arguments.
+
+        Returns:
+            Never returns because the function always raises.
+        """
+        raise AssertionError("run_image_generation should not short-circuit")
+
+    monkeypatch.setattr(
+        slack_assistant_runtime,
+        "run_image_generation",
+        fail_run_image_generation,
+    )
+    model = TestModel(
+        call_tools=[],
+        custom_output_args={
+            "action": "responded",
+            "message": "Need to interpret the thread context first.",
+            "delegated_agent_id": None,
+            "follow_up_question": None,
+        },
+    )
+
+    result = await run_slack_assistant(invocation, model=model)
+
+    assert result.action == SlackAssistantAction.RESPONDED
+    assert result.delegated_agent_id is None
+    assert result.message == "Need to interpret the thread context first."
 
 
 @pytest.mark.asyncio

@@ -197,6 +197,21 @@ def _looks_like_image_generation_request(invocation: SlackAgentInvocation) -> bo
     ) and _contains_any_phrase(normalized_text, _IMAGE_GENERATION_VISUAL_NOUNS)
 
 
+def _has_prior_thread_context(invocation: SlackAgentInvocation) -> bool:
+    """Return whether the invocation includes earlier thread context.
+
+    Args:
+        invocation: Slack invocation being evaluated for routing.
+
+    Returns:
+        `True` when the thread includes messages other than the originating one.
+    """
+    message_ts = invocation.message_ts
+    if message_ts is None:
+        return len(invocation.thread_messages) > 1
+    return any(message.ts != message_ts for message in invocation.thread_messages)
+
+
 async def _run_image_generation_for_invocation(
     invocation: SlackAgentInvocation,
 ) -> tuple[BinaryImage, str]:
@@ -452,7 +467,9 @@ async def run_slack_assistant(
         if isinstance(invocation, SlackAgentInvocation)
         else SlackAgentInvocation.from_mapping(invocation)
     )
-    if _looks_like_image_generation_request(parsed_invocation):
+    if _looks_like_image_generation_request(
+        parsed_invocation
+    ) and not _has_prior_thread_context(parsed_invocation):
         generated_image, message = await _run_image_generation_for_invocation(
             parsed_invocation
         )
