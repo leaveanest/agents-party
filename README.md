@@ -74,6 +74,17 @@ Run the app locally:
 uv run agents-party
 ```
 
+## Cloud Run Container
+
+This repository now includes a root `Dockerfile` for Cloud Run deployments.
+The container installs `ffmpeg`, which is required for transcribing Slack video attachments by extracting an audio track before sending it to Google Cloud Speech-to-Text.
+
+Build locally if needed:
+
+```bash
+docker build -t agents-party .
+```
+
 ## Configuration
 
 The application reads environment variables from `.env` when present.
@@ -97,6 +108,9 @@ SLACK_BOT_TOKEN=...
 SLACK_SIGNING_SECRET=...
 SLACK_APP_TOKEN=...
 AGENT_SELECTOR_MODEL=google-gla:gemini-3-flash-preview
+GOOGLE_CLOUD_PROJECT=...
+FIRESTORE_DATABASE=(default)
+GOOGLE_CLOUD_TRANSCRIPTION_STAGING_BUCKET=...
 ```
 
 Specialists:

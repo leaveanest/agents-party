@@ -1,9 +1,11 @@
 """Application configuration loaded from environment variables."""
 
+import json
+from typing import Annotated
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
-from pydantic import Field, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -57,6 +59,22 @@ class Settings(BaseSettings):
     google_cloud_location: str = Field(
         default="global",
         alias="GOOGLE_CLOUD_LOCATION",
+    )
+    google_cloud_speech_location: str = Field(
+        default="us",
+        alias="GOOGLE_CLOUD_SPEECH_LOCATION",
+    )
+    google_cloud_transcription_model: str = Field(
+        default="chirp_3",
+        alias="GOOGLE_CLOUD_TRANSCRIPTION_MODEL",
+    )
+    google_cloud_transcription_language_codes: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["ja-JP"],
+        alias="GOOGLE_CLOUD_TRANSCRIPTION_LANGUAGE_CODES",
+    )
+    google_cloud_transcription_staging_bucket: str | None = Field(
+        default=None,
+        alias="GOOGLE_CLOUD_TRANSCRIPTION_STAGING_BUCKET",
     )
     firestore_database: str = Field(default="(default)", alias="FIRESTORE_DATABASE")
     image_generation_model: str = Field(
@@ -132,6 +150,46 @@ class Settings(BaseSettings):
             read_google_oauth_redirect_base_url(self.google_oauth_redirect_base_url)
             + "/oauth/google/callback"
         )
+
+    @field_validator("google_cloud_transcription_language_codes", mode="before")
+    @classmethod
+    def _parse_transcription_language_codes(cls, value: object) -> object:
+        """Parse transcription language codes from JSON, CSV, or a single value.
+
+        Args:
+            value: Raw setting value supplied by pydantic-settings.
+
+        Returns:
+            Normalized list of non-blank language codes.
+
+        Raises:
+            ValueError: If the configured value cannot be parsed into language codes.
+        """
+        if value is None:
+            return value
+        if isinstance(value, list):
+            return [str(code).strip() for code in value if str(code).strip()]
+        if not isinstance(value, str):
+            raise ValueError("Transcription language codes must be a string or list.")
+
+        raw_value = value.strip()
+        if not raw_value:
+            return []
+        if raw_value.startswith("["):
+            try:
+                parsed_value = json.loads(raw_value)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "Transcription language codes must be valid JSON or comma-separated text."
+                ) from exc
+            if isinstance(parsed_value, str):
+                return [parsed_value.strip()] if parsed_value.strip() else []
+            if isinstance(parsed_value, list):
+                return [str(code).strip() for code in parsed_value if str(code).strip()]
+            raise ValueError(
+                "Transcription language code JSON must be a string or list."
+            )
+        return [code.strip() for code in raw_value.split(",") if code.strip()]
 
 
 settings = Settings()

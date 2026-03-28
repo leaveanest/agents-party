@@ -8,6 +8,13 @@ from agents_party.infrastructure.google_auth import (
     HttpxGoogleOAuthGateway,
     TokenCipherError,
 )
+from agents_party.infrastructure.transcription import (
+    CloudSpeechTranscriptionService,
+    CloudStorageStagingService,
+    CloudTranscriptionError,
+    TranscriptionResponse,
+    TranscriptionSegment,
+)
 from agents_party.infrastructure.google_maps import (
     GoogleMapsClientError,
     GoogleMapsClientProtocol,
@@ -22,6 +29,9 @@ from agents_party.infrastructure.translation import (
 __all__ = [
     "CloudTranslationError",
     "CloudTranslationService",
+    "CloudSpeechTranscriptionService",
+    "CloudStorageStagingService",
+    "CloudTranscriptionError",
     "FernetTokenCipher",
     "GoogleOAuthContextSigner",
     "GoogleOAuthContextSignerError",
@@ -31,5 +41,7 @@ __all__ = [
     "HttpxGoogleOAuthGateway",
     "HttpxGoogleMapsClient",
     "TokenCipherError",
+    "TranscriptionResponse",
+    "TranscriptionSegment",
     "TranslationResponse",
 ]
