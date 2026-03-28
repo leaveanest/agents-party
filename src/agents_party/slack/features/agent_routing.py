@@ -622,11 +622,12 @@ def build_agent_help_message(user_id: str | None = None) -> str:
     mention = f"<@{user_id}> " if user_id else ""
     return (
         f"{mention}mention the app in a channel or thread to talk to the assistant.\n"
-        "The assistant can help with general questions, task management, web research, translation, image generation, and video generation.\n"
+        "The assistant can help with general questions, task management, web research, place and route lookup, translation, image generation, and video generation.\n"
         "Examples:\n"
         "- `@agents-party summarize this thread`\n"
         "- `@agents-party capture follow-up actions from this discussion`\n"
         "- `@agents-party verify the latest deployment policy`\n"
+        "- `@agents-party 新宿駅近くのカフェを探して`\n"
         "- `@agents-party create a mockup from this idea`"
     )
 
@@ -646,7 +647,8 @@ def build_thread_menu_message(user_id: str | None = None) -> str:
         "Try one of these mentions:\n"
         "- `@agents-party summarize this thread`\n"
         "- `@agents-party capture follow-up actions from this discussion`\n"
-        "- `@agents-party verify the latest deployment policy`"
+        "- `@agents-party verify the latest deployment policy`\n"
+        "- `@agents-party 東京駅から渋谷駅までのルートを教えて`"
     )
 
 
@@ -686,6 +688,12 @@ def build_thread_menu_blocks(user_id: str | None = None) -> list[dict[str, Any]]
                     "type": "mrkdwn",
                     "text": (
                         "*Verify*\n`@agents-party verify the latest deployment policy`"
+                    ),
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Maps*\n`@agents-party 東京駅から渋谷駅までのルートを教えて`"
                     ),
                 },
             ],

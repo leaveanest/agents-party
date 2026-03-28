@@ -73,6 +73,7 @@ async def test_build_agent_router_agent_registers_expected_tools() -> None:
     params = model.last_model_request_parameters
     assert params is not None
     assert {tool.name for tool in params.function_tools} == {
+        "delegate_google_maps",
         "delegate_image_generation",
         "delegate_translation",
         "delegate_video_generation",
@@ -91,8 +92,63 @@ def test_build_agent_router_instructions_include_orchestration_guidance() -> Non
 
     assert "You may call multiple text specialists" in instructions
     assert "at most one media specialist" in instructions
+    assert "`delegate_google_maps`" in instructions
     assert "`delegate_image_generation`" in instructions
     assert "`delegate_video_generation`" in instructions
+
+
+@pytest.mark.asyncio
+async def test_run_agent_router_delegates_to_google_maps_specialist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify the router can delegate place and route requests to Google Maps.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub specialist runtimes.
+
+    Returns:
+        None.
+    """
+
+    async def fake_run_google_maps(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic Google Maps result for routing tests.
+
+        Args:
+            invocation: Google Maps invocation received from the router.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Lightweight result object with a fixed route answer.
+        """
+        assert invocation.channel_id == "C123"
+        return type(
+            "GoogleMapsResult",
+            (),
+            {
+                "answer": "東京駅から渋谷駅まで車で約18分です。",
+                "places": [],
+                "route": None,
+                "caveats": [],
+                "follow_up_question": None,
+            },
+        )()
+
+    monkeypatch.setattr(agent_router_runtime, "run_google_maps", fake_run_google_maps)
+    model = TestModel(
+        call_tools=["delegate_google_maps"],
+        custom_output_args={
+            "action": "responded",
+            "message": "東京駅から渋谷駅まで車で約18分です。",
+            "selected_specialist_ids": [],
+            "follow_up_question": None,
+        },
+    )
+
+    result = await run_agent_router(make_invocation(), model=model)
+
+    assert result.action == AgentRouterAction.ORCHESTRATED
+    assert result.selected_specialist_ids == ["google-maps"]
+    assert result.message == "東京駅から渋谷駅まで車で約18分です。"
 
 
 @pytest.mark.asyncio
@@ -240,6 +296,76 @@ async def test_run_agent_router_short_circuits_after_specialist_follow_up(
     assert result.action == AgentRouterAction.CLARIFICATION_NEEDED
     assert result.selected_specialist_ids == ["work-manager"]
     assert result.follow_up_question == "Which finance owner should I use?"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_router_stops_after_google_maps_follow_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify Google Maps follow-up questions block later specialist execution.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub specialist runtimes.
+
+    Returns:
+        None.
+    """
+
+    async def fake_run_google_maps(invocation: Any, **_: Any) -> Any:
+        """Return a clarification response for Google Maps routing tests.
+
+        Args:
+            invocation: Google Maps invocation received from the router.
+            **_: Unused keyword arguments.
+
+        Returns:
+            Lightweight result object carrying a follow-up question.
+        """
+        assert invocation.channel_id == "C123"
+        return type(
+            "GoogleMapsResult",
+            (),
+            {
+                "answer": "",
+                "places": [],
+                "route": None,
+                "caveats": [],
+                "follow_up_question": "出発地を教えてください。",
+            },
+        )()
+
+    async def fail_run_translation(*_: Any, **__: Any) -> Any:
+        """Fail the test if translation runs after a Google Maps follow-up.
+
+        Args:
+            *_: Unused positional arguments.
+            **__: Unused keyword arguments.
+
+        Returns:
+            None.
+
+        Raises:
+            AssertionError: Always raised when the function is called.
+        """
+        raise AssertionError("translation should not run after Google Maps follow-up")
+
+    monkeypatch.setattr(agent_router_runtime, "run_google_maps", fake_run_google_maps)
+    monkeypatch.setattr(agent_router_runtime, "run_translation", fail_run_translation)
+    model = TestModel(
+        call_tools=["delegate_google_maps", "delegate_translation"],
+        custom_output_args={
+            "action": "responded",
+            "message": "",
+            "selected_specialist_ids": [],
+            "follow_up_question": None,
+        },
+    )
+
+    result = await run_agent_router(make_invocation(), model=model)
+
+    assert result.action == AgentRouterAction.CLARIFICATION_NEEDED
+    assert result.selected_specialist_ids == ["google-maps"]
+    assert result.follow_up_question == "出発地を教えてください。"
 
 
 @pytest.mark.asyncio

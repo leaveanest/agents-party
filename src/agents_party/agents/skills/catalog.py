@@ -7,6 +7,7 @@ from pydantic_ai_skills import Skill, SkillsDirectory, SkillsToolset
 EXPECTED_BUILTIN_SKILL_NAMES = {
     "dispatch-triage",
     "handover-brief-builder",
+    "lodging-search-advisor",
     "shipper-communication-drafter",
     "web-research-analyst",
 }
