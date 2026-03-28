@@ -8,18 +8,27 @@ skinparam componentStyle rectangle
 skinparam defaultFontName Monospace
 
 actor "Slack User" as slack_user
+actor "Browser" as browser
 cloud "Slack" as slack
+cloud "Google Identity" as google_identity
+cloud "Google Maps Platform" as google_maps_platform
+cloud "Cloud Translation API" as cloud_translation
 
 package "Google Cloud Project" {
   rectangle "Cloud Run Service" as cloud_run {
     package "agents-party Application" {
-      component "Slack Events Endpoint\nPOST /slack/events" as slack_events_endpoint
-      component "App Home / Mention Handling" as slack_handlers
+      component "FastAPI App" as fastapi_app
+      component "Slack Bolt Gateway\nPOST /slack/events" as slack_gateway
+      component "Google OAuth Router\nGET /oauth/google/start\nGET /oauth/google/callback" as google_oauth_router
+      component "Slack Event Handlers\napp_home_opened / app_mention /\nmessage / reaction_added" as slack_handlers
       component "Agent Routing" as agent_routing
-      component "Slack Assistant" as slack_assistant
       component "Work Manager" as work_manager
       component "Web Research" as web_research
+      component "Google Maps" as google_maps
       component "Translation" as translation
+      component "Image Generation" as image_generation
+      component "Video Generation" as video_generation
+      component "Google OAuth Coordinator" as google_oauth
     }
   }
 
@@ -41,52 +50,69 @@ package "Google Cloud Project" {
       }
 
       folder "attention_index/{user_id}/work_items/{work_item_id}" as fs_attention
+      folder "google_connections/{slack_user_id}__{google_sub}" as fs_google_connections
+      folder "google_oauth_states/{state_id}" as fs_google_oauth_states
     }
   }
 }
 
 slack_user --> slack : use app
-slack --> cloud_run : HTTPS request
-cloud_run --> slack_events_endpoint : /slack/events
+slack --> cloud_run : HTTPS events and interactions
+cloud_run --> fastapi_app
+fastapi_app --> slack_gateway : /slack/events
+fastapi_app --> google_oauth_router : /oauth/google/*
 
-secret_manager --> cloud_run : Slack credentials\nruntime secret injection
+secret_manager --> cloud_run : runtime secrets and config
 
-slack_events_endpoint --> slack_handlers
-slack_handlers --> agent_routing
+slack_gateway --> slack_handlers
+slack_handlers --> agent_routing : mentions and active-thread replies
+slack_handlers --> cloud_translation : flag reaction translation via CloudTranslationService
 
-agent_routing --> fs_workspace_settings : enabled channels\nthread auto-reply
-agent_routing --> fs_channel_settings : enabled channels\nthread auto-reply
-agent_routing --> fs_threads : active assistant thread
-agent_routing --> slack_assistant : execute with full thread context
+agent_routing --> fs_workspace_settings : channel enablement defaults
+agent_routing --> fs_channel_settings : thread auto-reply overrides
+agent_routing --> fs_threads : active assistant thread state
+agent_routing --> slack : fetch thread history / post replies / upload files
 
-slack_assistant --> vertex_ai : assistant reasoning
-slack_assistant --> work_manager : explicit delegation
-slack_assistant --> web_research : explicit delegation
-slack_assistant --> translation : explicit delegation
+agent_routing --> work_manager : task capture and updates
+agent_routing --> web_research : source-backed research
+agent_routing --> google_maps : place and route lookup
+agent_routing --> translation : text translation
+agent_routing --> image_generation : image generation
+agent_routing --> video_generation : video generation
 
-work_manager --> vertex_ai : task execution
+work_manager --> vertex_ai : structured task execution
 work_manager --> fs_work_item : create / read / update
 work_manager --> fs_participants : assignees / roles / attention
 work_manager --> fs_events : work item history
 work_manager --> fs_attention : per-user attention index
-web_research --> vertex_ai : source-backed research
-translation --> vertex_ai : translation execution
+
+web_research --> vertex_ai : web tool orchestration
+google_maps --> vertex_ai : maps reasoning
+google_maps --> google_maps_platform : Places / Routes API calls
+translation --> vertex_ai : request-driven translation
+image_generation --> vertex_ai : Gemini image generation
+video_generation --> vertex_ai : Gemini prompt planning and Veo rendering
+
+browser --> google_oauth_router : open signed OAuth start URL
+google_oauth_router --> google_oauth
+google_oauth --> fs_google_oauth_states : create / consume state
+google_oauth --> fs_google_connections : encrypted token storage
+google_oauth --> google_identity : authorization and token exchange
+google_identity --> browser : consent and redirect
+browser --> google_oauth_router : callback redirect
 
 note bottom of firestore
-Slack routing data:
-- workspace app settings
-- channel app settings
-- thread active state
-
-Work management data:
-- work items
-- participants
-- events
-- attention index
+Stored data:
+- workspace and channel app settings
+- active assistant thread state
+- work items, participants, events, and attention index
+- Google OAuth connection documents
+- short-lived Google OAuth state documents
 end note
 
 note top of cloud_run
-Deployment runtime for the HTTP service.
+Cloud Run hosts one FastAPI service for Slack events,
+health checks, and Google OAuth browser callbacks.
 end note
 
 @enduml
