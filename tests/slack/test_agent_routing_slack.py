@@ -489,6 +489,35 @@ def test_normalize_thread_message_preserves_file_share_transcription_media_metad
     }
 
 
+def test_normalize_thread_message_allows_unrelated_file_share_without_metadata() -> (
+    None
+):
+    """Verify non-transcribable file shares do not abort thread normalization.
+
+    Returns:
+        None.
+    """
+    message = agent_routing._normalize_thread_message(
+        {
+            "ts": "1712345678.000100",
+            "user": "U1",
+            "subtype": "file_share",
+            "text": "Here is the PDF",
+            "files": [
+                {
+                    "name": "spec.pdf",
+                    "title": "spec",
+                    "mimetype": "application/pdf",
+                    "url_private_download": "https://files.slack.com/files-pri/T1-F1/spec.pdf",
+                }
+            ],
+        }
+    )
+
+    assert message.role == MessageRole.USER
+    assert message.metadata == {}
+
+
 def test_is_transcription_request_rejects_non_command_keyword_mentions() -> None:
     """Verify keyword-only mentions do not hijack normal assistant questions.
 
@@ -518,6 +547,133 @@ def test_is_transcription_request_rejects_non_command_keyword_mentions() -> None
         agent_routing._is_transcription_request("how do transcription factors work?")
         is False
     )
+
+
+@pytest.mark.asyncio
+async def test_download_thread_transcription_media_attachment_rejects_oversized_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify transcription downloads stop when the streamed payload exceeds the size cap.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub the streaming HTTP client.
+
+    Returns:
+        None.
+    """
+
+    class FakeStreamingResponse:
+        """Fake streaming HTTP response for transcription download tests."""
+
+        def __init__(self, chunks: list[bytes]) -> None:
+            """Store deterministic response chunks for the test.
+
+            Args:
+                chunks: Ordered byte chunks yielded by `aiter_bytes`.
+
+            Returns:
+                None.
+            """
+            self.headers = {"content-type": "audio/wav"}
+            self._chunks = chunks
+
+        async def __aenter__(self) -> FakeStreamingResponse:
+            """Enter the async context manager.
+
+            Returns:
+                This fake response.
+            """
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            """Exit the async context manager.
+
+            Args:
+                *args: Unused context manager arguments.
+
+            Returns:
+                None.
+            """
+            del args
+
+        def raise_for_status(self) -> None:
+            """Pretend the HTTP response succeeded.
+
+            Returns:
+                None.
+            """
+
+        async def aiter_bytes(self) -> Any:
+            """Yield deterministic streamed chunks.
+
+            Yields:
+                Next chunk from the fake response body.
+            """
+            for chunk in self._chunks:
+                yield chunk
+
+    class FakeStreamingClient:
+        """Fake async HTTP client used to stub streamed media downloads."""
+
+        async def __aenter__(self) -> FakeStreamingClient:
+            """Enter the async context manager.
+
+            Returns:
+                This fake client.
+            """
+            return self
+
+        async def __aexit__(self, *args: Any) -> None:
+            """Exit the async context manager.
+
+            Args:
+                *args: Unused context manager arguments.
+
+            Returns:
+                None.
+            """
+            del args
+
+        def stream(
+            self,
+            method: str,
+            url: str,
+            *,
+            headers: Mapping[str, str],
+        ) -> FakeStreamingResponse:
+            """Return a deterministic streaming response for the requested media.
+
+            Args:
+                method: HTTP method used by the downloader.
+                url: Requested media URL.
+                headers: Authorization headers used by the downloader.
+
+            Returns:
+                Fake streaming response that exceeds the configured size cap.
+            """
+            assert method == "GET"
+            assert url == "https://files.slack.com/files-pri/T1-F1/meeting.wav"
+            assert headers["Authorization"] == "Bearer xoxb-test-token"
+            return FakeStreamingResponse(
+                [
+                    b"a" * agent_routing._MAX_REFERENCE_AUDIO_BYTES,
+                    b"b",
+                ]
+            )
+
+    monkeypatch.setattr(
+        agent_routing.httpx, "AsyncClient", lambda **_: FakeStreamingClient()
+    )
+
+    with pytest.raises(agent_routing.SlackAudioDownloadError):
+        await agent_routing._download_thread_transcription_media_attachment(
+            cast(agent_routing.SlackConversationsClient, FakeSlackClient()),
+            {
+                "download_url": "https://files.slack.com/files-pri/T1-F1/meeting.wav",
+                "media_type": "audio/wav",
+                "filename": "meeting.wav",
+            },
+        )
 
 
 @pytest.mark.asyncio
@@ -1035,6 +1191,159 @@ async def test_handle_agent_mention_starts_background_transcription_for_audio_re
             "thread_ts": "1712345678.000100",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_transcribes_audio_when_thread_contains_unrelated_file_share(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify unrelated file shares do not block thread transcription.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub background execution.
+
+    Returns:
+        None.
+    """
+
+    class FakeTranscriptionService:
+        """Fake transcription service returning a deterministic response."""
+
+        def transcribe_bytes(self, **_: Any) -> TranscriptionResponse:
+            """Return a deterministic transcription response for routing tests.
+
+            Args:
+                **_: Unused keyword arguments.
+
+            Returns:
+                Fixed speaker-attributed transcription payload.
+            """
+            return TranscriptionResponse(
+                segments=[
+                    TranscriptionSegment(
+                        speaker_label="Speaker 1",
+                        text="transcribed audio",
+                    )
+                ]
+            )
+
+    scheduled_tasks: list[asyncio.Task[Any]] = []
+
+    def immediate_scheduler(coro: Any) -> asyncio.Task[Any]:
+        """Schedule the background coroutine immediately for test control.
+
+        Args:
+            coro: Coroutine created by the routing layer.
+
+        Returns:
+            Created asyncio task.
+        """
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    async def fake_download_thread_transcription_media_attachment(
+        client: Any,
+        spec: Any,
+    ) -> dict[str, str | bytes]:
+        """Return deterministic audio bytes for transcription routing tests.
+
+        Args:
+            client: Slack client received by the routing layer.
+            spec: Media descriptor selected from the thread.
+
+        Returns:
+            Fake audio payload mapping.
+        """
+        del client
+        assert spec["filename"] == "meeting.wav"
+        return {
+            "data": b"audio-bytes",
+            "media_type": "audio/wav",
+            "filename": "meeting.wav",
+        }
+
+    monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
+    monkeypatch.setattr(
+        agent_routing,
+        "_build_transcription_service",
+        lambda: FakeTranscriptionService(),
+    )
+    monkeypatch.setattr(
+        agent_routing,
+        "_download_thread_transcription_media_attachment",
+        fake_download_thread_transcription_media_attachment,
+    )
+    responder = SayResponder()
+    repository = StubSlackAgentRepository()
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "subtype": "file_share",
+                        "text": "<@Ubot> 文字起こしして",
+                        "files": [
+                            {
+                                "name": "spec.pdf",
+                                "title": "spec",
+                                "mimetype": "application/pdf",
+                                "url_private_download": "https://files.slack.com/files-pri/T1-F1/spec.pdf",
+                            }
+                        ],
+                    },
+                    {
+                        "ts": "1712345679.000100",
+                        "user": "U2",
+                        "subtype": "file_share",
+                        "text": "audio upload",
+                        "files": [
+                            {
+                                "name": "meeting.wav",
+                                "title": "meeting",
+                                "mimetype": "audio/wav",
+                                "url_private_download": "https://files.slack.com/files-pri/T1-F1/meeting.wav",
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> 文字起こしして",
+        },
+        responder,
+        cast(agent_routing.SlackConversationsClient, client),
+        repository=repository,
+    )
+    await asyncio.gather(*scheduled_tasks)
+
+    assert responder.calls == []
+    assert client.post_calls[-1] == {
+        "channel": "C123",
+        "text": agent_routing.build_transcription_response_message(
+            TranscriptionResponse(
+                segments=[
+                    TranscriptionSegment(
+                        speaker_label="Speaker 1",
+                        text="transcribed audio",
+                    )
+                ]
+            ),
+            filename="meeting.wav",
+        ),
+        "thread_ts": "1712345678.000100",
+    }
 
 
 @pytest.mark.asyncio

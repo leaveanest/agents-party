@@ -546,28 +546,43 @@ async def _download_thread_transcription_media_attachment(
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as http_client:
         try:
-            response = await http_client.get(
+            async with http_client.stream(
+                "GET",
                 download_url,
                 headers=_build_slack_download_headers(
                     download_url, client.token.strip()
                 ),
-            )
-            response.raise_for_status()
+            ) as response:
+                response.raise_for_status()
+                media_type = (
+                    str(spec.get("media_type") or "").strip()
+                    or response.headers.get("content-type", "").split(";", 1)[0].strip()
+                )
+                if not (
+                    media_type.startswith("audio/") or media_type.startswith("video/")
+                ):
+                    raise SlackAudioDownloadError(
+                        "Slack attachment was not an audio or video payload."
+                    )
+
+                data_buffer = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if not chunk:
+                        continue
+                    data_buffer.extend(chunk)
+                    if len(data_buffer) > _MAX_REFERENCE_AUDIO_BYTES:
+                        raise SlackAudioDownloadError(
+                            "Slack audio or video attachment was empty or too large."
+                        )
         except httpx.HTTPError as exc:
             raise SlackAudioDownloadError(
                 "Slack transcription media download failed."
             ) from exc
+        except SlackAudioDownloadError:
+            raise
 
-    media_type = (
-        str(spec.get("media_type") or "").strip()
-        or response.headers.get("content-type", "").split(";", 1)[0].strip()
-    )
-    data = response.content
-    if not (media_type.startswith("audio/") or media_type.startswith("video/")):
-        raise SlackAudioDownloadError(
-            "Slack attachment was not an audio or video payload."
-        )
-    if not data or len(data) > _MAX_REFERENCE_AUDIO_BYTES:
+    data = bytes(data_buffer)
+    if not data:
         raise SlackAudioDownloadError(
             "Slack audio or video attachment was empty or too large."
         )
@@ -1224,9 +1239,7 @@ def _normalize_thread_message(message: Mapping[str, Any]) -> ThreadMessage:
         subtype is not None
         and subtype not in _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES
         and not (
-            subtype in _SUPPORTED_USER_THREAD_MESSAGE_SUBTYPES
-            and user_id is not None
-            and (image_metadata or transcription_media_metadata)
+            subtype in _SUPPORTED_USER_THREAD_MESSAGE_SUBTYPES and user_id is not None
         )
     ):
         raise SlackThreadHistoryError(
