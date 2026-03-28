@@ -1840,6 +1840,17 @@ async def handle_agent_mention(
         )
         return
 
+    resolved_repository = repository or _build_repository()
+    if resolved_repository is None or not resolved_repository.is_channel_enabled(
+        team_id=invocation.team_id,
+        channel_id=invocation.channel_id,
+    ):
+        await say(
+            text=build_agent_unconfigured_message(invocation.user_id),
+            thread_ts=invocation.thread_ts,
+        )
+        return
+
     if _is_transcription_request(invocation.text):
         _schedule_background_task(
             _run_transcription_request(
@@ -1852,7 +1863,7 @@ async def handle_agent_mention(
     response_text = await invoke_routed_agent(
         invocation,
         client=client,
-        repository=repository,
+        repository=resolved_repository,
         work_item_repository=work_item_repository,
     )
     if response_text.strip():

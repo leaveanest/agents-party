@@ -869,6 +869,7 @@ async def test_handle_agent_mention_starts_background_transcription_for_audio_re
         fake_download_thread_transcription_media_attachment,
     )
     responder = SayResponder()
+    repository = StubSlackAgentRepository()
     client = FakeSlackClient(
         [
             {
@@ -902,6 +903,7 @@ async def test_handle_agent_mention_starts_background_transcription_for_audio_re
         },
         responder,
         client,
+        repository=repository,
     )
     await asyncio.gather(*scheduled_tasks)
 
@@ -932,6 +934,64 @@ async def test_handle_agent_mention_starts_background_transcription_for_audio_re
             "thread_ts": "1712345678.000100",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_returns_unconfigured_for_disabled_channel_transcription_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify disabled channels block transcription requests before background work starts.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to assert scheduler non-execution.
+
+    Returns:
+        None.
+    """
+
+    def fail_schedule_background_task(_: Any) -> Any:
+        """Fail the test if transcription scheduling is attempted.
+
+        Args:
+            _: Unused coroutine argument.
+
+        Returns:
+            Never returns because the function always raises.
+
+        Raises:
+            AssertionError: Raised whenever scheduling is attempted.
+        """
+        raise AssertionError("_schedule_background_task should not run")
+
+    monkeypatch.setattr(
+        agent_routing,
+        "_schedule_background_task",
+        fail_schedule_background_task,
+    )
+    responder = SayResponder()
+    repository = StubSlackAgentRepository(channel_enabled=False)
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> 文字起こしして",
+        },
+        responder,
+        repository=repository,
+    )
+
+    assert responder.calls == [
+        {
+            "text": "The Slack agent router is not enabled for this workspace or channel.\n"
+            + agent_routing.build_agent_help_message("U1"),
+            "thread_ts": "1712345678.000100",
+            "blocks": None,
+        }
+    ]
+    assert repository.activate_calls == []
 
 
 @pytest.mark.asyncio
@@ -1018,6 +1078,7 @@ async def test_handle_agent_mention_starts_background_transcription_for_video_re
         fake_download_thread_transcription_media_attachment,
     )
     responder = SayResponder()
+    repository = StubSlackAgentRepository()
     client = FakeSlackClient(
         [
             {
@@ -1051,6 +1112,7 @@ async def test_handle_agent_mention_starts_background_transcription_for_video_re
         },
         responder,
         client,
+        repository=repository,
     )
     await asyncio.gather(*scheduled_tasks)
 
@@ -1102,6 +1164,7 @@ async def test_handle_agent_mention_reports_missing_thread_audio_for_transcripti
     monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
     monkeypatch.setattr(agent_routing, "_build_transcription_service", lambda: object())
     responder = SayResponder()
+    repository = StubSlackAgentRepository()
     client = FakeSlackClient(
         [
             {
@@ -1127,6 +1190,7 @@ async def test_handle_agent_mention_reports_missing_thread_audio_for_transcripti
         },
         responder,
         client,
+        repository=repository,
     )
     await asyncio.gather(*scheduled_tasks)
 
@@ -1168,6 +1232,7 @@ async def test_handle_agent_mention_reports_unconfigured_transcription(
     monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
     monkeypatch.setattr(agent_routing, "_build_transcription_service", lambda: None)
     responder = SayResponder()
+    repository = StubSlackAgentRepository()
     client = FakeSlackClient(
         [
             {
@@ -1201,6 +1266,7 @@ async def test_handle_agent_mention_reports_unconfigured_transcription(
         },
         responder,
         client,
+        repository=repository,
     )
     await asyncio.gather(*scheduled_tasks)
 
@@ -1282,6 +1348,7 @@ async def test_handle_agent_mention_reports_transcription_download_failure(
         fail_download_thread_transcription_media_attachment,
     )
     responder = SayResponder()
+    repository = StubSlackAgentRepository()
     client = FakeSlackClient(
         [
             {
@@ -1315,6 +1382,7 @@ async def test_handle_agent_mention_reports_transcription_download_failure(
         },
         responder,
         client,
+        repository=repository,
     )
     await asyncio.gather(*scheduled_tasks)
 
