@@ -420,6 +420,72 @@ def test_normalize_thread_message_preserves_image_metadata() -> None:
     }
 
 
+def test_normalize_thread_message_preserves_file_share_transcription_media_metadata() -> (
+    None
+):
+    """Verify Slack file-share thread messages retain transcription media metadata.
+
+    Returns:
+        None.
+    """
+    message = agent_routing._normalize_thread_message(
+        {
+            "ts": "1712345678.000100",
+            "user": "U1",
+            "subtype": "file_share",
+            "text": "Please transcribe this upload",
+            "files": [
+                {
+                    "name": "meeting.wav",
+                    "title": "meeting",
+                    "mimetype": "audio/wav",
+                    "url_private_download": "https://files.slack.com/files-pri/T1-F1/meeting.wav",
+                }
+            ],
+        }
+    )
+
+    assert message.role == MessageRole.USER
+    assert message.metadata == {
+        "slack_transcription_media": [
+            {
+                "source": "file",
+                "title": "meeting",
+                "mime_type": "audio/wav",
+                "download_url": "https://files.slack.com/files-pri/T1-F1/meeting.wav",
+                "filename": "meeting.wav",
+            }
+        ]
+    }
+
+
+def test_is_transcription_request_rejects_non_command_keyword_mentions() -> None:
+    """Verify keyword-only mentions do not hijack normal assistant questions.
+
+    Returns:
+        None.
+    """
+    assert agent_routing._is_transcription_request("文字起こしして") is True
+    assert (
+        agent_routing._is_transcription_request("please transcribe this thread") is True
+    )
+    assert (
+        agent_routing._is_transcription_request("transcribe the latest audio") is True
+    )
+    assert (
+        agent_routing._is_transcription_request("could you transcribe this thread?")
+        is True
+    )
+    assert (
+        agent_routing._is_transcription_request("tell me about transcription factors")
+        is False
+    )
+    assert (
+        agent_routing._is_transcription_request("how do transcription factors work?")
+        is False
+    )
+
+
 @pytest.mark.asyncio
 async def test_download_thread_reference_images_downloads_binary_images(
     monkeypatch: pytest.MonkeyPatch,
@@ -878,6 +944,7 @@ async def test_handle_agent_mention_starts_background_transcription_for_audio_re
                     {
                         "ts": "1712345678.000100",
                         "user": "U1",
+                        "subtype": "file_share",
                         "text": "<@Ubot> 文字起こしして",
                         "files": [
                             {
@@ -933,6 +1000,75 @@ async def test_handle_agent_mention_starts_background_transcription_for_audio_re
             ),
             "thread_ts": "1712345678.000100",
         },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_routes_non_command_transcription_keyword_to_assistant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify transcription-related nouns still route to the main assistant path.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub routed execution.
+
+    Returns:
+        None.
+    """
+
+    def fail_schedule_background_task(_: Any) -> Any:
+        """Fail the test if transcription scheduling is attempted.
+
+        Args:
+            _: Unused coroutine argument.
+
+        Returns:
+            Never returns because the function always raises.
+
+        Raises:
+            AssertionError: Raised whenever scheduling is attempted.
+        """
+        raise AssertionError("_schedule_background_task should not run")
+
+    async def fake_invoke_routed_agent(*_: Any, **__: Any) -> str:
+        """Return a deterministic assistant response for non-command keyword mentions.
+
+        Args:
+            *_: Unused positional arguments.
+            **__: Unused keyword arguments.
+
+        Returns:
+            Deterministic assistant response text.
+        """
+        return "assistant route"
+
+    monkeypatch.setattr(
+        agent_routing,
+        "_schedule_background_task",
+        fail_schedule_background_task,
+    )
+    monkeypatch.setattr(agent_routing, "invoke_routed_agent", fake_invoke_routed_agent)
+    responder = SayResponder()
+    repository = StubSlackAgentRepository()
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> tell me about transcription factors",
+        },
+        responder,
+        repository=repository,
+    )
+
+    assert responder.calls == [
+        {
+            "text": "assistant route",
+            "thread_ts": "1712345678.000100",
+            "blocks": None,
+        }
     ]
 
 

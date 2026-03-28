@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from importlib import import_module
 from urllib.parse import urlparse
@@ -31,10 +32,23 @@ from agents_party.repositories import SlackAgentRepository, WorkItemRepository
 
 logger = logging.getLogger(__name__)
 _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES = frozenset({"bot_message"})
+_SUPPORTED_USER_THREAD_MESSAGE_SUBTYPES = frozenset({"file_share"})
 _MAX_REFERENCE_IMAGES = 3
 _MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024
 _MAX_REFERENCE_AUDIO_BYTES = 100 * 1024 * 1024
-_TRANSCRIPTION_KEYWORDS = ("文字起こし", "transcribe", "transcription")
+_TRANSCRIPTION_COMMAND_PATTERNS = (
+    re.compile(
+        r"文字起こし(?:\s*(?:して|してください|して下さい|お願い(?:します)?|頼む))?(?:$|[\s.!！。?？])"
+    ),
+    re.compile(r"^(?:please\s+)?transcribe\b(?:[\s.!?].*)?$"),
+    re.compile(r"\b(?:can|could|would)\s+you\s+transcribe\b(?:[\s.!?].*)?$"),
+    re.compile(
+        r"^(?:please\s+)?(?:run|get|create|make|start)\s+(?:a\s+)?transcription"
+        r"(?:\s+for\s+(?:this|that|it|thread|audio|video|file|meeting|recording|attachment))?"
+        r"(?:\s+please)?[.!?]?$"
+    ),
+    re.compile(r"^(?:please\s+)?transcription(?:\s+please)?[.!?]?$"),
+)
 
 
 class SayResponder(Protocol):
@@ -1072,7 +1086,10 @@ def _is_transcription_request(text: str) -> bool:
         `True` when the request clearly asks for transcription.
     """
     normalized = text.casefold()
-    return any(keyword in normalized for keyword in _TRANSCRIPTION_KEYWORDS)
+    return any(
+        pattern.search(normalized) is not None
+        for pattern in _TRANSCRIPTION_COMMAND_PATTERNS
+    )
 
 
 def _build_agent_invocation(
@@ -1187,20 +1204,26 @@ def _normalize_thread_message(message: Mapping[str, Any]) -> ThreadMessage:
     Raises:
         SlackThreadHistoryError: If the message cannot be mapped safely.
     """
-    subtype = _optional_text_field(message, "subtype")
-    if subtype is not None and subtype not in _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES:
-        raise SlackThreadHistoryError(
-            f"Unsupported Slack message subtype in thread history: {subtype}"
-        )
-
     ts = _require_text_field(message, "ts")
     text = _optional_text_field(message, "text") or ""
     user_id = _optional_text_field(message, "user")
     bot_id = _optional_text_field(message, "bot_id")
     app_id = _optional_text_field(message, "app_id")
-
     image_metadata = _extract_slack_image_metadata(message)
     transcription_media_metadata = _extract_slack_transcription_media_metadata(message)
+    subtype = _optional_text_field(message, "subtype")
+    if (
+        subtype is not None
+        and subtype not in _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES
+        and not (
+            subtype in _SUPPORTED_USER_THREAD_MESSAGE_SUBTYPES
+            and user_id is not None
+            and (image_metadata or transcription_media_metadata)
+        )
+    ):
+        raise SlackThreadHistoryError(
+            f"Unsupported Slack message subtype in thread history: {subtype}"
+        )
 
     if (
         subtype in _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES
