@@ -477,6 +477,10 @@ def test_is_transcription_request_rejects_non_command_keyword_mentions() -> None
         is True
     )
     assert (
+        agent_routing._is_transcription_request("what can you transcribe in Slack?")
+        is False
+    )
+    assert (
         agent_routing._is_transcription_request("tell me about transcription factors")
         is False
     )
@@ -1066,6 +1070,62 @@ async def test_handle_agent_mention_routes_non_command_transcription_keyword_to_
     assert responder.calls == [
         {
             "text": "assistant route",
+            "thread_ts": "1712345678.000100",
+            "blocks": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_reports_thread_context_error_for_transcription_without_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify transcription requests fail visibly when no Slack client is available.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to assert scheduler non-execution.
+
+    Returns:
+        None.
+    """
+
+    def fail_schedule_background_task(_: Any) -> Any:
+        """Fail the test if transcription scheduling is attempted.
+
+        Args:
+            _: Unused coroutine argument.
+
+        Returns:
+            Never returns because the function always raises.
+
+        Raises:
+            AssertionError: Raised whenever scheduling is attempted.
+        """
+        raise AssertionError("_schedule_background_task should not run")
+
+    monkeypatch.setattr(
+        agent_routing,
+        "_schedule_background_task",
+        fail_schedule_background_task,
+    )
+    responder = SayResponder()
+    repository = StubSlackAgentRepository()
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> 文字起こしして",
+        },
+        responder,
+        repository=repository,
+    )
+
+    assert responder.calls == [
+        {
+            "text": agent_routing.build_thread_context_error_message("U1"),
             "thread_ts": "1712345678.000100",
             "blocks": None,
         }

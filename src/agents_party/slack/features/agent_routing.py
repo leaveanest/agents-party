@@ -41,7 +41,7 @@ _TRANSCRIPTION_COMMAND_PATTERNS = (
         r"文字起こし(?:\s*(?:して|してください|して下さい|お願い(?:します)?|頼む))?(?:$|[\s.!！。?？])"
     ),
     re.compile(r"^(?:please\s+)?transcribe\b(?:[\s.!?].*)?$"),
-    re.compile(r"\b(?:can|could|would)\s+you\s+transcribe\b(?:[\s.!?].*)?$"),
+    re.compile(r"^(?:can|could|would)\s+you\s+transcribe\b(?:[\s.!?].*)?$"),
     re.compile(
         r"^(?:please\s+)?(?:run|get|create|make|start)\s+(?:a\s+)?transcription"
         r"(?:\s+for\s+(?:this|that|it|thread|audio|video|file|meeting|recording|attachment))?"
@@ -1534,7 +1534,7 @@ def _log_background_task_error(task: asyncio.Task[Any]) -> None:
 async def _run_transcription_request(
     invocation: SlackAgentInvocation,
     *,
-    client: SlackConversationsClient | None,
+    client: SlackConversationsClient,
 ) -> None:
     """Execute a thread transcription request outside the Slack ack path.
 
@@ -1546,7 +1546,7 @@ async def _run_transcription_request(
         None.
     """
     thread_ts = invocation.thread_ts or invocation.message_ts
-    if client is None or thread_ts is None:
+    if thread_ts is None:
         return
 
     await client.chat_postMessage(
@@ -1875,6 +1875,12 @@ async def handle_agent_mention(
         return
 
     if _is_transcription_request(invocation.text):
+        if client is None:
+            await say(
+                text=build_thread_context_error_message(invocation.user_id),
+                thread_ts=invocation.thread_ts,
+            )
+            return
         _schedule_background_task(
             _run_transcription_request(
                 invocation,
