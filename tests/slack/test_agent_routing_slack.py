@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pydantic_ai import BinaryContent, BinaryImage
@@ -198,6 +198,36 @@ class FakeSlackClient:
         if self._error is not None:
             raise self._error
         return {"ok": True, "file": {"id": "F123"}}
+
+
+def test_build_agent_help_message_mentions_maps_capabilities() -> None:
+    """Verify the generic help message advertises Google Maps support.
+
+    Returns:
+        None.
+    """
+    message = agent_routing.build_agent_help_message("U1")
+
+    assert "place and route lookup" in message
+    assert "`@agents-party 新宿駅近くのカフェを探して`" in message
+
+
+def test_build_thread_menu_blocks_include_maps_example() -> None:
+    """Verify the empty-mention menu includes a Google Maps example.
+
+    Returns:
+        None.
+    """
+    blocks = agent_routing.build_thread_menu_blocks("U1")
+
+    menu_texts = [
+        field["text"]
+        for block in blocks
+        if block.get("type") == "section"
+        for field in block.get("fields", [])
+    ]
+
+    assert any("東京駅から渋谷駅までのルート" in text for text in menu_texts)
 
 
 class StubSlackAgentRepository:
@@ -558,7 +588,7 @@ async def test_download_thread_reference_images_downloads_binary_images(
     )
 
     reference_images = await agent_routing._download_thread_reference_images(
-        FakeSlackClient(),
+        cast(agent_routing.SlackConversationsClient, FakeSlackClient()),
         [
             ThreadMessage(
                 ts="1712345678.000100",
@@ -657,7 +687,7 @@ async def test_handle_agent_mention_runs_agent_router_and_activates_thread(
             "text": "<@Ubot> mark the checklist complete",
         },
         responder,
-        client,
+        cast(agent_routing.SlackConversationsClient, client),
         repository=repository,
     )
 
@@ -757,7 +787,7 @@ async def test_handle_agent_message_routes_active_thread_follow_up(
             "text": "please also tag finance",
         },
         responder,
-        client,
+        cast(agent_routing.SlackConversationsClient, client),
         bot_user_id="Ubot",
         repository=repository,
     )
@@ -1697,7 +1727,7 @@ async def test_handle_agent_mention_uploads_generated_image_into_thread(
             "text": "<@Ubot> generate a fox poster",
         },
         responder,
-        client,
+        cast(agent_routing.SlackConversationsClient, client),
         repository=repository,
     )
 
@@ -1780,7 +1810,7 @@ async def test_handle_agent_mention_uploads_generated_video_into_thread(
             "text": "<@Ubot> create a teaser video",
         },
         responder,
-        client,
+        cast(agent_routing.SlackConversationsClient, client),
         repository=repository,
     )
 
@@ -1906,7 +1936,7 @@ async def test_invoke_routed_agent_returns_context_error_for_unsupported_thread_
             "thread_ts": "1712345678.000100",
             "message_ts": "1712345678.000100",
         },
-        client=client,
+        client=cast(agent_routing.SlackConversationsClient, client),
         repository=repository,
     )
 
@@ -1968,7 +1998,7 @@ async def test_handle_translation_reaction_translates_flagged_message(
                 "ts": "1712345678.000100",
             },
         },
-        client=client,
+        client=cast(agent_routing.SlackConversationsClient, client),
     )
 
     assert client.post_calls == [

@@ -32,6 +32,22 @@ class Settings(BaseSettings):
         default=None,
         alias="WEB_RESEARCH_MODEL",
     )
+    google_maps_api_key: SecretStr | None = Field(
+        default=None,
+        alias="GOOGLE_MAPS_API_KEY",
+    )
+    google_maps_model: str | None = Field(
+        default=None,
+        alias="GOOGLE_MAPS_MODEL",
+    )
+    google_maps_language_code: str = Field(
+        default="ja",
+        alias="GOOGLE_MAPS_LANGUAGE_CODE",
+    )
+    google_maps_region_code: str = Field(
+        default="JP",
+        alias="GOOGLE_MAPS_REGION_CODE",
+    )
 
     slack_bot_token: str | None = Field(default=None, alias="SLACK_BOT_TOKEN")
     slack_signing_secret: str | None = Field(default=None, alias="SLACK_SIGNING_SECRET")

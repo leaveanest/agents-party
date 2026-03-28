@@ -5,8 +5,15 @@ from pathlib import Path
 from pydantic_ai_skills import Skill, SkillsDirectory, SkillsToolset
 
 EXPECTED_BUILTIN_SKILL_NAMES = {
+    "airport-transfer-planner",
+    "area-safety-and-convenience-checker",
+    "budget-stay-optimizer",
     "dispatch-triage",
+    "family-stay-advisor",
     "handover-brief-builder",
+    "itinerary-gap-checker",
+    "lodging-search-advisor",
+    "meeting-location-advisor",
     "shipper-communication-drafter",
     "web-research-analyst",
 }

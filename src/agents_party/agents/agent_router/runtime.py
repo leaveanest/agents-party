@@ -9,6 +9,11 @@ from typing import Literal, cast
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models import KnownModelName, Model
 
+from agents_party.agents.google_maps import (
+    GoogleMapsInvocation,
+    render_google_maps_response,
+    run_google_maps,
+)
 from agents_party.agents.image_generation import (
     ImageGenerationInvocation,
     run_image_generation,
@@ -44,6 +49,8 @@ You are the public Slack-facing agent router for this application.
 You may answer greetings, general help, and lightweight conversation directly.
 When the request clearly needs specialist execution, call one or more specialist tools
 as subroutines and then return one concise final Slack-ready response.
+Prefer specialist delegation for location lookups, nearby search, route search,
+and travel-time requests instead of answering those from general knowledge.
 """
 
 AGENT_ROUTER_ORCHESTRATION_SECTION = """
@@ -62,9 +69,9 @@ When orchestrating, synthesize the specialist outcomes into one concise Slack-re
 
 AGENT_ROUTER_DIRECT_HELP = (
     "I can help with general questions, task management, web research, "
-    "translation, image generation, and video generation.\n"
+    "Google Maps lookups, translation, image generation, and video generation.\n"
     "Try asking me to summarize what you need, verify a current fact, "
-    "translate part of the thread, or create an image or video."
+    "find a place or route, translate part of the thread, or create an image or video."
 )
 
 
@@ -136,6 +143,47 @@ async def _run_web_research_specialist(
     return SpecialistOutcome(
         specialist_id="web-research",
         message=render_web_research_response(result),
+        follow_up_question=result.follow_up_question,
+    )
+
+
+async def _run_google_maps_specialist(
+    deps: AgentRouterDeps,
+) -> SpecialistOutcome:
+    """Run the Google Maps specialist and normalize its outcome.
+
+    Args:
+        deps: Current router dependencies and invocation context.
+
+    Returns:
+        Normalized specialist outcome for Google Maps execution.
+    """
+    if settings.google_maps_api_key is None:
+        return SpecialistOutcome(
+            specialist_id="google-maps",
+            message=(
+                "Google Maps lookup is not configured for this workspace yet, "
+                "so I cannot run place or route searches right now."
+            ),
+        )
+
+    try:
+        result = await run_google_maps(
+            GoogleMapsInvocation.model_validate(
+                deps.invocation.model_dump(mode="python")
+            )
+        )
+    except ValueError:
+        return SpecialistOutcome(
+            specialist_id="google-maps",
+            message=(
+                "Google Maps lookup is not configured for this workspace yet, "
+                "so I cannot run place or route searches right now."
+            ),
+        )
+    return SpecialistOutcome(
+        specialist_id="google-maps",
+        message=render_google_maps_response(result),
         follow_up_question=result.follow_up_question,
     )
 
@@ -234,6 +282,16 @@ SPECIALIST_REGISTRY: tuple[SpecialistSpec, ...] = (
         ),
         media_kind="text",
         runner=_run_web_research_specialist,
+    ),
+    SpecialistSpec(
+        specialist_id="google-maps",
+        tool_name="delegate_google_maps",
+        description=(
+            "Use for place search, address and facility details, nearby search, "
+            "route lookup, and travel-time questions."
+        ),
+        media_kind="text",
+        runner=_run_google_maps_specialist,
     ),
     SpecialistSpec(
         specialist_id="translation",

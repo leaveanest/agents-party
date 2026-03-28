@@ -15,6 +15,11 @@ from agents_party.infrastructure.transcription import (
     TranscriptionResponse,
     TranscriptionSegment,
 )
+from agents_party.infrastructure.google_maps import (
+    GoogleMapsClientError,
+    GoogleMapsClientProtocol,
+    HttpxGoogleMapsClient,
+)
 from agents_party.infrastructure.translation import (
     CloudTranslationError,
     CloudTranslationService,
@@ -31,7 +36,10 @@ __all__ = [
     "GoogleOAuthContextSigner",
     "GoogleOAuthContextSignerError",
     "GoogleOAuthGatewayError",
+    "GoogleMapsClientError",
+    "GoogleMapsClientProtocol",
     "HttpxGoogleOAuthGateway",
+    "HttpxGoogleMapsClient",
     "TokenCipherError",
     "TranscriptionResponse",
     "TranscriptionSegment",
