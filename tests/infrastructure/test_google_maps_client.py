@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -173,6 +173,44 @@ async def test_compute_route_normalizes_route_result() -> None:
     assert route.google_maps_uri is not None
     assert "origin=%E6%9D%B1%E4%BA%AC%E9%A7%85" in route.google_maps_uri
     assert "destination=%E6%B8%8B%E8%B0%B7%E9%A7%85" in route.google_maps_uri
+
+
+@pytest.mark.asyncio
+async def test_compute_route_defaults_unknown_travel_mode_to_driving() -> None:
+    """Verify unknown travel modes are normalized to driving consistently.
+
+    Returns:
+        None.
+    """
+    http_client = FakeAsyncClient(
+        responses=[
+            httpx.Response(
+                200,
+                request=httpx.Request(
+                    "POST",
+                    "https://routes.googleapis.com/directions/v2:computeRoutes",
+                ),
+                json={
+                    "routes": [
+                        {
+                            "distanceMeters": 7200,
+                            "duration": "1080s",
+                            "description": "首都高速経由",
+                        }
+                    ]
+                },
+            )
+        ]
+    )
+    client = HttpxGoogleMapsClient(api_key="test-key", http_client=http_client)  # type: ignore[arg-type]
+
+    route = await client.compute_route("東京駅", "渋谷駅", travel_mode="train")
+
+    assert route.travel_mode == "driving"
+    assert route.google_maps_uri is not None
+    assert "travelmode=driving" in route.google_maps_uri
+    body = cast(dict[str, Any], http_client.calls[0]["json"])
+    assert body["travelMode"] == "DRIVE"
 
 
 @pytest.mark.asyncio

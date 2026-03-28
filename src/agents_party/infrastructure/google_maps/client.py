@@ -432,6 +432,7 @@ def _canonical_travel_mode(travel_mode: str) -> str:
     return {
         "drive": "driving",
         "driving": "driving",
+        "car": "driving",
         "walk": "walking",
         "walking": "walking",
         "bicycle": "bicycling",
@@ -441,7 +442,7 @@ def _canonical_travel_mode(travel_mode: str) -> str:
         "public_transit": "transit",
         "two_wheeler": "two_wheeler",
         "motorcycle": "two_wheeler",
-    }.get(travel_mode.strip().lower(), travel_mode.strip().lower() or "driving")
+    }.get(travel_mode.strip().lower(), "driving")
 
 
 def _normalize_travel_mode(travel_mode: str) -> str:
