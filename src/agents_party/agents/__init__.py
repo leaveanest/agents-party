@@ -1,5 +1,14 @@
 """Public exports for repository agent packages and shared helpers."""
 
+from agents_party.agents.agent_router import (
+    AgentRouterAction,
+    AgentRouterDeps,
+    AgentRouterResult,
+    build_agent_router_agent,
+    build_agent_router_instructions,
+    build_agent_router_prompt,
+    run_agent_router,
+)
 from agents_party.agents.image_generation import (
     DEFAULT_IMAGE_GENERATION_MODEL,
     ImageGenerationInvocation,
@@ -21,15 +30,6 @@ from agents_party.agents.skills import (
     builtin_skills_path,
     load_builtin_skills,
     repository_root,
-)
-from agents_party.agents.slack_assistant import (
-    SlackAssistantAction,
-    SlackAssistantDeps,
-    SlackAssistantResult,
-    build_slack_assistant_agent,
-    build_slack_assistant_instructions,
-    build_slack_assistant_prompt,
-    run_slack_assistant,
 )
 from agents_party.agents.slack_runtime import SlackAgentInvocation, SlackReferenceImage
 from agents_party.agents.translation import (
@@ -83,6 +83,9 @@ from agents_party.agents.work_manager import (
 )
 
 __all__ = [
+    "AgentRouterAction",
+    "AgentRouterDeps",
+    "AgentRouterResult",
     "DEFAULT_IMAGE_GENERATION_MODEL",
     "DEFAULT_TRANSLATION_MODEL",
     "DEFAULT_VIDEO_GENERATION_MODEL",
@@ -94,9 +97,6 @@ __all__ = [
     "ResolvedAgentModel",
     "SlackAgentInvocation",
     "SlackReferenceImage",
-    "SlackAssistantAction",
-    "SlackAssistantDeps",
-    "SlackAssistantResult",
     "TranslationAction",
     "TranslationInvocation",
     "TranslationResult",
@@ -111,14 +111,14 @@ __all__ = [
     "WorkManagerPreparedRequest",
     "WorkManagerRequestContext",
     "WorkManagerResult",
+    "build_agent_router_agent",
+    "build_agent_router_instructions",
+    "build_agent_router_prompt",
     "build_image_generation_agent",
     "build_image_generation_instructions",
     "build_image_generation_prompt",
     "build_image_generation_user_prompt",
     "build_builtin_skills_toolset",
-    "build_slack_assistant_agent",
-    "build_slack_assistant_instructions",
-    "build_slack_assistant_prompt",
     "build_translation_agent",
     "build_translation_instructions",
     "build_translation_prompt",
@@ -142,8 +142,8 @@ __all__ = [
     "render_web_research_response",
     "repository_root",
     "resolve_request_preparation",
+    "run_agent_router",
     "run_image_generation",
-    "run_slack_assistant",
     "run_translation",
     "run_video_generation",
     "run_web_research",

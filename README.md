@@ -1,7 +1,7 @@
 # agents-party
 
 `agents-party` is a Python Slack application built with FastAPI, Slack Bolt, `pydantic-ai`, and Firestore.
-It is intended to orchestrate agent-based workflows inside Slack.
+It is intended to orchestrate agent-based workflows inside Slack through a public `agent_router` entrypoint and specialized downstream agents.
 
 ## Stack
 
@@ -62,6 +62,7 @@ Set the following environment variables before using Slack integration:
 ```bash
 SLACK_BOT_TOKEN=...
 SLACK_SIGNING_SECRET=...
+AGENT_SELECTOR_MODEL=google-gla:gemini-3-flash-preview
 GOOGLE_CLOUD_PROJECT=...
 FIRESTORE_DATABASE=(default)
 ```

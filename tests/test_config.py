@@ -51,3 +51,19 @@ def test_google_oauth_callback_url_normalizes_trailing_slash() -> None:
         settings.google_oauth_callback_url
         == "https://example.com/app/oauth/google/callback"
     )
+
+
+def test_agent_selector_model_defaults_to_none() -> None:
+    """Verify the agent router requires explicit selector-model configuration."""
+    settings = Settings.model_validate({})
+
+    assert settings.agent_selector_model is None
+
+
+def test_settings_do_not_expose_legacy_slack_assistant_model() -> None:
+    """Verify the legacy Slack-assistant model setting has been removed."""
+    settings = Settings.model_validate(
+        {"SLACK_ASSISTANT_MODEL": "google-gla:gemini-3-flash-preview"}
+    )
+
+    assert hasattr(settings, "slack_assistant_model") is False

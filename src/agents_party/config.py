@@ -21,12 +21,8 @@ class Settings(BaseSettings):
     app_port: int = 8000
     default_timezone: str = Field(default="UTC", alias="DEFAULT_TIMEZONE")
     agent_selector_model: str | None = Field(
-        default="google-gla:gemini-3-flash-preview",
-        alias="AGENT_SELECTOR_MODEL",
-    )
-    slack_assistant_model: str | None = Field(
         default=None,
-        alias="SLACK_ASSISTANT_MODEL",
+        alias="AGENT_SELECTOR_MODEL",
     )
     work_manager_model: str | None = Field(
         default="google-gla:gemini-3-flash-preview",

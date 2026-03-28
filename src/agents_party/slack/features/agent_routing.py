@@ -9,7 +9,7 @@ from typing import Any, Protocol, cast
 
 import httpx
 from pydantic_ai import BinaryContent, BinaryImage
-from agents_party.agents.slack_assistant import run_slack_assistant
+from agents_party.agents.agent_router import run_agent_router
 from agents_party.agents.slack_runtime import SlackAgentInvocation, SlackReferenceImage
 from agents_party.config import settings
 from agents_party.domain import (
@@ -611,7 +611,7 @@ def _message_targets_bot(text: str, bot_user_id: str | None) -> bool:
 
 
 def build_agent_help_message(user_id: str | None = None) -> str:
-    """Build a generic help message for mention-based Slack assistant usage.
+    """Build a generic help message for mention-based Slack agent-router usage.
 
     Args:
         user_id: Optional Slack user id to mention in the help message.
@@ -622,11 +622,12 @@ def build_agent_help_message(user_id: str | None = None) -> str:
     mention = f"<@{user_id}> " if user_id else ""
     return (
         f"{mention}mention the app in a channel or thread to talk to the assistant.\n"
-        "The assistant can help with task management, web research, and translation.\n"
+        "The assistant can help with general questions, task management, web research, translation, image generation, and video generation.\n"
         "Examples:\n"
         "- `@agents-party summarize this thread`\n"
         "- `@agents-party capture follow-up actions from this discussion`\n"
-        "- `@agents-party verify the latest deployment policy`"
+        "- `@agents-party verify the latest deployment policy`\n"
+        "- `@agents-party create a mockup from this idea`"
     )
 
 
@@ -702,7 +703,7 @@ def build_thread_menu_blocks(user_id: str | None = None) -> list[dict[str, Any]]
 
 
 def build_agent_unconfigured_message(user_id: str | None = None) -> str:
-    """Build the message shown when the Slack assistant is unavailable.
+    """Build the message shown when the Slack agent router is unavailable.
 
     Args:
         user_id: Optional Slack user id to mention in the help message.
@@ -711,7 +712,7 @@ def build_agent_unconfigured_message(user_id: str | None = None) -> str:
         Slack-formatted fallback text.
     """
     return (
-        "The Slack assistant is not enabled for this workspace or channel.\n"
+        "The Slack agent router is not enabled for this workspace or channel.\n"
         f"{build_agent_help_message(user_id)}"
     )
 
@@ -1256,17 +1257,17 @@ async def invoke_routed_agent(
     repository: SlackAgentRepository | None = None,
     work_item_repository: WorkItemRepository | None = None,
 ) -> str:
-    """Fetch full thread context, run the Slack assistant, and persist thread state.
+    """Fetch full thread context, run the agent router, and persist thread state.
 
     Args:
         invocation: Raw or validated routing payload derived from Slack.
         client: Slack client used to fetch the full thread transcript and any
             downloadable reference images.
         repository: Optional repository override used for channel checks and thread state.
-        work_item_repository: Optional repository override for assistant delegation.
+        work_item_repository: Optional repository override for router delegation.
 
     Returns:
-        Slack response text produced by the assistant or a configuration fallback.
+        Slack response text produced by the router or a configuration fallback.
     """
     parsed_invocation = (
         invocation
@@ -1296,14 +1297,14 @@ async def invoke_routed_agent(
     if thread_ts is None:
         return build_thread_context_error_message(parsed_invocation.user_id)
 
-    assistant_result = await run_slack_assistant(
+    router_result = await run_agent_router(
         execution_invocation,
         work_item_repository=work_item_repository,
     )
-    response_text = getattr(assistant_result, "follow_up_question", None) or getattr(
-        assistant_result, "message", ""
+    response_text = getattr(router_result, "follow_up_question", None) or getattr(
+        router_result, "message", ""
     )
-    generated_video = getattr(assistant_result, "generated_video", None)
+    generated_video = getattr(router_result, "generated_video", None)
     if generated_video is not None:
         initial_comment = response_text.strip() or (
             f"Generated video for prompt:\n{execution_invocation.text}"
@@ -1329,7 +1330,7 @@ async def invoke_routed_agent(
             last_message_ts=thread_messages[-1].ts,
         )
         return ""
-    generated_image = getattr(assistant_result, "generated_image", None)
+    generated_image = getattr(router_result, "generated_image", None)
     if generated_image is not None:
         initial_comment = response_text.strip() or (
             f"Generated image for prompt:\n{execution_invocation.text}"

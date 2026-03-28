@@ -519,34 +519,34 @@ async def test_download_thread_reference_images_downloads_binary_images(
 
 
 @pytest.mark.asyncio
-async def test_handle_agent_mention_runs_assistant_and_activates_thread(
+async def test_handle_agent_mention_runs_agent_router_and_activates_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify explicit mentions execute the assistant and activate the thread.
+    """Verify explicit mentions execute the agent router and activate the thread.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to stub assistant execution.
+        monkeypatch: Pytest monkeypatch fixture used to stub router execution.
 
     Returns:
         None.
     """
 
-    async def fake_run_slack_assistant(invocation: Any, **_: Any) -> Any:
-        """Return a deterministic assistant result for mention routing tests.
+    async def fake_run_agent_router(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic router result for mention routing tests.
 
         Args:
             invocation: Slack invocation received from the routing layer.
             **_: Unused keyword arguments.
 
         Returns:
-            Lightweight assistant result object with a fixed message.
+            Lightweight router result object with a fixed message.
         """
         assert [message.role for message in invocation.thread_messages] == [
             MessageRole.USER
         ]
         assert invocation.reference_images == []
         return type(
-            "SlackAssistantResult",
+            "AgentRouterResult",
             (),
             {
                 "message": "Completed `checklist`.",
@@ -555,7 +555,7 @@ async def test_handle_agent_mention_runs_assistant_and_activates_thread(
             },
         )()
 
-    monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
+    monkeypatch.setattr(agent_routing, "run_agent_router", fake_run_agent_router)
     responder = SayResponder()
     repository = StubSlackAgentRepository()
     client = FakeSlackClient(
@@ -618,19 +618,19 @@ async def test_handle_agent_message_routes_active_thread_follow_up(
         None.
     """
 
-    async def fake_run_slack_assistant(invocation: Any, **_: Any) -> Any:
-        """Return a deterministic assistant result for follow-up routing tests.
+    async def fake_run_agent_router(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic router result for follow-up routing tests.
 
         Args:
             invocation: Slack invocation received from the routing layer.
             **_: Unused keyword arguments.
 
         Returns:
-            Lightweight assistant result object with a fixed message.
+            Lightweight router result object with a fixed message.
         """
         assert invocation.text == "please also tag finance"
         return type(
-            "SlackAssistantResult",
+            "AgentRouterResult",
             (),
             {
                 "message": "Tagged finance.",
@@ -639,7 +639,7 @@ async def test_handle_agent_message_routes_active_thread_follow_up(
             },
         )()
 
-    monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
+    monkeypatch.setattr(agent_routing, "run_agent_router", fake_run_agent_router)
     responder = SayResponder()
     repository = StubSlackAgentRepository(
         thread_document=ThreadDocument(
@@ -721,7 +721,7 @@ async def test_handle_agent_mention_returns_unconfigured_for_disabled_channel() 
 
     assert responder.calls == [
         {
-            "text": "The Slack assistant is not enabled for this workspace or channel.\n"
+            "text": "The Slack agent router is not enabled for this workspace or channel.\n"
             + agent_routing.build_agent_help_message("U1"),
             "thread_ts": "1712345678.000100",
             "blocks": None,
@@ -737,14 +737,14 @@ async def test_handle_agent_mention_returns_thread_menu_for_textless_mention(
     """Verify textless mentions show the thread menu instead of routing to AI.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to assert assistant non-execution.
+        monkeypatch: Pytest monkeypatch fixture used to assert router non-execution.
 
     Returns:
         None.
     """
 
-    async def fail_run_slack_assistant(*_: Any, **__: Any) -> Any:
-        """Fail the test if the assistant is invoked unexpectedly.
+    async def fail_run_agent_router(*_: Any, **__: Any) -> Any:
+        """Fail the test if the router is invoked unexpectedly.
 
         Args:
             *_: Unused positional arguments.
@@ -753,9 +753,9 @@ async def test_handle_agent_mention_returns_thread_menu_for_textless_mention(
         Returns:
             Never returns because the function always raises.
         """
-        raise AssertionError("run_slack_assistant should not run")
+        raise AssertionError("run_agent_router should not run")
 
-    monkeypatch.setattr(agent_routing, "run_slack_assistant", fail_run_slack_assistant)
+    monkeypatch.setattr(agent_routing, "run_agent_router", fail_run_agent_router)
     responder = SayResponder()
 
     await agent_routing.handle_agent_mention(
@@ -785,21 +785,21 @@ async def test_handle_agent_mention_uploads_generated_image_into_thread(
     """Verify image-generation delegation uploads the image instead of sending text.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to stub assistant execution.
+        monkeypatch: Pytest monkeypatch fixture used to stub router execution.
 
     Returns:
         None.
     """
 
-    async def fake_run_slack_assistant(invocation: Any, **_: Any) -> Any:
-        """Return a deterministic image-generation result for routing tests.
+    async def fake_run_agent_router(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic image-generation router result for routing tests.
 
         Args:
             invocation: Slack invocation received from the routing layer.
             **_: Unused keyword arguments.
 
         Returns:
-            Lightweight assistant result object carrying a generated image.
+            Lightweight router result object carrying a generated image.
         """
         assert invocation.text == "generate a fox poster"
         assert invocation.reference_images == [
@@ -814,7 +814,7 @@ async def test_handle_agent_mention_uploads_generated_image_into_thread(
             )
         ]
         return type(
-            "SlackAssistantResult",
+            "AgentRouterResult",
             (),
             {
                 "message": "Generated image for prompt:\ngenerate a fox poster",
@@ -826,7 +826,7 @@ async def test_handle_agent_mention_uploads_generated_image_into_thread(
             },
         )()
 
-    monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
+    monkeypatch.setattr(agent_routing, "run_agent_router", fake_run_agent_router)
 
     async def fake_download_thread_reference_images(
         client: Any,
@@ -911,25 +911,25 @@ async def test_handle_agent_mention_uploads_generated_video_into_thread(
     """Verify video-generation delegation uploads the video instead of sending text.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to stub assistant execution.
+        monkeypatch: Pytest monkeypatch fixture used to stub router execution.
 
     Returns:
         None.
     """
 
-    async def fake_run_slack_assistant(invocation: Any, **_: Any) -> Any:
-        """Return a deterministic video-generation result for routing tests.
+    async def fake_run_agent_router(invocation: Any, **_: Any) -> Any:
+        """Return a deterministic video-generation router result for routing tests.
 
         Args:
             invocation: Slack invocation received from the routing layer.
             **_: Unused keyword arguments.
 
         Returns:
-            Lightweight assistant result carrying a generated video.
+            Lightweight router result carrying a generated video.
         """
         assert invocation.text == "create a teaser video"
         return type(
-            "SlackAssistantResult",
+            "AgentRouterResult",
             (),
             {
                 "message": "Generated video for prompt:\ncreate a teaser video",
@@ -941,7 +941,7 @@ async def test_handle_agent_mention_uploads_generated_video_into_thread(
             },
         )()
 
-    monkeypatch.setattr(agent_routing, "run_slack_assistant", fake_run_slack_assistant)
+    monkeypatch.setattr(agent_routing, "run_agent_router", fake_run_agent_router)
     responder = SayResponder()
     repository = StubSlackAgentRepository()
     client = FakeSlackClient(
@@ -993,14 +993,14 @@ async def test_handle_agent_message_ignores_disabled_channel_follow_up(
     """Verify disabled channels do not auto-route active-thread follow-ups.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to assert assistant non-execution.
+        monkeypatch: Pytest monkeypatch fixture used to assert router non-execution.
 
     Returns:
         None.
     """
 
-    async def fail_run_slack_assistant(*_: Any, **__: Any) -> Any:
-        """Fail the test if the assistant is invoked unexpectedly.
+    async def fail_run_agent_router(*_: Any, **__: Any) -> Any:
+        """Fail the test if the router is invoked unexpectedly.
 
         Args:
             *_: Unused positional arguments.
@@ -1009,9 +1009,9 @@ async def test_handle_agent_message_ignores_disabled_channel_follow_up(
         Returns:
             Never returns because the function always raises.
         """
-        raise AssertionError("run_slack_assistant should not run")
+        raise AssertionError("run_agent_router should not run")
 
-    monkeypatch.setattr(agent_routing, "run_slack_assistant", fail_run_slack_assistant)
+    monkeypatch.setattr(agent_routing, "run_agent_router", fail_run_agent_router)
     responder = SayResponder()
     repository = StubSlackAgentRepository(
         channel_enabled=False,
@@ -1047,17 +1047,17 @@ async def test_handle_agent_message_ignores_disabled_channel_follow_up(
 async def test_invoke_routed_agent_returns_context_error_for_unsupported_thread_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify invalid thread history prevents assistant execution.
+    """Verify invalid thread history prevents router execution.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to assert assistant non-execution.
+        monkeypatch: Pytest monkeypatch fixture used to assert router non-execution.
 
     Returns:
         None.
     """
 
-    async def fail_run_slack_assistant(*_: Any, **__: Any) -> Any:
-        """Fail the test if the assistant is invoked unexpectedly.
+    async def fail_run_agent_router(*_: Any, **__: Any) -> Any:
+        """Fail the test if the router is invoked unexpectedly.
 
         Args:
             *_: Unused positional arguments.
@@ -1066,9 +1066,9 @@ async def test_invoke_routed_agent_returns_context_error_for_unsupported_thread_
         Returns:
             Never returns because the function always raises.
         """
-        raise AssertionError("run_slack_assistant should not run")
+        raise AssertionError("run_agent_router should not run")
 
-    monkeypatch.setattr(agent_routing, "run_slack_assistant", fail_run_slack_assistant)
+    monkeypatch.setattr(agent_routing, "run_agent_router", fail_run_agent_router)
     repository = StubSlackAgentRepository()
     client = FakeSlackClient(
         [
