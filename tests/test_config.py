@@ -70,6 +70,27 @@ def test_transcription_settings_default_to_japanese_chirp3_in_us() -> None:
     assert settings.google_cloud_transcription_staging_bucket is None
 
 
+@pytest.mark.parametrize(
+    ("raw_value", "expected_codes"),
+    [
+        ("ja-JP", ["ja-JP"]),
+        ("ja-JP,en-US", ["ja-JP", "en-US"]),
+        ('["ja-JP", "en-US"]', ["ja-JP", "en-US"]),
+    ],
+)
+def test_transcription_language_codes_accept_common_env_formats(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_value: str,
+    expected_codes: list[str],
+) -> None:
+    """Verify transcription language codes parse from common environment formats."""
+    monkeypatch.setenv("GOOGLE_CLOUD_TRANSCRIPTION_LANGUAGE_CODES", raw_value)
+
+    settings = Settings()
+
+    assert settings.google_cloud_transcription_language_codes == expected_codes
+
+
 def test_settings_do_not_expose_legacy_slack_assistant_model() -> None:
     """Verify the legacy Slack-assistant model setting has been removed."""
     settings = Settings.model_validate(

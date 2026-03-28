@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SPEAKER_COUNT = 8
 _DEFAULT_STAGING_PREFIX = "slack-transcriptions"
 _DEFAULT_BATCH_TIMEOUT_SECONDS = 900.0
+_MAX_EXTRACTED_AUDIO_BYTES = 100 * 1024 * 1024
 _VIDEO_FILE_EXTENSIONS = {
     ".avi",
     ".m4v",
@@ -79,6 +80,14 @@ class _BlobLike(Protocol):
         content_type: str | None = None,
     ) -> None:
         """Upload raw object bytes into Cloud Storage."""
+
+    def upload_from_filename(
+        self,
+        filename: str,
+        *,
+        content_type: str | None = None,
+    ) -> None:
+        """Upload a local file into Cloud Storage."""
 
     def delete(self) -> None:
         """Delete the previously uploaded object from Cloud Storage."""
@@ -169,6 +178,40 @@ class CloudStorageStagingService:
         """
         self._client.bucket(self._bucket_name).blob(object_name).delete()
 
+    def stage_file(
+        self,
+        *,
+        path: Path,
+        filename: str | None,
+        content_type: str | None = None,
+    ) -> tuple[str, str]:
+        """Upload a local file into the staging bucket.
+
+        Args:
+            path: Local file path to upload.
+            filename: Original filename used to derive a readable object suffix.
+            content_type: Optional MIME type for the staged object.
+
+        Returns:
+            Tuple of `(object_name, gcs_uri)` for the staged upload.
+
+        Raises:
+            ValueError: If the file is missing or empty.
+            CloudTranscriptionError: If the upload fails.
+        """
+        if not path.exists() or path.stat().st_size <= 0:
+            raise ValueError("Transcription staging file must exist and not be empty.")
+
+        object_name = self._build_object_name(filename)
+        blob = self._client.bucket(self._bucket_name).blob(object_name)
+        try:
+            blob.upload_from_filename(str(path), content_type=content_type)
+        except Exception as exc:  # pragma: no cover - SDK exception surface.
+            raise CloudTranscriptionError(
+                "Cloud Storage staging upload failed."
+            ) from exc
+        return object_name, f"gs://{self._bucket_name}/{object_name}"
+
     def _build_object_name(self, filename: str | None) -> str:
         """Return a unique object name for a staged transcription upload.
 
@@ -253,25 +296,58 @@ class CloudSpeechTranscriptionService:
         if not self._model.strip():
             raise ValueError("Transcription model must not be blank.")
 
-        normalized_data = data
-        normalized_filename = filename
-        normalized_content_type = content_type
         if _is_video_payload(filename=filename, content_type=content_type):
-            (
-                normalized_data,
-                normalized_filename,
-                normalized_content_type,
-            ) = _extract_audio_from_video_bytes(
-                data=data,
-                filename=filename,
-                content_type=content_type,
-            )
+            with tempfile.TemporaryDirectory(
+                prefix="agents-party-transcription-"
+            ) as tmpdir:
+                (
+                    extracted_audio_path,
+                    normalized_filename,
+                    normalized_content_type,
+                ) = _extract_audio_from_video_bytes(
+                    data=data,
+                    filename=filename,
+                    content_type=content_type,
+                    output_dir=Path(tmpdir),
+                )
+                object_name, gcs_uri = self._staging_service.stage_file(
+                    path=extracted_audio_path,
+                    filename=normalized_filename,
+                    content_type=normalized_content_type,
+                )
+                return self._transcribe_staged_gcs_uri(
+                    object_name=object_name,
+                    gcs_uri=gcs_uri,
+                )
 
         object_name, gcs_uri = self._staging_service.stage_bytes(
-            data=normalized_data,
-            filename=normalized_filename,
-            content_type=normalized_content_type,
+            data=data,
+            filename=filename,
+            content_type=content_type,
         )
+        return self._transcribe_staged_gcs_uri(
+            object_name=object_name,
+            gcs_uri=gcs_uri,
+        )
+
+    def _transcribe_staged_gcs_uri(
+        self,
+        *,
+        object_name: str,
+        gcs_uri: str,
+    ) -> TranscriptionResponse:
+        """Run batch recognition against a staged Cloud Storage object.
+
+        Args:
+            object_name: Cloud Storage object name used for cleanup.
+            gcs_uri: Cloud Storage URI passed to Speech-to-Text.
+
+        Returns:
+            Normalized speaker-attributed transcript response.
+
+        Raises:
+            CloudTranscriptionError: If recognition fails or returns no transcript.
+        """
         try:
             response = self._run_batch_recognize(gcs_uri)
         finally:
@@ -386,17 +462,19 @@ def _extract_audio_from_video_bytes(
     data: bytes,
     filename: str | None,
     content_type: str | None,
-) -> tuple[bytes, str, str]:
+    output_dir: Path,
+) -> tuple[Path, str, str]:
     """Extract a mono PCM WAV track from a video payload using `ffmpeg`.
 
     Args:
         data: Raw video container bytes.
         filename: Original video filename when available.
         content_type: Original video MIME type when available.
+        output_dir: Existing temporary directory used for ffmpeg input/output files.
 
     Returns:
-        Tuple containing extracted audio bytes, normalized output filename, and
-        the output MIME type.
+        Tuple containing extracted audio path, normalized output filename, and the
+        output MIME type.
 
     Raises:
         CloudTranscriptionError: If `ffmpeg` is unavailable or extraction fails.
@@ -409,43 +487,49 @@ def _extract_audio_from_video_bytes(
 
     input_suffix = _video_input_suffix(filename=filename, content_type=content_type)
     output_filename = _wav_output_filename(filename)
-    with tempfile.TemporaryDirectory(prefix="agents-party-transcription-") as tmpdir:
-        tmpdir_path = Path(tmpdir)
-        input_path = tmpdir_path / f"source{input_suffix}"
-        output_path = tmpdir_path / output_filename
-        input_path.write_bytes(data)
+    input_path = output_dir / f"source{input_suffix}"
+    output_path = output_dir / output_filename
+    input_path.write_bytes(data)
 
-        try:
-            subprocess.run(
-                [
-                    ffmpeg_path,
-                    "-y",
-                    "-nostdin",
-                    "-loglevel",
-                    "error",
-                    "-i",
-                    str(input_path),
-                    "-vn",
-                    "-acodec",
-                    "pcm_s16le",
-                    "-ar",
-                    "16000",
-                    "-ac",
-                    "1",
-                    str(output_path),
-                ],
-                capture_output=True,
-                check=True,
-            )
-        except (OSError, subprocess.CalledProcessError) as exc:
-            raise CloudTranscriptionError("Video audio extraction failed.") from exc
+    try:
+        subprocess.run(
+            [
+                ffmpeg_path,
+                "-y",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-i",
+                str(input_path),
+                "-vn",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                str(output_path),
+            ],
+            capture_output=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise CloudTranscriptionError("Video audio extraction failed.") from exc
 
-        audio_bytes = output_path.read_bytes() if output_path.exists() else b""
-        if not audio_bytes:
-            raise CloudTranscriptionError(
-                "Video audio extraction returned an empty audio track."
-            )
-    return audio_bytes, output_filename, "audio/wav"
+    if not output_path.exists():
+        raise CloudTranscriptionError(
+            "Video audio extraction returned an empty audio track."
+        )
+    output_size = output_path.stat().st_size
+    if output_size <= 0:
+        raise CloudTranscriptionError(
+            "Video audio extraction returned an empty audio track."
+        )
+    if output_size > _MAX_EXTRACTED_AUDIO_BYTES:
+        raise CloudTranscriptionError(
+            "Video audio extraction exceeded the supported size limit."
+        )
+    return output_path, output_filename, "audio/wav"
 
 
 def _video_input_suffix(

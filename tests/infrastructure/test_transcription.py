@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -51,6 +52,30 @@ class FakeBlob:
         if self.fail_upload is not None:
             raise self.fail_upload
         self.uploads.append({"data": data, "content_type": content_type})
+
+    def upload_from_filename(
+        self,
+        filename: str,
+        *,
+        content_type: str | None = None,
+    ) -> None:
+        """Record uploaded file contents or raise a configured error.
+
+        Args:
+            filename: Local file path uploaded by the caller.
+            content_type: Optional MIME type passed by the caller.
+
+        Returns:
+            None.
+        """
+        if self.fail_upload is not None:
+            raise self.fail_upload
+        self.uploads.append(
+            {
+                "data": Path(filename).read_bytes(),
+                "content_type": content_type,
+            }
+        )
 
     def delete(self) -> None:
         """Record that the blob was deleted.
@@ -409,6 +434,69 @@ def test_transcribe_bytes_raises_when_video_extraction_fails(
             filename="meeting.mp4",
             content_type="video/mp4",
         )
+
+
+def test_transcribe_bytes_rejects_oversized_extracted_audio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify extracted audio larger than the cap fails before staging.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub ffmpeg execution.
+
+    Returns:
+        None.
+    """
+    bucket = FakeBucket()
+    storage_client = FakeStorageClient(bucket)
+    staging_service = CloudStorageStagingService(
+        project_id="demo-project",
+        bucket_name="demo-bucket",
+        client=storage_client,  # type: ignore[arg-type]
+    )
+    speech_client = FakeSpeechClient(response=_build_diarized_response())
+
+    def fake_run(command: list[str], *, capture_output: bool, check: bool) -> Any:
+        """Pretend ffmpeg produced an oversized WAV output file.
+
+        Args:
+            command: Subprocess command emitted by the extractor.
+            capture_output: Whether stdio is captured.
+            check: Whether subprocess errors should raise.
+
+        Returns:
+            Minimal completed-process-like object.
+        """
+        assert capture_output is True
+        assert check is True
+        Path(command[-1]).write_bytes(b"a" * 9)
+        return type("Completed", (), {"returncode": 0})()
+
+    monkeypatch.setattr(
+        transcription_module.shutil, "which", lambda _: "/opt/homebrew/bin/ffmpeg"
+    )
+    monkeypatch.setattr(transcription_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(transcription_module, "_MAX_EXTRACTED_AUDIO_BYTES", 8)
+
+    service = CloudSpeechTranscriptionService(
+        project_id="demo-project",
+        location="us",
+        model="chirp_3",
+        language_codes=["ja-JP"],
+        staging_service=staging_service,
+        speech_client=speech_client,  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(
+        CloudTranscriptionError, match="exceeded the supported size limit"
+    ):
+        service.transcribe_bytes(
+            data=b"video-bytes",
+            filename="meeting.mp4",
+            content_type="video/mp4",
+        )
+
+    assert bucket.blobs == {}
 
 
 def test_transcribe_bytes_deletes_staged_object_when_batch_recognition_fails() -> None:

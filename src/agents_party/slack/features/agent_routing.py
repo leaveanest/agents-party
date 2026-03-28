@@ -1485,6 +1485,25 @@ def _is_supported_message_event(event: Mapping[str, Any]) -> bool:
     return bool(_optional_text_field(event, "text"))
 
 
+def _is_supported_targeted_message_event(event: Mapping[str, Any]) -> bool:
+    """Return whether a targeted Slack message can route through mention handling.
+
+    Args:
+        event: Slack message event payload.
+
+    Returns:
+        `True` when the event is a user-authored targeted message or file share.
+    """
+    if event.get("bot_id") is not None or event.get("bot_profile") is not None:
+        return False
+    if _optional_text_field(event, "user") is None:
+        return False
+    if not _optional_text_field(event, "text"):
+        return False
+    subtype = _optional_text_field(event, "subtype")
+    return subtype is None or subtype == "file_share"
+
+
 def _build_translation_service() -> CloudTranslationService | None:
     """Build the configured Cloud Translation service helper.
 
@@ -1943,11 +1962,10 @@ async def handle_agent_message(
     Returns:
         None.
     """
-    if not _is_supported_message_event(event):
-        return
-
     raw_text = _optional_text_field(event, "text") or ""
     if _message_targets_bot(raw_text, bot_user_id):
+        if not _is_supported_targeted_message_event(event):
+            return
         await handle_agent_mention(
             body,
             event,
@@ -1956,6 +1974,9 @@ async def handle_agent_message(
             repository=repository,
             work_item_repository=work_item_repository,
         )
+        return
+
+    if not _is_supported_message_event(event):
         return
 
     try:
