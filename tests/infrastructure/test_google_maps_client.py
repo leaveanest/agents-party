@@ -240,6 +240,41 @@ async def test_search_places_wraps_google_api_errors() -> None:
     assert exc_info.value.retriable is True
 
 
+@pytest.mark.asyncio
+async def test_search_places_wraps_non_object_error_json() -> None:
+    """Verify non-object error JSON still surfaces as a typed client error.
+
+    Returns:
+        None.
+    """
+    client = HttpxGoogleMapsClient(
+        api_key="test-key",
+        http_client=FakeAsyncClient(
+            responses=[
+                httpx.Response(
+                    503,
+                    request=httpx.Request(
+                        "POST",
+                        "https://places.googleapis.com/v1/places:searchText",
+                    ),
+                    json=["temporary", "error"],
+                )
+            ]
+        ),  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(GoogleMapsClientError) as exc_info:
+        await client.search_places("新宿駅")
+
+    assert (
+        str(exc_info.value)
+        == "Google Maps place search returned HTTP 503."
+    )
+    assert exc_info.value.error_code == "api_error"
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.retriable is True
+
+
 def test_google_maps_client_requires_api_key() -> None:
     """Verify the Google Maps client rejects blank API keys.
 

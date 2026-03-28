@@ -372,12 +372,13 @@ class HttpxGoogleMapsClient:
 
         if response.status_code >= 400:
             payload = self._safe_json(response)
-            error_payload = payload.get("error")
             error_message = None
             error_code = None
-            if isinstance(error_payload, Mapping):
-                error_message = _as_optional_text(error_payload.get("message"))
-                error_code = _as_optional_text(error_payload.get("status"))
+            if isinstance(payload, Mapping):
+                error_payload = payload.get("error")
+                if isinstance(error_payload, Mapping):
+                    error_message = _as_optional_text(error_payload.get("message"))
+                    error_code = _as_optional_text(error_payload.get("status"))
             raise GoogleMapsClientError(
                 error_message
                 or f"{request_name} returned HTTP {response.status_code}.",
