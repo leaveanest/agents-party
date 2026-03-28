@@ -1992,6 +1992,21 @@ async def handle_agent_message(
     ):
         return
 
+    if _is_transcription_request(invocation.text):
+        if client is None:
+            await say(
+                text=build_thread_context_error_message(invocation.user_id),
+                thread_ts=invocation.thread_ts,
+            )
+            return
+        _schedule_background_task(
+            _run_transcription_request(
+                invocation,
+                client=client,
+            )
+        )
+        return
+
     response_text = await invoke_routed_agent(
         invocation,
         client=client,

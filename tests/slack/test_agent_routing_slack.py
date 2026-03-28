@@ -959,6 +959,170 @@ async def test_handle_agent_message_routes_active_thread_follow_up(
 
 
 @pytest.mark.asyncio
+async def test_handle_agent_message_starts_background_transcription_for_active_thread_follow_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify active thread follow-ups can trigger transcription without a fresh mention.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub background execution.
+
+    Returns:
+        None.
+    """
+
+    class FakeTranscriptionService:
+        """Fake transcription service returning speaker-attributed segments."""
+
+        def transcribe_bytes(self, **_: Any) -> TranscriptionResponse:
+            """Return a deterministic transcription response for routing tests.
+
+            Args:
+                **_: Unused keyword arguments.
+
+            Returns:
+                Fixed speaker-attributed transcription payload.
+            """
+            return TranscriptionResponse(
+                segments=[
+                    TranscriptionSegment(
+                        speaker_label="Speaker 1",
+                        text="follow-up transcription",
+                    )
+                ]
+            )
+
+    scheduled_tasks: list[asyncio.Task[Any]] = []
+
+    def immediate_scheduler(coro: Any) -> asyncio.Task[Any]:
+        """Schedule the background coroutine immediately for test control.
+
+        Args:
+            coro: Coroutine created by the routing layer.
+
+        Returns:
+            Created asyncio task.
+        """
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    async def fake_download_thread_transcription_media_attachment(
+        client: Any,
+        spec: Any,
+    ) -> dict[str, str | bytes]:
+        """Return deterministic audio bytes for transcription routing tests.
+
+        Args:
+            client: Slack client received by the routing layer.
+            spec: Media descriptor selected from the thread.
+
+        Returns:
+            Fake audio payload mapping.
+        """
+        del client
+        assert spec["filename"] == "meeting.wav"
+        return {
+            "data": b"audio-bytes",
+            "media_type": "audio/wav",
+            "filename": "meeting.wav",
+        }
+
+    monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
+    monkeypatch.setattr(
+        agent_routing,
+        "_build_transcription_service",
+        lambda: FakeTranscriptionService(),
+    )
+    monkeypatch.setattr(
+        agent_routing,
+        "_download_thread_transcription_media_attachment",
+        fake_download_thread_transcription_media_attachment,
+    )
+    responder = SayResponder()
+    repository = StubSlackAgentRepository(
+        thread_document=ThreadDocument(
+            thread_ts="1712345678.000100",
+            root_message_ts="1712345678.000100",
+            channel_id="C123",
+            team_id="T1",
+            status=ThreadStatus.ACTIVE,
+            agent_id="assistant",
+            last_message_ts="1712345678.000100",
+        )
+    )
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "text": "<@Ubot> summarize this thread",
+                    },
+                    {
+                        "ts": "1712345680.000100",
+                        "user": "U1",
+                        "subtype": "file_share",
+                        "text": "文字起こしして",
+                        "files": [
+                            {
+                                "name": "meeting.wav",
+                                "title": "meeting",
+                                "mimetype": "audio/wav",
+                                "url_private_download": "https://files.slack.com/files-pri/T1-F1/meeting.wav",
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_message(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345680.000100",
+            "thread_ts": "1712345678.000100",
+            "text": "文字起こしして",
+        },
+        responder,
+        cast(agent_routing.SlackConversationsClient, client),
+        bot_user_id="Ubot",
+        repository=repository,
+    )
+    await asyncio.gather(*scheduled_tasks)
+
+    assert responder.calls == []
+    assert client.post_calls == [
+        {
+            "channel": "C123",
+            "text": agent_routing.build_transcription_started_message("U1"),
+            "thread_ts": "1712345678.000100",
+        },
+        {
+            "channel": "C123",
+            "text": agent_routing.build_transcription_response_message(
+                TranscriptionResponse(
+                    segments=[
+                        TranscriptionSegment(
+                            speaker_label="Speaker 1",
+                            text="follow-up transcription",
+                        )
+                    ]
+                ),
+                filename="meeting.wav",
+            ),
+            "thread_ts": "1712345678.000100",
+        },
+    ]
+    assert repository.activate_calls == []
+
+
+@pytest.mark.asyncio
 async def test_handle_agent_mention_returns_unconfigured_for_disabled_channel() -> None:
     """Verify disabled channels do not run the assistant for new mentions.
 
