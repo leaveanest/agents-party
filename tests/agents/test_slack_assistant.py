@@ -440,159 +440,59 @@ async def test_run_slack_assistant_clears_stale_generated_video_after_later_tool
 
 
 @pytest.mark.asyncio
-async def test_run_slack_assistant_short_circuits_indirect_visual_request_without_prior_context(
+async def test_run_slack_assistant_requires_model_for_indirect_visual_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify strong visual phrasing short-circuits only without prior context.
+    """Verify indirect visual requests no longer bypass model-based routing.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to stub image generation.
+        monkeypatch: Pytest monkeypatch fixture used to clear configured models.
 
     Returns:
         None.
     """
+    monkeypatch.setattr(slack_assistant_runtime.settings, "slack_assistant_model", None)
+    monkeypatch.setattr(slack_assistant_runtime.settings, "work_manager_model", None)
     invocation = make_invocation().model_copy(
         update={"text": "この案をモックアップにして"}
     )
 
-    async def fake_run_image_generation(invocation: Any, **_: Any) -> BinaryImage:
-        """Return a deterministic image result for direct routing tests.
-
-        Args:
-            invocation: Image-generation invocation received from the assistant.
-            **_: Unused keyword arguments.
-
-        Returns:
-            Binary image payload for the generated image.
-        """
-        assert invocation.prompt == "この案をモックアップにして"
-        return BinaryImage(data=b"png-bytes", media_type="image/png")
-
-    monkeypatch.setattr(
-        slack_assistant_runtime,
-        "run_image_generation",
-        fake_run_image_generation,
-    )
-
     result = await run_slack_assistant(invocation, model=None)
 
-    assert result.action == SlackAssistantAction.DELEGATED
-    assert result.delegated_agent_id == "image-generation"
-    assert result.message == "Generated image for prompt:\nこの案をモックアップにして"
-    assert result.generated_image == BinaryImage(
-        data=b"png-bytes", media_type="image/png"
+    assert result.action == SlackAssistantAction.RESPONDED
+    assert result.delegated_agent_id is None
+    assert (
+        result.message == "Slack assistant is not configured. Set "
+        "SLACK_ASSISTANT_MODEL or WORK_MANAGER_MODEL before using it."
     )
 
 
 @pytest.mark.asyncio
-async def test_run_slack_assistant_short_circuits_video_request_without_prior_context(
+async def test_run_slack_assistant_requires_model_for_indirect_video_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify strong video phrasing short-circuits without prior thread context.
+    """Verify indirect video requests no longer bypass model-based routing.
 
     Args:
-        monkeypatch: Pytest monkeypatch fixture used to stub video generation.
+        monkeypatch: Pytest monkeypatch fixture used to clear configured models.
 
     Returns:
         None.
     """
+    monkeypatch.setattr(slack_assistant_runtime.settings, "slack_assistant_model", None)
+    monkeypatch.setattr(slack_assistant_runtime.settings, "work_manager_model", None)
     invocation = make_invocation().model_copy(
         update={"text": "この案をショート動画にして"}
     )
 
-    async def fake_run_video_generation(invocation: Any, **_: Any) -> BinaryContent:
-        """Return a deterministic video result for direct routing tests.
-
-        Args:
-            invocation: Video-generation invocation received from the assistant.
-            **_: Unused keyword arguments.
-
-        Returns:
-            Binary video payload for the generated video.
-        """
-        assert invocation.prompt == "この案をショート動画にして"
-        return BinaryContent(data=b"mp4-bytes", media_type="video/mp4")
-
-    monkeypatch.setattr(
-        slack_assistant_runtime,
-        "run_video_generation",
-        fake_run_video_generation,
-    )
-
     result = await run_slack_assistant(invocation, model=None)
-
-    assert result.action == SlackAssistantAction.DELEGATED
-    assert result.delegated_agent_id == "video-generation"
-    assert result.message == "Generated video for prompt:\nこの案をショート動画にして"
-    assert result.generated_video == BinaryContent(
-        data=b"mp4-bytes", media_type="video/mp4"
-    )
-
-
-@pytest.mark.asyncio
-async def test_run_slack_assistant_does_not_short_circuit_visual_request_with_prior_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify prior thread context prevents direct image-generation short-circuiting.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture used to assert non-execution.
-
-    Returns:
-        None.
-    """
-    invocation = make_invocation().model_copy(
-        update={
-            "text": "この案をモックアップにして",
-            "thread_messages": [
-                ThreadMessage(
-                    ts="1712345677.000100",
-                    role=MessageRole.USER,
-                    text="LP の構成をまず整理したい",
-                    user_id="U1",
-                ),
-                ThreadMessage(
-                    ts="1712345678.000100",
-                    role=MessageRole.USER,
-                    text="この案をモックアップにして",
-                    user_id="U1",
-                ),
-            ],
-        }
-    )
-
-    async def fail_run_image_generation(*_: Any, **__: Any) -> BinaryImage:
-        """Fail if direct image generation runs despite prior thread context.
-
-        Args:
-            *_: Unused positional arguments.
-            **__: Unused keyword arguments.
-
-        Returns:
-            Never returns because the function always raises.
-        """
-        raise AssertionError("run_image_generation should not short-circuit")
-
-    monkeypatch.setattr(
-        slack_assistant_runtime,
-        "run_image_generation",
-        fail_run_image_generation,
-    )
-    model = TestModel(
-        call_tools=[],
-        custom_output_args={
-            "action": "responded",
-            "message": "Need to interpret the thread context first.",
-            "delegated_agent_id": None,
-            "follow_up_question": None,
-        },
-    )
-
-    result = await run_slack_assistant(invocation, model=model)
 
     assert result.action == SlackAssistantAction.RESPONDED
     assert result.delegated_agent_id is None
-    assert result.message == "Need to interpret the thread context first."
+    assert (
+        result.message == "Slack assistant is not configured. Set "
+        "SLACK_ASSISTANT_MODEL or WORK_MANAGER_MODEL before using it."
+    )
 
 
 @pytest.mark.asyncio
