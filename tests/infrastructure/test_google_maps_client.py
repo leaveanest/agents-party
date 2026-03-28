@@ -137,6 +137,73 @@ async def test_search_nearby_wraps_missing_anchor_results() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_nearby_filters_results_outside_radius() -> None:
+    """Verify nearby search excludes places beyond the requested radius.
+
+    Returns:
+        None.
+    """
+    http_client = FakeAsyncClient(
+        responses=[
+            httpx.Response(
+                200,
+                request=httpx.Request(
+                    "POST", "https://places.googleapis.com/v1/places:searchText"
+                ),
+                json={
+                    "places": [
+                        {
+                            "id": "anchor",
+                            "displayName": {"text": "東京駅"},
+                            "formattedAddress": "東京都千代田区丸の内1丁目",
+                            "location": {
+                                "latitude": 35.681236,
+                                "longitude": 139.767125,
+                            },
+                        }
+                    ]
+                },
+            ),
+            httpx.Response(
+                200,
+                request=httpx.Request(
+                    "POST", "https://places.googleapis.com/v1/places:searchText"
+                ),
+                json={
+                    "places": [
+                        {
+                            "id": "nearby",
+                            "displayName": {"text": "Nearby Cafe"},
+                            "formattedAddress": "東京都千代田区丸の内1丁目",
+                            "location": {
+                                "latitude": 35.6818,
+                                "longitude": 139.7676,
+                            },
+                        },
+                        {
+                            "id": "far-away",
+                            "displayName": {"text": "Far Away Cafe"},
+                            "formattedAddress": "東京都新宿区西新宿2丁目",
+                            "location": {
+                                "latitude": 35.6895,
+                                "longitude": 139.6917,
+                            },
+                        },
+                    ]
+                },
+            ),
+        ]
+    )
+    client = HttpxGoogleMapsClient(api_key="test-key", http_client=http_client)  # type: ignore[arg-type]
+
+    places = await client.search_nearby("東京駅", "カフェ", radius_meters=500)
+
+    assert [place.place_id for place in places] == ["nearby"]
+    body = cast(dict[str, Any], http_client.calls[1]["json"])
+    assert body["maxResultCount"] == 10
+
+
+@pytest.mark.asyncio
 async def test_compute_route_normalizes_route_result() -> None:
     """Verify route lookups normalize distance, duration, and directions links.
 
@@ -304,10 +371,7 @@ async def test_search_places_wraps_non_object_error_json() -> None:
     with pytest.raises(GoogleMapsClientError) as exc_info:
         await client.search_places("新宿駅")
 
-    assert (
-        str(exc_info.value)
-        == "Google Maps place search returned HTTP 503."
-    )
+    assert str(exc_info.value) == "Google Maps place search returned HTTP 503."
     assert exc_info.value.error_code == "api_error"
     assert exc_info.value.status_code == 503
     assert exc_info.value.retriable is True

@@ -109,6 +109,9 @@ async def test_run_agent_router_delegates_to_google_maps_specialist(
     Returns:
         None.
     """
+    monkeypatch.setattr(
+        agent_router_runtime.settings, "google_maps_api_key", "test-key"
+    )
 
     async def fake_run_google_maps(invocation: Any, **_: Any) -> Any:
         """Return a deterministic Google Maps result for routing tests.
@@ -310,6 +313,9 @@ async def test_run_agent_router_stops_after_google_maps_follow_up(
     Returns:
         None.
     """
+    monkeypatch.setattr(
+        agent_router_runtime.settings, "google_maps_api_key", "test-key"
+    )
 
     async def fake_run_google_maps(invocation: Any, **_: Any) -> Any:
         """Return a clarification response for Google Maps routing tests.
@@ -366,6 +372,39 @@ async def test_run_agent_router_stops_after_google_maps_follow_up(
     assert result.action == AgentRouterAction.CLARIFICATION_NEEDED
     assert result.selected_specialist_ids == ["google-maps"]
     assert result.follow_up_question == "出発地を教えてください。"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_router_handles_google_maps_unconfigured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify router returns a user-facing message when Maps is unconfigured.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub settings.
+
+    Returns:
+        None.
+    """
+    monkeypatch.setattr(agent_router_runtime.settings, "google_maps_api_key", None)
+    model = TestModel(
+        call_tools=["delegate_google_maps"],
+        custom_output_args={
+            "action": "responded",
+            "message": (
+                "Google Maps lookup is not configured for this workspace yet, "
+                "so I cannot run place or route searches right now."
+            ),
+            "selected_specialist_ids": [],
+            "follow_up_question": None,
+        },
+    )
+
+    result = await run_agent_router(make_invocation(), model=model)
+
+    assert result.action == AgentRouterAction.ORCHESTRATED
+    assert result.selected_specialist_ids == ["google-maps"]
+    assert "not configured" in result.message
 
 
 @pytest.mark.asyncio

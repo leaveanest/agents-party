@@ -158,9 +158,29 @@ async def _run_google_maps_specialist(
     Returns:
         Normalized specialist outcome for Google Maps execution.
     """
-    result = await run_google_maps(
-        GoogleMapsInvocation.model_validate(deps.invocation.model_dump(mode="python"))
-    )
+    if settings.google_maps_api_key is None:
+        return SpecialistOutcome(
+            specialist_id="google-maps",
+            message=(
+                "Google Maps lookup is not configured for this workspace yet, "
+                "so I cannot run place or route searches right now."
+            ),
+        )
+
+    try:
+        result = await run_google_maps(
+            GoogleMapsInvocation.model_validate(
+                deps.invocation.model_dump(mode="python")
+            )
+        )
+    except ValueError:
+        return SpecialistOutcome(
+            specialist_id="google-maps",
+            message=(
+                "Google Maps lookup is not configured for this workspace yet, "
+                "so I cannot run place or route searches right now."
+            ),
+        )
     return SpecialistOutcome(
         specialist_id="google-maps",
         message=render_google_maps_response(result),

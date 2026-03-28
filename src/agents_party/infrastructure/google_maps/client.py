@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import asin, cos, radians, sin, sqrt
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlencode
 
@@ -176,9 +177,9 @@ class HttpxGoogleMapsClient:
                 retriable=False,
             )
 
-        return await self._search_text(
+        nearby_places = await self._search_text(
             text_query=search_query,
-            max_result_count=5,
+            max_result_count=10,
             location_bias={
                 "circle": {
                     "center": {
@@ -189,6 +190,16 @@ class HttpxGoogleMapsClient:
                 }
             },
         )
+        return [
+            place
+            for place in nearby_places
+            if _is_place_within_radius(
+                place=place,
+                center_latitude=anchor.latitude,
+                center_longitude=anchor.longitude,
+                radius_meters=radius_meters,
+            )
+        ][:5]
 
     async def compute_route(
         self,
@@ -462,6 +473,70 @@ def _normalize_travel_mode(travel_mode: str) -> str:
         "transit": "TRANSIT",
         "two_wheeler": "TWO_WHEELER",
     }.get(canonical_mode, "DRIVE")
+
+
+def _is_place_within_radius(
+    *,
+    place: GoogleMapsPlaceSummary,
+    center_latitude: float,
+    center_longitude: float,
+    radius_meters: int,
+) -> bool:
+    """Return whether a place falls within the requested nearby radius.
+
+    Args:
+        place: Normalized place candidate returned by the Places API.
+        center_latitude: Anchor latitude in decimal degrees.
+        center_longitude: Anchor longitude in decimal degrees.
+        radius_meters: Maximum allowed distance from the anchor in meters.
+
+    Returns:
+        `True` when the place has coordinates inside the radius.
+    """
+    if place.latitude is None or place.longitude is None:
+        return False
+
+    return (
+        _great_circle_distance_meters(
+            latitude_a=center_latitude,
+            longitude_a=center_longitude,
+            latitude_b=place.latitude,
+            longitude_b=place.longitude,
+        )
+        <= radius_meters
+    )
+
+
+def _great_circle_distance_meters(
+    *,
+    latitude_a: float,
+    longitude_a: float,
+    latitude_b: float,
+    longitude_b: float,
+) -> float:
+    """Compute the great-circle distance between two coordinates in meters.
+
+    Args:
+        latitude_a: First latitude in decimal degrees.
+        longitude_a: First longitude in decimal degrees.
+        latitude_b: Second latitude in decimal degrees.
+        longitude_b: Second longitude in decimal degrees.
+
+    Returns:
+        Great-circle distance in meters.
+    """
+    earth_radius_meters = 6_371_000.0
+    delta_latitude = radians(latitude_b - latitude_a)
+    delta_longitude = radians(longitude_b - longitude_a)
+    latitude_a_radians = radians(latitude_a)
+    latitude_b_radians = radians(latitude_b)
+    haversine = (
+        sin(delta_latitude / 2) ** 2
+        + cos(latitude_a_radians)
+        * cos(latitude_b_radians)
+        * sin(delta_longitude / 2) ** 2
+    )
+    return 2 * earth_radius_meters * asin(sqrt(haversine))
 
 
 def _parse_duration_seconds(duration_value: object) -> int | None:
