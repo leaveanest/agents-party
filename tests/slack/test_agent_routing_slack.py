@@ -1,7 +1,8 @@
-"""Tests for Slack mention routing, follow-up routing, and translation reactions."""
+"""Tests for Slack mention routing, follow-up routing, translation, and transcription."""
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -15,7 +16,11 @@ from agents_party.domain import (
     ThreadDocument,
     ThreadStatus,
 )
-from agents_party.infrastructure import TranslationResponse
+from agents_party.infrastructure import (
+    TranscriptionResponse,
+    TranscriptionSegment,
+    TranslationResponse,
+)
 from agents_party.slack.features import agent_routing
 
 
@@ -776,6 +781,549 @@ async def test_handle_agent_mention_returns_thread_menu_for_textless_mention(
             "blocks": agent_routing.build_thread_menu_blocks("U1"),
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_starts_background_transcription_for_audio_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify explicit transcription mentions post diarized results in-thread.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub background execution.
+
+    Returns:
+        None.
+    """
+
+    class FakeTranscriptionService:
+        """Fake transcription service returning speaker-attributed segments."""
+
+        def transcribe_bytes(self, **_: Any) -> TranscriptionResponse:
+            """Return a deterministic transcription response for routing tests.
+
+            Args:
+                **_: Unused keyword arguments.
+
+            Returns:
+                Fixed speaker-attributed transcription payload.
+            """
+            return TranscriptionResponse(
+                segments=[
+                    TranscriptionSegment(
+                        speaker_label="Speaker 1",
+                        text="こんにちは 今日は",
+                    ),
+                    TranscriptionSegment(
+                        speaker_label="Speaker 2",
+                        text="ありがとうございます",
+                    ),
+                ]
+            )
+
+    scheduled_tasks: list[asyncio.Task[Any]] = []
+
+    def immediate_scheduler(coro: Any) -> asyncio.Task[Any]:
+        """Schedule the background coroutine immediately for test control.
+
+        Args:
+            coro: Coroutine created by the routing layer.
+
+        Returns:
+            Created asyncio task.
+        """
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    async def fake_download_thread_transcription_media_attachment(
+        client: Any,
+        spec: Any,
+    ) -> dict[str, str | bytes]:
+        """Return deterministic audio bytes for transcription routing tests.
+
+        Args:
+            client: Slack client received by the routing layer.
+            spec: Audio descriptor selected from the thread.
+
+        Returns:
+            Fake audio payload mapping.
+        """
+        del client
+        assert spec["filename"] == "meeting.wav"
+        return {
+            "data": b"audio-bytes",
+            "media_type": "audio/wav",
+            "filename": "meeting.wav",
+        }
+
+    monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
+    monkeypatch.setattr(
+        agent_routing,
+        "_build_transcription_service",
+        lambda: FakeTranscriptionService(),
+    )
+    monkeypatch.setattr(
+        agent_routing,
+        "_download_thread_transcription_media_attachment",
+        fake_download_thread_transcription_media_attachment,
+    )
+    responder = SayResponder()
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "text": "<@Ubot> 文字起こしして",
+                        "files": [
+                            {
+                                "name": "meeting.wav",
+                                "title": "meeting",
+                                "mimetype": "audio/wav",
+                                "url_private_download": "https://files.slack.com/files-pri/T1-F1/meeting.wav",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> 文字起こしして",
+        },
+        responder,
+        client,
+    )
+    await asyncio.gather(*scheduled_tasks)
+
+    assert responder.calls == []
+    assert client.post_calls == [
+        {
+            "channel": "C123",
+            "text": agent_routing.build_transcription_started_message("U1"),
+            "thread_ts": "1712345678.000100",
+        },
+        {
+            "channel": "C123",
+            "text": agent_routing.build_transcription_response_message(
+                TranscriptionResponse(
+                    segments=[
+                        TranscriptionSegment(
+                            speaker_label="Speaker 1",
+                            text="こんにちは 今日は",
+                        ),
+                        TranscriptionSegment(
+                            speaker_label="Speaker 2",
+                            text="ありがとうございます",
+                        ),
+                    ]
+                ),
+                filename="meeting.wav",
+            ),
+            "thread_ts": "1712345678.000100",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_starts_background_transcription_for_video_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify explicit transcription mentions accept video attachments too.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to stub background execution.
+
+    Returns:
+        None.
+    """
+
+    class FakeTranscriptionService:
+        """Fake transcription service validating the forwarded video payload."""
+
+        def transcribe_bytes(self, **kwargs: Any) -> TranscriptionResponse:
+            """Return a deterministic transcription response for video tests.
+
+            Args:
+                **kwargs: Keyword arguments forwarded by the routing layer.
+
+            Returns:
+                Fixed speaker-attributed transcription payload.
+            """
+            assert kwargs["filename"] == "demo.mp4"
+            assert kwargs["content_type"] == "video/mp4"
+            return TranscriptionResponse(
+                segments=[
+                    TranscriptionSegment(
+                        speaker_label="Speaker 1",
+                        text="デモ動画の音声です",
+                    )
+                ]
+            )
+
+    scheduled_tasks: list[asyncio.Task[Any]] = []
+
+    def immediate_scheduler(coro: Any) -> asyncio.Task[Any]:
+        """Schedule the background coroutine immediately for test control.
+
+        Args:
+            coro: Coroutine created by the routing layer.
+
+        Returns:
+            Created asyncio task.
+        """
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    async def fake_download_thread_transcription_media_attachment(
+        client: Any,
+        spec: Any,
+    ) -> dict[str, str | bytes]:
+        """Return deterministic video bytes for transcription routing tests.
+
+        Args:
+            client: Slack client received by the routing layer.
+            spec: Media descriptor selected from the thread.
+
+        Returns:
+            Fake video payload mapping.
+        """
+        del client
+        assert spec["filename"] == "demo.mp4"
+        return {
+            "data": b"video-bytes",
+            "media_type": "video/mp4",
+            "filename": "demo.mp4",
+        }
+
+    monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
+    monkeypatch.setattr(
+        agent_routing,
+        "_build_transcription_service",
+        lambda: FakeTranscriptionService(),
+    )
+    monkeypatch.setattr(
+        agent_routing,
+        "_download_thread_transcription_media_attachment",
+        fake_download_thread_transcription_media_attachment,
+    )
+    responder = SayResponder()
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "text": "<@Ubot> 文字起こしして",
+                        "files": [
+                            {
+                                "name": "demo.mp4",
+                                "title": "demo",
+                                "mimetype": "video/mp4",
+                                "url_private_download": "https://files.slack.com/files-pri/T1-F1/demo.mp4",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> 文字起こしして",
+        },
+        responder,
+        client,
+    )
+    await asyncio.gather(*scheduled_tasks)
+
+    assert responder.calls == []
+    assert client.post_calls[-1] == {
+        "channel": "C123",
+        "text": agent_routing.build_transcription_response_message(
+            TranscriptionResponse(
+                segments=[
+                    TranscriptionSegment(
+                        speaker_label="Speaker 1",
+                        text="デモ動画の音声です",
+                    )
+                ]
+            ),
+            filename="demo.mp4",
+        ),
+        "thread_ts": "1712345678.000100",
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_reports_missing_thread_audio_for_transcription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify transcription requests fail clearly when the thread has no audio.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to control background tasks.
+
+    Returns:
+        None.
+    """
+    scheduled_tasks: list[asyncio.Task[Any]] = []
+
+    def immediate_scheduler(coro: Any) -> asyncio.Task[Any]:
+        """Schedule the background coroutine immediately for test control.
+
+        Args:
+            coro: Coroutine created by the routing layer.
+
+        Returns:
+            Created asyncio task.
+        """
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
+    monkeypatch.setattr(agent_routing, "_build_transcription_service", lambda: object())
+    responder = SayResponder()
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "text": "<@Ubot> 文字起こしして",
+                    }
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> 文字起こしして",
+        },
+        responder,
+        client,
+    )
+    await asyncio.gather(*scheduled_tasks)
+
+    assert responder.calls == []
+    assert client.post_calls[-1] == {
+        "channel": "C123",
+        "text": agent_routing.build_transcription_source_error_message("U1"),
+        "thread_ts": "1712345678.000100",
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_reports_unconfigured_transcription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify transcription requests fail clearly when Speech is unconfigured.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to control background tasks.
+
+    Returns:
+        None.
+    """
+    scheduled_tasks: list[asyncio.Task[Any]] = []
+
+    def immediate_scheduler(coro: Any) -> asyncio.Task[Any]:
+        """Schedule the background coroutine immediately for test control.
+
+        Args:
+            coro: Coroutine created by the routing layer.
+
+        Returns:
+            Created asyncio task.
+        """
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
+    monkeypatch.setattr(agent_routing, "_build_transcription_service", lambda: None)
+    responder = SayResponder()
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "text": "<@Ubot> 文字起こしして",
+                        "files": [
+                            {
+                                "name": "meeting.wav",
+                                "title": "meeting",
+                                "mimetype": "audio/wav",
+                                "url_private_download": "https://files.slack.com/files-pri/T1-F1/meeting.wav",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> 文字起こしして",
+        },
+        responder,
+        client,
+    )
+    await asyncio.gather(*scheduled_tasks)
+
+    assert responder.calls == []
+    assert client.post_calls[-1] == {
+        "channel": "C123",
+        "text": agent_routing.build_transcription_unconfigured_message("U1"),
+        "thread_ts": "1712345678.000100",
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_agent_mention_reports_transcription_download_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify transcription requests fail clearly when audio download fails.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture used to control background tasks.
+
+    Returns:
+        None.
+    """
+
+    class FakeTranscriptionService:
+        """Fake transcription service that should never be called in this test."""
+
+        def transcribe_bytes(self, **_: Any) -> TranscriptionResponse:
+            """Fail the test if the transcription service is reached.
+
+            Args:
+                **_: Unused keyword arguments.
+
+            Returns:
+                Never returns because the function always raises.
+            """
+            raise AssertionError("transcribe_bytes should not be called")
+
+    scheduled_tasks: list[asyncio.Task[Any]] = []
+
+    def immediate_scheduler(coro: Any) -> asyncio.Task[Any]:
+        """Schedule the background coroutine immediately for test control.
+
+        Args:
+            coro: Coroutine created by the routing layer.
+
+        Returns:
+            Created asyncio task.
+        """
+        task = asyncio.create_task(coro)
+        scheduled_tasks.append(task)
+        return task
+
+    async def fail_download_thread_transcription_media_attachment(
+        client: Any,
+        spec: Any,
+    ) -> dict[str, str | bytes]:
+        """Raise a download failure for transcription routing tests.
+
+        Args:
+            client: Slack client received by the routing layer.
+            spec: Audio descriptor selected from the thread.
+
+        Returns:
+            Never returns because the function always raises.
+        """
+        del client, spec
+        raise agent_routing.SlackAudioDownloadError("boom")
+
+    monkeypatch.setattr(agent_routing, "_schedule_background_task", immediate_scheduler)
+    monkeypatch.setattr(
+        agent_routing,
+        "_build_transcription_service",
+        lambda: FakeTranscriptionService(),
+    )
+    monkeypatch.setattr(
+        agent_routing,
+        "_download_thread_transcription_media_attachment",
+        fail_download_thread_transcription_media_attachment,
+    )
+    responder = SayResponder()
+    client = FakeSlackClient(
+        [
+            {
+                "ok": True,
+                "messages": [
+                    {
+                        "ts": "1712345678.000100",
+                        "user": "U1",
+                        "text": "<@Ubot> 文字起こしして",
+                        "files": [
+                            {
+                                "name": "meeting.wav",
+                                "title": "meeting",
+                                "mimetype": "audio/wav",
+                                "url_private_download": "https://files.slack.com/files-pri/T1-F1/meeting.wav",
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    await agent_routing.handle_agent_mention(
+        {"team_id": "T1"},
+        {
+            "user": "U1",
+            "channel": "C123",
+            "ts": "1712345678.000100",
+            "text": "<@Ubot> 文字起こしして",
+        },
+        responder,
+        client,
+    )
+    await asyncio.gather(*scheduled_tasks)
+
+    assert responder.calls == []
+    assert client.post_calls[-1] == {
+        "channel": "C123",
+        "text": agent_routing.build_transcription_execution_error_message("U1"),
+        "thread_ts": "1712345678.000100",
+    }
 
 
 @pytest.mark.asyncio

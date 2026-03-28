@@ -60,6 +60,16 @@ def test_agent_selector_model_defaults_to_none() -> None:
     assert settings.agent_selector_model is None
 
 
+def test_transcription_settings_default_to_japanese_chirp3_in_us() -> None:
+    """Verify transcription defaults target the expected Speech-to-Text setup."""
+    settings = Settings.model_validate({})
+
+    assert settings.google_cloud_speech_location == "us"
+    assert settings.google_cloud_transcription_model == "chirp_3"
+    assert settings.google_cloud_transcription_language_codes == ["ja-JP"]
+    assert settings.google_cloud_transcription_staging_bucket is None
+
+
 def test_settings_do_not_expose_legacy_slack_assistant_model() -> None:
     """Verify the legacy Slack-assistant model setting has been removed."""
     settings = Settings.model_validate(

@@ -42,6 +42,22 @@ class Settings(BaseSettings):
         default="global",
         alias="GOOGLE_CLOUD_LOCATION",
     )
+    google_cloud_speech_location: str = Field(
+        default="us",
+        alias="GOOGLE_CLOUD_SPEECH_LOCATION",
+    )
+    google_cloud_transcription_model: str = Field(
+        default="chirp_3",
+        alias="GOOGLE_CLOUD_TRANSCRIPTION_MODEL",
+    )
+    google_cloud_transcription_language_codes: list[str] = Field(
+        default_factory=lambda: ["ja-JP"],
+        alias="GOOGLE_CLOUD_TRANSCRIPTION_LANGUAGE_CODES",
+    )
+    google_cloud_transcription_staging_bucket: str | None = Field(
+        default=None,
+        alias="GOOGLE_CLOUD_TRANSCRIPTION_STAGING_BUCKET",
+    )
     firestore_database: str = Field(default="(default)", alias="FIRESTORE_DATABASE")
     image_generation_model: str = Field(
         default="gemini-2.5-flash-image",

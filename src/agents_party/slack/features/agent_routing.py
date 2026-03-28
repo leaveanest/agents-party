@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Mapping, Sequence
 from importlib import import_module
 from urllib.parse import urlparse
@@ -17,12 +19,22 @@ from agents_party.domain import (
     ThreadMessage,
     ThreadStatus,
 )
-from agents_party.infrastructure import CloudTranslationError, CloudTranslationService
+from agents_party.infrastructure import (
+    CloudSpeechTranscriptionService,
+    CloudStorageStagingService,
+    CloudTranscriptionError,
+    CloudTranslationError,
+    CloudTranslationService,
+    TranscriptionResponse,
+)
 from agents_party.repositories import SlackAgentRepository, WorkItemRepository
 
+logger = logging.getLogger(__name__)
 _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES = frozenset({"bot_message"})
 _MAX_REFERENCE_IMAGES = 3
 _MAX_REFERENCE_IMAGE_BYTES = 20 * 1024 * 1024
+_MAX_REFERENCE_AUDIO_BYTES = 100 * 1024 * 1024
+_TRANSCRIPTION_KEYWORDS = ("文字起こし", "transcribe", "transcription")
 
 
 class SayResponder(Protocol):
@@ -152,6 +164,10 @@ class SlackMessageLookupError(RuntimeError):
     """Raised when a Slack message cannot be read for reaction-triggered translation."""
 
 
+class SlackAudioDownloadError(RuntimeError):
+    """Raised when Slack transcription media cannot be downloaded safely."""
+
+
 def _read_nested_plain_text(value: object) -> str | None:
     """Read a plain-text field from either a raw string or Slack text object.
 
@@ -172,6 +188,38 @@ def _read_nested_plain_text(value: object) -> str | None:
     return None
 
 
+def _is_transcription_media_slack_file(file_payload: Mapping[str, Any]) -> bool:
+    """Return whether a Slack file payload looks transcribable.
+
+    Args:
+        file_payload: Slack file payload embedded in a message.
+
+    Returns:
+        `True` when the file appears to be an audio or video payload.
+    """
+    mime_type = _optional_text_field(file_payload, "mimetype")
+    if mime_type is not None and (
+        mime_type.startswith("audio/") or mime_type.startswith("video/")
+    ):
+        return True
+    file_type = _optional_text_field(file_payload, "filetype")
+    return file_type in {
+        "aac",
+        "avi",
+        "flac",
+        "m4a",
+        "mkv",
+        "mov",
+        "mp3",
+        "mp4",
+        "mpeg",
+        "mpg",
+        "ogg",
+        "wav",
+        "webm",
+    }
+
+
 def _is_image_like_slack_file(file_payload: Mapping[str, Any]) -> bool:
     """Return whether a Slack file payload looks like an image attachment.
 
@@ -186,6 +234,48 @@ def _is_image_like_slack_file(file_payload: Mapping[str, Any]) -> bool:
         return True
     file_type = _optional_text_field(file_payload, "filetype")
     return file_type in {"gif", "heic", "jpeg", "jpg", "png", "svg", "webp"}
+
+
+def _extract_slack_transcription_media_metadata(
+    message: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    """Extract lightweight transcription-media metadata from a Slack message.
+
+    Args:
+        message: Raw Slack message payload that may contain audio or video files.
+
+    Returns:
+        Ordered media descriptors suitable for later download and transcription.
+    """
+    media_files: list[dict[str, str]] = []
+    raw_files = message.get("files")
+    if not isinstance(raw_files, list):
+        return media_files
+
+    for raw_file in raw_files:
+        if not isinstance(raw_file, Mapping) or not _is_transcription_media_slack_file(
+            raw_file
+        ):
+            continue
+        media_payload: dict[str, str] = {"source": "file"}
+        title = _optional_text_field(raw_file, "title") or _optional_text_field(
+            raw_file, "name"
+        )
+        mime_type = _optional_text_field(raw_file, "mimetype")
+        download_url = _optional_text_field(
+            raw_file, "url_private_download"
+        ) or _optional_text_field(raw_file, "url_private")
+        filename = _optional_text_field(raw_file, "name")
+        if title is not None:
+            media_payload["title"] = title
+        if mime_type is not None:
+            media_payload["mime_type"] = mime_type
+        if download_url is not None:
+            media_payload["download_url"] = download_url
+        if filename is not None:
+            media_payload["filename"] = filename
+        media_files.append(media_payload)
+    return media_files
 
 
 def _extract_slack_image_metadata(message: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -306,11 +396,48 @@ def _collect_thread_image_specs(
     return specs[-_MAX_REFERENCE_IMAGES:]
 
 
-def _build_image_download_headers(url: str, token: str) -> dict[str, str]:
-    """Build safe headers for downloading a thread reference image.
+def _collect_thread_transcription_media_specs(
+    thread_messages: Sequence[ThreadMessage],
+) -> list[dict[str, str]]:
+    """Collect downloadable transcription-media descriptors from thread messages.
 
     Args:
-        url: Image download URL extracted from Slack metadata.
+        thread_messages: Normalized Slack thread transcript used for routing.
+
+    Returns:
+        Ordered downloadable audio or video descriptors.
+    """
+    specs: list[dict[str, str]] = []
+    for message in thread_messages:
+        raw_media = message.metadata.get("slack_transcription_media")
+        if not isinstance(raw_media, list):
+            continue
+        for index, raw_file in enumerate(raw_media, start=1):
+            if not isinstance(raw_file, Mapping):
+                continue
+            file_payload = cast(Mapping[str, Any], raw_file)
+            download_url = str(file_payload.get("download_url") or "").strip()
+            if not download_url:
+                continue
+            specs.append(
+                {
+                    "identifier": f"thread-media-{message.ts.replace('.', '-')}-{index}",
+                    "download_url": download_url,
+                    "media_type": str(file_payload.get("mime_type") or "").strip(),
+                    "title": str(file_payload.get("title") or "").strip(),
+                    "filename": str(file_payload.get("filename") or "").strip(),
+                    "source": str(file_payload.get("source") or "").strip(),
+                    "message_ts": message.ts,
+                }
+            )
+    return specs
+
+
+def _build_slack_download_headers(url: str, token: str) -> dict[str, str]:
+    """Build safe headers for downloading a Slack-owned private file.
+
+    Args:
+        url: Download URL extracted from Slack metadata.
         token: Slack bot token available on the current client.
 
     Returns:
@@ -349,7 +476,7 @@ async def _download_thread_reference_images(
             try:
                 response = await http_client.get(
                     spec["download_url"],
-                    headers=_build_image_download_headers(spec["download_url"], token),
+                    headers=_build_slack_download_headers(spec["download_url"], token),
                 )
                 response.raise_for_status()
             except httpx.HTTPError:
@@ -378,6 +505,67 @@ async def _download_thread_reference_images(
                 )
             )
     return reference_images
+
+
+async def _download_thread_transcription_media_attachment(
+    client: SlackConversationsClient | None,
+    spec: Mapping[str, str],
+) -> dict[str, str | bytes]:
+    """Download a Slack audio or video attachment for transcription.
+
+    Args:
+        client: Slack client whose token can authorize private Slack file downloads.
+        spec: Media descriptor selected from `_collect_thread_transcription_media_specs`.
+
+    Returns:
+        Mapping containing binary `data`, normalized `media_type`, and `filename`.
+
+    Raises:
+        SlackAudioDownloadError: If the attachment cannot be downloaded safely.
+    """
+    if client is None or not isinstance(client.token, str) or not client.token.strip():
+        raise SlackAudioDownloadError("Slack client token is required.")
+
+    download_url = str(spec.get("download_url") or "").strip()
+    if not download_url:
+        raise SlackAudioDownloadError("Slack media descriptor did not include a URL.")
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=60.0) as http_client:
+        try:
+            response = await http_client.get(
+                download_url,
+                headers=_build_slack_download_headers(
+                    download_url, client.token.strip()
+                ),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise SlackAudioDownloadError(
+                "Slack transcription media download failed."
+            ) from exc
+
+    media_type = (
+        str(spec.get("media_type") or "").strip()
+        or response.headers.get("content-type", "").split(";", 1)[0].strip()
+    )
+    data = response.content
+    if not (media_type.startswith("audio/") or media_type.startswith("video/")):
+        raise SlackAudioDownloadError(
+            "Slack attachment was not an audio or video payload."
+        )
+    if not data or len(data) > _MAX_REFERENCE_AUDIO_BYTES:
+        raise SlackAudioDownloadError(
+            "Slack audio or video attachment was empty or too large."
+        )
+
+    filename = (
+        str(spec.get("filename") or spec.get("title") or "media").strip() or "media"
+    )
+    return {
+        "data": data,
+        "media_type": media_type,
+        "filename": filename,
+    }
 
 
 def _filename_for_generated_image(media_type: str) -> str:
@@ -627,7 +815,8 @@ def build_agent_help_message(user_id: str | None = None) -> str:
         "- `@agents-party summarize this thread`\n"
         "- `@agents-party capture follow-up actions from this discussion`\n"
         "- `@agents-party verify the latest deployment policy`\n"
-        "- `@agents-party create a mockup from this idea`"
+        "- `@agents-party create a mockup from this idea`\n"
+        "- `@agents-party 文字起こしして`"
     )
 
 
@@ -646,7 +835,8 @@ def build_thread_menu_message(user_id: str | None = None) -> str:
         "Try one of these mentions:\n"
         "- `@agents-party summarize this thread`\n"
         "- `@agents-party capture follow-up actions from this discussion`\n"
-        "- `@agents-party verify the latest deployment policy`"
+        "- `@agents-party verify the latest deployment policy`\n"
+        "- `@agents-party 文字起こしして`"
     )
 
 
@@ -687,6 +877,10 @@ def build_thread_menu_blocks(user_id: str | None = None) -> list[dict[str, Any]]
                     "text": (
                         "*Verify*\n`@agents-party verify the latest deployment policy`"
                     ),
+                },
+                {
+                    "type": "mrkdwn",
+                    "text": "*Transcribe*\n`@agents-party 文字起こしして`",
                 },
             ],
         },
@@ -779,6 +973,106 @@ def build_translation_execution_error_message(user_id: str | None = None) -> str
         f"{mention}I couldn't translate that message right now.\n"
         "Please try again in a moment."
     )
+
+
+def build_transcription_started_message(user_id: str | None = None) -> str:
+    """Build the message shown when a transcription job has started.
+
+    Args:
+        user_id: Optional Slack user id to mention in the start message.
+
+    Returns:
+        Slack-formatted progress message.
+    """
+    mention = f"<@{user_id}> " if user_id else ""
+    return (
+        f"{mention}starting transcription for the latest audio or video attachment in this thread.\n"
+        "I'll post the result here when it is ready."
+    )
+
+
+def build_transcription_source_error_message(user_id: str | None = None) -> str:
+    """Build the message shown when a thread contains no transcribable media.
+
+    Args:
+        user_id: Optional Slack user id to mention in the error message.
+
+    Returns:
+        Slack-formatted operational error message.
+    """
+    mention = f"<@{user_id}> " if user_id else ""
+    return (
+        f"{mention}I couldn't find a Slack audio or video attachment in this thread.\n"
+        "Attach an audio or video file and ask me to transcribe it in the same thread."
+    )
+
+
+def build_transcription_unconfigured_message(user_id: str | None = None) -> str:
+    """Build the message shown when Cloud Speech transcription is not configured.
+
+    Args:
+        user_id: Optional Slack user id to mention in the error message.
+
+    Returns:
+        Slack-formatted configuration error message.
+    """
+    mention = f"<@{user_id}> " if user_id else ""
+    return (
+        f"{mention}Transcription is not configured for this workspace.\n"
+        "Set `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_TRANSCRIPTION_STAGING_BUCKET`, and configure Application Default Credentials."
+    )
+
+
+def build_transcription_execution_error_message(user_id: str | None = None) -> str:
+    """Build the message shown when Cloud Speech transcription fails at runtime.
+
+    Args:
+        user_id: Optional Slack user id to mention in the error message.
+
+    Returns:
+        Slack-formatted runtime error message.
+    """
+    mention = f"<@{user_id}> " if user_id else ""
+    return (
+        f"{mention}I couldn't transcribe that media right now.\n"
+        "Please try again in a moment."
+    )
+
+
+def build_transcription_response_message(
+    transcription: TranscriptionResponse,
+    *,
+    filename: str | None = None,
+) -> str:
+    """Build the final Slack reply for a completed transcription run.
+
+    Args:
+        transcription: Completed speaker-attributed transcription response.
+        filename: Optional original Slack filename for the transcribed audio.
+
+    Returns:
+        Slack-formatted transcription reply.
+    """
+    heading = "Transcription complete."
+    if filename:
+        heading = f"Transcription complete for `{filename}`."
+    lines = [heading]
+    for segment in transcription.segments:
+        lines.append(f"{segment.speaker_label}: {segment.text}")
+    return "\n".join(lines)
+
+
+def _is_transcription_request(text: str) -> bool:
+    """Return whether a Slack request explicitly asks for transcription.
+
+    Args:
+        text: User request text after Slack mention normalization.
+
+    Returns:
+        `True` when the request clearly asks for transcription.
+    """
+    normalized = text.casefold()
+    return any(keyword in normalized for keyword in _TRANSCRIPTION_KEYWORDS)
 
 
 def _build_agent_invocation(
@@ -906,6 +1200,7 @@ def _normalize_thread_message(message: Mapping[str, Any]) -> ThreadMessage:
     app_id = _optional_text_field(message, "app_id")
 
     image_metadata = _extract_slack_image_metadata(message)
+    transcription_media_metadata = _extract_slack_transcription_media_metadata(message)
 
     if (
         subtype in _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES
@@ -921,6 +1216,8 @@ def _normalize_thread_message(message: Mapping[str, Any]) -> ThreadMessage:
             metadata["slack_app_id"] = app_id
         if image_metadata:
             metadata["slack_images"] = image_metadata
+        if transcription_media_metadata:
+            metadata["slack_transcription_media"] = transcription_media_metadata
         return ThreadMessage(
             ts=ts,
             role=MessageRole.ASSISTANT,
@@ -936,6 +1233,8 @@ def _normalize_thread_message(message: Mapping[str, Any]) -> ThreadMessage:
     metadata: dict[str, Any] = {}
     if image_metadata:
         metadata["slack_images"] = image_metadata
+    if transcription_media_metadata:
+        metadata["slack_transcription_media"] = transcription_media_metadata
     return ThreadMessage(
         ts=ts,
         role=MessageRole.USER,
@@ -1152,6 +1451,143 @@ def _build_translation_service() -> CloudTranslationService | None:
     if not settings.google_cloud_project:
         return None
     return CloudTranslationService(project_id=settings.google_cloud_project)
+
+
+def _build_transcription_service() -> CloudSpeechTranscriptionService | None:
+    """Build the configured Cloud Speech transcription service helper.
+
+    Returns:
+        Cloud Speech transcription service bound to the configured Google Cloud
+        project, or `None` when transcription is not configured.
+    """
+    if not settings.google_cloud_project:
+        return None
+    if not settings.google_cloud_transcription_staging_bucket:
+        return None
+    staging_service = CloudStorageStagingService(
+        project_id=settings.google_cloud_project,
+        bucket_name=settings.google_cloud_transcription_staging_bucket,
+    )
+    return CloudSpeechTranscriptionService(
+        project_id=settings.google_cloud_project,
+        location=settings.google_cloud_speech_location,
+        model=settings.google_cloud_transcription_model,
+        language_codes=settings.google_cloud_transcription_language_codes,
+        staging_service=staging_service,
+    )
+
+
+def _schedule_background_task(coro: Any) -> asyncio.Task[Any]:
+    """Create a background task for long-running Slack feature work.
+
+    Args:
+        coro: Awaitable coroutine implementing the background work.
+
+    Returns:
+        Created asyncio task.
+    """
+    task = asyncio.create_task(coro)
+    task.add_done_callback(_log_background_task_error)
+    return task
+
+
+def _log_background_task_error(task: asyncio.Task[Any]) -> None:
+    """Log uncaught exceptions from background Slack feature tasks.
+
+    Args:
+        task: Completed background task.
+
+    Returns:
+        None.
+    """
+    if task.cancelled():
+        return
+    try:
+        task.result()
+    except Exception:  # pragma: no cover - defensive async logging.
+        logger.exception("Background Slack task failed.")
+
+
+async def _run_transcription_request(
+    invocation: SlackAgentInvocation,
+    *,
+    client: SlackConversationsClient | None,
+) -> None:
+    """Execute a thread transcription request outside the Slack ack path.
+
+    Args:
+        invocation: Validated Slack invocation describing the target thread.
+        client: Slack client used to fetch thread history and post replies.
+
+    Returns:
+        None.
+    """
+    thread_ts = invocation.thread_ts or invocation.message_ts
+    if client is None or thread_ts is None:
+        return
+
+    await client.chat_postMessage(
+        channel=invocation.channel_id,
+        text=build_transcription_started_message(invocation.user_id),
+        thread_ts=thread_ts,
+    )
+
+    try:
+        thread_messages = await _fetch_thread_messages(client, invocation)
+    except SlackThreadHistoryError:
+        await client.chat_postMessage(
+            channel=invocation.channel_id,
+            text=build_thread_context_error_message(invocation.user_id),
+            thread_ts=thread_ts,
+        )
+        return
+
+    media_specs = _collect_thread_transcription_media_specs(thread_messages)
+    if not media_specs:
+        await client.chat_postMessage(
+            channel=invocation.channel_id,
+            text=build_transcription_source_error_message(invocation.user_id),
+            thread_ts=thread_ts,
+        )
+        return
+
+    transcription_service = _build_transcription_service()
+    if transcription_service is None:
+        await client.chat_postMessage(
+            channel=invocation.channel_id,
+            text=build_transcription_unconfigured_message(invocation.user_id),
+            thread_ts=thread_ts,
+        )
+        return
+
+    latest_media = media_specs[-1]
+    try:
+        media_payload = await _download_thread_transcription_media_attachment(
+            client,
+            latest_media,
+        )
+        transcription = await asyncio.to_thread(
+            transcription_service.transcribe_bytes,
+            data=cast(bytes, media_payload["data"]),
+            filename=cast(str, media_payload["filename"]),
+            content_type=cast(str, media_payload["media_type"]),
+        )
+    except (SlackAudioDownloadError, CloudTranscriptionError, ValueError):
+        await client.chat_postMessage(
+            channel=invocation.channel_id,
+            text=build_transcription_execution_error_message(invocation.user_id),
+            thread_ts=thread_ts,
+        )
+        return
+
+    await client.chat_postMessage(
+        channel=invocation.channel_id,
+        text=build_transcription_response_message(
+            transcription,
+            filename=cast(str, media_payload["filename"]),
+        ),
+        thread_ts=thread_ts,
+    )
 
 
 async def handle_translation_reaction(
@@ -1404,6 +1840,15 @@ async def handle_agent_mention(
         )
         return
 
+    if _is_transcription_request(invocation.text):
+        _schedule_background_task(
+            _run_transcription_request(
+                invocation,
+                client=client,
+            )
+        )
+        return
+
     response_text = await invoke_routed_agent(
         invocation,
         client=client,
@@ -1506,6 +1951,11 @@ __all__ = [
     "build_thread_menu_message",
     "build_agent_unconfigured_message",
     "build_thread_context_error_message",
+    "build_transcription_execution_error_message",
+    "build_transcription_response_message",
+    "build_transcription_source_error_message",
+    "build_transcription_started_message",
+    "build_transcription_unconfigured_message",
     "build_translation_execution_error_message",
     "build_translation_unconfigured_message",
     "build_translation_source_error_message",
