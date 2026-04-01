@@ -1,0 +1,261 @@
+"""Slack App Home image-generation interactions."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from agents_party.agents.image_generation import (
+    ImageGenerationInvocation,
+    run_image_generation,
+)
+
+IMAGE_GENERATION_ACTION_ID = "image_generation:start"
+IMAGE_GENERATION_VIEW_CALLBACK_ID = "image_generation:submit"
+_PROMPT_BLOCK_ID = "image_generation_prompt"
+_PROMPT_ACTION_ID = "image_generation_prompt_value"
+
+
+def _build_image_generation_view() -> dict[str, Any]:
+    """Build the modal payload used to collect an image-generation prompt.
+
+    Returns:
+        Slack view payload for the prompt-entry modal.
+    """
+    return {
+        "type": "modal",
+        "callback_id": IMAGE_GENERATION_VIEW_CALLBACK_ID,
+        "title": {
+            "type": "plain_text",
+            "text": "Generate image",
+        },
+        "submit": {
+            "type": "plain_text",
+            "text": "Generate",
+        },
+        "close": {
+            "type": "plain_text",
+            "text": "Cancel",
+        },
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": _PROMPT_BLOCK_ID,
+                "label": {
+                    "type": "plain_text",
+                    "text": "Prompt",
+                },
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": _PROMPT_ACTION_ID,
+                    "multiline": True,
+                    "placeholder": {
+                        "type": "plain_text",
+                        "text": "Describe the image you want to generate.",
+                    },
+                },
+            }
+        ],
+    }
+
+
+def _read_submission_prompt(body: Mapping[str, Any]) -> str:
+    """Extract and validate the image-generation prompt from a Slack modal payload.
+
+    Args:
+        body: Slack view submission payload containing the modal state.
+
+    Returns:
+        Trimmed prompt entered by the user.
+
+    Raises:
+        ValueError: If the modal payload does not contain a non-blank prompt.
+    """
+    view = body.get("view", {})
+    view_state = view.get("state", {})
+    values = view_state.get("values", {})
+    prompt_state = values.get(_PROMPT_BLOCK_ID, {})
+    prompt_payload = prompt_state.get(_PROMPT_ACTION_ID, {})
+    prompt = str(prompt_payload.get("value", "")).strip()
+    if not prompt:
+        raise ValueError("Enter an image prompt.")
+    return prompt
+
+
+def _filename_for_media_type(media_type: str) -> str:
+    """Return a stable Slack upload filename for the generated image.
+
+    Args:
+        media_type: MIME type reported by the image-generation agent.
+
+    Returns:
+        Filename with an extension matching the MIME type when recognized.
+    """
+    if media_type == "image/jpeg":
+        return "generated-image.jpg"
+    if media_type == "image/webp":
+        return "generated-image.webp"
+    return "generated-image.png"
+
+
+def _build_generation_comment(prompt: str) -> str:
+    """Build the Slack comment attached to an uploaded generated image.
+
+    Args:
+        prompt: Prompt used for image generation.
+
+    Returns:
+        Slack-ready comment summarizing the completed generation request.
+    """
+    return f"Generated image for prompt:\n{prompt}"
+
+
+async def _open_user_messages_channel(client: Any, user_id: str) -> str:
+    """Open the Slack DM channel used to deliver generated images.
+
+    Args:
+        client: Slack client used to open a direct message conversation.
+        user_id: Slack user id that should receive the generated image.
+
+    Returns:
+        Slack conversation id for the user's messages surface.
+
+    Raises:
+        ValueError: If Slack does not return a usable channel id.
+    """
+    response = await client.conversations_open(users=user_id)
+    channel = response.get("channel", {})
+    channel_id = str(channel.get("id", "")).strip()
+    if not channel_id:
+        raise ValueError("Slack did not return a direct-message channel id.")
+    return channel_id
+
+
+def _build_image_generation_invocation(
+    body: Mapping[str, Any],
+    prompt: str,
+    *,
+    user_id: str,
+) -> ImageGenerationInvocation:
+    """Build the typed agent invocation for a Slack image-generation request.
+
+    Args:
+        body: Slack view submission payload containing workspace metadata.
+        prompt: Normalized prompt submitted by the Slack user.
+        user_id: Slack user id that submitted the prompt.
+
+    Returns:
+        Typed image-generation invocation for the specialist agent.
+    """
+    team = body.get("team", {})
+    team_id = str(team.get("id", "")).strip() or None
+    return ImageGenerationInvocation(
+        prompt=prompt,
+        user_id=user_id,
+        team_id=team_id,
+    )
+
+
+async def handle_image_generation_action(
+    ack: Any,
+    body: Mapping[str, Any],
+    client: Any,
+) -> None:
+    """Open the image-generation modal from the registered Slack action.
+
+    Args:
+        ack: Slack acknowledgement callback for the button action.
+        body: Slack action payload containing the trigger id.
+        client: Slack client used to open the modal.
+
+    Returns:
+        None.
+    """
+    await ack()
+    trigger_id = str(body.get("trigger_id", "")).strip()
+    if not trigger_id:
+        return
+
+    await client.views_open(
+        trigger_id=trigger_id,
+        view=_build_image_generation_view(),
+    )
+
+
+async def handle_image_generation_submission(
+    ack: Any,
+    body: Mapping[str, Any],
+    client: Any,
+) -> None:
+    """Generate an image from a submitted modal prompt and upload it to Slack.
+
+    Args:
+        ack: Slack acknowledgement callback for the view submission.
+        body: Slack view submission payload containing the prompt and user id.
+        client: Slack client used to post messages and upload the generated image.
+
+    Returns:
+        None.
+    """
+    try:
+        prompt = _read_submission_prompt(body)
+    except ValueError:
+        await ack(
+            response_action="errors",
+            errors={_PROMPT_BLOCK_ID: "Enter an image prompt."},
+        )
+        return
+
+    await ack()
+
+    user = body.get("user", {})
+    user_id = str(user.get("id", "")).strip()
+    if not user_id:
+        return
+
+    try:
+        delivery_channel_id = await _open_user_messages_channel(client, user_id)
+    except ValueError:
+        await client.chat_postMessage(
+            channel=user_id,
+            text="Image generation failed because a delivery channel could not be opened.",
+        )
+        return
+
+    try:
+        generated_image = await run_image_generation(
+            _build_image_generation_invocation(
+                body,
+                prompt,
+                user_id=user_id,
+            )
+        )
+    except ValueError as exc:
+        await client.chat_postMessage(
+            channel=delivery_channel_id,
+            text=f"Image generation is not configured: {exc}",
+        )
+        return
+    except Exception:
+        await client.chat_postMessage(
+            channel=delivery_channel_id,
+            text=("Image generation failed. Verify Vertex AI access and try again."),
+        )
+        return
+
+    await client.files_upload_v2(
+        channel=delivery_channel_id,
+        file=generated_image.data,
+        filename=_filename_for_media_type(generated_image.media_type),
+        title="Generated image",
+        alt_txt=prompt,
+        initial_comment=_build_generation_comment(prompt),
+    )
+
+
+__all__ = [
+    "IMAGE_GENERATION_ACTION_ID",
+    "IMAGE_GENERATION_VIEW_CALLBACK_ID",
+    "handle_image_generation_action",
+    "handle_image_generation_submission",
+]

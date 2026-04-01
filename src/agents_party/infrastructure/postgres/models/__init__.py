@@ -3,6 +3,10 @@
 from sqlmodel import SQLModel
 
 from agents_party.infrastructure.postgres.models.common import ensure_schema
+from agents_party.infrastructure.postgres.models.google_auth import (
+    GoogleAuthConnectionRecord,
+    GoogleOAuthStateRecord,
+)
 from agents_party.infrastructure.postgres.models.slack_routing import (
     AgentRecord,
     ChannelAppSettingsRecord,
@@ -26,6 +30,8 @@ metadata = SQLModel.metadata
 __all__ = [
     "AgentRecord",
     "ChannelAppSettingsRecord",
+    "GoogleAuthConnectionRecord",
+    "GoogleOAuthStateRecord",
     "SlackThreadRecord",
     "SlackBotRecord",
     "SlackInstallationRecord",

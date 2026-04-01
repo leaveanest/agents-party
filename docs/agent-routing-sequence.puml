@@ -16,75 +16,98 @@ box "Google Cloud Project"
   participant "Mention Handler" as mention_handler
   participant "Message Handler" as message_handler
   participant "Agent Routing" as agent_routing
-  participant "Agent Selector" as agent_selector
-  participant "Selected Agent" as selected_agent
-  database "PostgreSQL\nslack_threads" as slack_threads
+  participant "Agent Router" as agent_router
+  participant "Text Specialist(s)" as text_specialists
+  participant "Media Specialist" as media_specialist
+  database "PostgreSQL\nworkspace/channel settings\nslack_threads" as pg_threads
   participant "Vertex AI" as vertex_ai
+  participant "Google Maps Platform" as google_maps
 end box
 
-slack_user -> slack : Post a message in a channel or thread
-alt Explicit agent invocation by mention
+slack_user -> slack : Post in channel or thread
+
+alt Explicit app mention
   slack -> slack_events_endpoint : app_mention event
   slack_events_endpoint -> mention_handler : Pass event payload
-  mention_handler -> agent_routing : Build invocation\n(team, channel, thread, user text)
-  agent_routing -> slack_threads : Read thread setting\n(agent_id)
-  alt Agent already selected on the thread
-    slack_threads --> agent_routing : Existing agent_id
-  else Agent not selected on the thread
-    slack_threads --> agent_routing : No agent_id
-    agent_routing -> agent_selector : Select agent from user request\nand available agent candidates
-    agent_selector -> vertex_ai : Reason over the request
-    vertex_ai --> agent_selector : Recommended agent_id
-    agent_selector --> agent_routing : Selected agent_id
-    agent_routing -> slack_threads : Persist selected agent_id\nas thread setting
+  mention_handler -> mention_handler : Normalize invocation
+  alt Mention has no prompt text
+    mention_handler -> slack : Post thread menu / usage help
+    slack --> slack_user : Show menu blocks
+  else Mention has prompt text
+    mention_handler -> agent_routing : Route request
   end
-else Follow-up message in an active agent thread
+else Message event
   slack -> slack_events_endpoint : message event
   slack_events_endpoint -> message_handler : Pass event payload
-  message_handler -> slack_threads : Read thread state\n(agent_id, status)
-  alt Thread has an active agent conversation
-    slack_threads --> message_handler : Existing agent_id and active status
-    message_handler -> agent_routing : Continue with thread agent\nwithout mention
-  else No active agent conversation
-    slack_threads --> message_handler : No active thread agent
-    message_handler --> slack : No response
+  alt Message starts with bot mention
+    message_handler -> mention_handler : Reuse mention flow
+  else Plain follow-up message
+    message_handler -> pg_threads : Read stored thread state
+    pg_threads --> message_handler : active agent_id and status
+    message_handler -> pg_threads : Read auto-reply / channel enablement settings
+    alt Active assistant thread and auto-reply enabled
+      message_handler -> agent_routing : Continue routed conversation
+    else Ignore message
+      message_handler --> slack : No response
+    end
   end
 end
 
-agent_routing -> slack_api : Fetch full thread history\nvia Slack API (conversations.replies)
-slack_api --> agent_routing : All thread messages\n(user posts + bot posts)
-agent_routing -> selected_agent : Execute with selected agent_id\nand full thread messages
-selected_agent -> vertex_ai : Generate reply from full thread context
-vertex_ai --> selected_agent : Response content
-selected_agent --> agent_routing : Agent output
-agent_routing -> slack : Post reply to the thread
-slack --> slack_user : Show agent response
+agent_routing -> pg_threads : Check channel enablement and thread route
+agent_routing -> slack_api : Fetch full thread history
+slack_api --> agent_routing : Root message + thread transcript
+agent_routing -> agent_router : Build Slack invocation with full context
+agent_router -> vertex_ai : Decide direct reply or delegation
 
-note right of selected_agent
-Basic behavior:
-the agent reads all posts in the thread,
-including user posts and bot posts,
-and generates the output from that full context.
+alt Direct reply
+  vertex_ai --> agent_router : Slack-ready response
+  agent_router --> agent_routing : Final text
+else One or more text specialists
+  loop zero or more text specialists
+    agent_router -> text_specialists : Delegate specialist call
+    text_specialists -> vertex_ai : Specialist reasoning
+    opt Maps specialist
+      text_specialists -> google_maps : Places / Routes lookup
+      google_maps --> text_specialists : Structured maps data
+    end
+    vertex_ai --> text_specialists : Specialist result
+    text_specialists --> agent_router : Normalized outcome
+  end
+  agent_router -> vertex_ai : Synthesize final answer
+  vertex_ai --> agent_router : Slack-ready response
+  agent_router --> agent_routing : Final text
+else Media specialist
+  agent_router -> media_specialist : Delegate image or video request
+  media_specialist -> vertex_ai : Generate media payload
+  vertex_ai --> media_specialist : Binary image or video
+  media_specialist --> agent_router : Media outcome
+  agent_router --> agent_routing : Uploadable media + optional comment
+end
+
+alt Text response
+  agent_routing -> pg_threads : Persist active agent_id=`assistant`
+  agent_routing -> slack : Post reply in thread
+else Media response
+  agent_routing -> slack : Upload generated file to thread
+  agent_routing -> pg_threads : Persist active agent_id=`assistant`
+end
+slack --> slack_user : Show assistant result
+
+note right of agent_router
+The router may combine multiple text specialists in one run.
+At most one media specialist can run, and it must be last.
 end note
 
-note over agent_routing, slack_threads
-Assumption for this diagram:
-if selector fallback chooses an agent, the result is stored on the thread
-so later mentions in the same thread reuse that agent directly.
+note over agent_routing, slack_api
+Before execution, the routing layer always loads the full Slack thread.
+Recent thread images may also be downloaded and passed through for image generation.
 end note
 
 note over message_handler
-Recommended guard conditions for message events:
-- react only to user-authored messages
-- ignore bot, edit, and delete related subtypes
-- limit auto-replies to threads with an active agent conversation
-end note
-
-note over slack_api, selected_agent
-Context collection rule:
-retrieve the full thread from Slack API,
-including both user messages and bot messages,
-before running the selected agent.
+Follow-up auto-replies run only when:
+- the message is user-authored text
+- the thread is marked active in PostgreSQL
+- channel auto-reply remains enabled
 end note
 
 @enduml

@@ -142,6 +142,80 @@ def test_resolve_agent_prefers_thread_over_channel_and_workspace() -> None:
     assert route.scope == AgentRouteScope.THREAD
 
 
+def test_is_channel_enabled_returns_false_outside_workspace_enablement() -> None:
+    """Verify the assistant is disabled when the channel is not workspace-enabled.
+
+    Returns:
+        None.
+    """
+    engine = build_seeded_engine()
+    repository = PostgresSlackAgentRepository(engine=engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(WorkspaceAppSettingsRecord),
+            [
+                {
+                    "team_id": "T1",
+                    "default_agent_id": None,
+                    "thread_auto_reply": None,
+                    "updated_at": seed_timestamp(),
+                    "payload": {
+                        "enabled_channel_ids": ["C999"],
+                    },
+                }
+            ],
+        )
+
+    assert repository.is_channel_enabled(team_id="T1", channel_id="C123") is False
+
+
+def test_is_channel_enabled_returns_true_for_allowed_channel() -> None:
+    """Verify the assistant remains enabled when the channel is allowed.
+
+    Returns:
+        None.
+    """
+    engine = build_seeded_engine()
+    repository = PostgresSlackAgentRepository(engine=engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(WorkspaceAppSettingsRecord),
+            [
+                {
+                    "team_id": "T1",
+                    "default_agent_id": "legacy-agent",
+                    "thread_auto_reply": None,
+                    "updated_at": seed_timestamp(),
+                    "payload": {
+                        "default_agent_id": "legacy-agent",
+                        "enabled_channel_ids": ["C123"],
+                    },
+                }
+            ],
+        )
+        connection.execute(
+            insert(AgentRecord),
+            [
+                {
+                    "agent_id": "legacy-agent",
+                    "enabled": True,
+                    "updated_at": seed_timestamp(),
+                    "payload": {
+                        "agent_id": "legacy-agent",
+                        "name": "Legacy Agent",
+                        "model_provider": "google-gla",
+                        "model_name": "gemini-3-flash-preview",
+                        "enabled": True,
+                    },
+                }
+            ],
+        )
+
+    assert repository.is_channel_enabled(team_id="T1", channel_id="C123") is True
+
+
 def test_activate_thread_agent_upserts_minimal_state_only() -> None:
     """Verify thread activation writes only routing state fields.
 

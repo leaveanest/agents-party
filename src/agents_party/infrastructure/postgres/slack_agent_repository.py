@@ -53,6 +53,30 @@ class PostgresSlackAgentRepository:
             raise ValueError("database_url or engine is required.")
         self._engine = engine or build_database_engine(cast(str, database_url))
 
+    def is_channel_enabled(
+        self,
+        *,
+        team_id: str,
+        channel_id: str,
+    ) -> bool:
+        """Return whether the Slack assistant is enabled for a channel.
+
+        Args:
+            team_id: Slack workspace id owning the conversation.
+            channel_id: Slack channel id where the request was made.
+
+        Returns:
+            `True` when the assistant should handle requests in this channel.
+        """
+        workspace_settings = self._read_workspace_settings(team_id)
+        if (
+            workspace_settings is not None
+            and workspace_settings.enabled_channel_ids
+            and channel_id not in workspace_settings.enabled_channel_ids
+        ):
+            return False
+        return True
+
     def resolve_agent(
         self,
         *,
@@ -70,14 +94,10 @@ class PostgresSlackAgentRepository:
         Returns:
             Resolved route containing the enabled agent, or `None` when none applies.
         """
-        workspace_settings = self._read_workspace_settings(team_id)
-        if (
-            workspace_settings is not None
-            and workspace_settings.enabled_channel_ids
-            and channel_id not in workspace_settings.enabled_channel_ids
-        ):
+        if not self.is_channel_enabled(team_id=team_id, channel_id=channel_id):
             return None
 
+        workspace_settings = self._read_workspace_settings(team_id)
         channel_settings = self._read_channel_settings(team_id, channel_id)
         thread = (
             self.get_thread_document(
@@ -135,12 +155,7 @@ class PostgresSlackAgentRepository:
             Enabled agent documents that are allowed in the supplied context.
         """
         del thread_ts
-        workspace_settings = self._read_workspace_settings(team_id)
-        if (
-            workspace_settings is not None
-            and workspace_settings.enabled_channel_ids
-            and channel_id not in workspace_settings.enabled_channel_ids
-        ):
+        if not self.is_channel_enabled(team_id=team_id, channel_id=channel_id):
             return []
 
         statement = (
@@ -272,14 +287,10 @@ class PostgresSlackAgentRepository:
         Returns:
             `True` when follow-up thread replies should trigger auto-routing.
         """
-        workspace_settings = self._read_workspace_settings(team_id)
-        if (
-            workspace_settings is not None
-            and workspace_settings.enabled_channel_ids
-            and channel_id not in workspace_settings.enabled_channel_ids
-        ):
+        if not self.is_channel_enabled(team_id=team_id, channel_id=channel_id):
             return False
 
+        workspace_settings = self._read_workspace_settings(team_id)
         channel_settings = self._read_channel_settings(team_id, channel_id)
         if (
             channel_settings is not None

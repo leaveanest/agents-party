@@ -126,6 +126,37 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "google_auth_connections",
+        sa.Column("team_id", sa.String(), nullable=False),
+        sa.Column("slack_user_id", sa.String(), nullable=False),
+        sa.Column("google_account_subject", sa.String(), nullable=False),
+        sa.Column("google_account_email", sa.String(), nullable=True),
+        sa.Column("connection_status", sa.String(), nullable=False),
+        sa.Column("token_expires_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "refresh_token_expires_at", sa.DateTime(timezone=True), nullable=True
+        ),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("payload", sa.JSON(), nullable=False),
+        sa.PrimaryKeyConstraint(
+            "team_id",
+            "slack_user_id",
+            "google_account_subject",
+        ),
+    )
+
+    op.create_table(
+        "google_oauth_states",
+        sa.Column("team_id", sa.String(), nullable=False),
+        sa.Column("state_id", sa.String(), nullable=False),
+        sa.Column("slack_user_id", sa.String(), nullable=False),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("payload", sa.JSON(), nullable=False),
+        sa.PrimaryKeyConstraint("team_id", "state_id"),
+    )
+
+    op.create_table(
         "work_items",
         sa.Column("team_id", sa.String(), nullable=False),
         sa.Column("work_item_id", sa.String(), nullable=False),
@@ -234,6 +265,8 @@ def downgrade() -> None:
     op.drop_table("slack_bots")
     op.drop_index("ix_slack_installations_lookup", table_name="slack_installations")
     op.drop_table("slack_installations")
+    op.drop_table("google_oauth_states")
+    op.drop_table("google_auth_connections")
 
     op.drop_table("slack_threads")
     op.drop_table("channel_app_settings")
