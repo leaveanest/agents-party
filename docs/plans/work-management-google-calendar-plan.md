@@ -102,13 +102,13 @@ Google Calendar の event そのものではない。
 「会議の 30 分前に自分だけ再確認したい」
 を自然に表現できる。
 
-## Firestore 配置追加案
+## PostgreSQL 配置追加案
 
 ```text
-workspaces/{team_id}/work_items/{work_item_id}/calendar_links/{link_id}
+work_item_calendar_links (team_id, work_item_id, link_id)
 ```
 
-この document は外部予定との link と local cache を持つ。
+この row は外部予定との link と local cache を持つ。
 `WorkItemDocument` に Google Calendar 固有フィールドを増やしすぎずに済む。
 
 ## Repository / Gateway の責務
@@ -172,7 +172,7 @@ src/agents_party/
     work_item_repository.py
     google_calendar_gateway.py
   infrastructure/
-    firestore/
+    postgres/
       work_item_repository.py
     google_calendar/
       google_calendar_gateway.py

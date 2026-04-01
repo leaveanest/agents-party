@@ -511,8 +511,7 @@ class GoogleAuthCoordinator:
                     update={
                         "connection_status": status,
                         "last_refresh_error_at": now,
-                        "last_refresh_error_code": exc.error_code
-                        or "refresh_failed",
+                        "last_refresh_error_code": exc.error_code or "refresh_failed",
                         "updated_at": now,
                     }
                 )
@@ -809,7 +808,7 @@ class GoogleAuthCoordinator:
         """Build an opaque document id for a stored OAuth state.
 
         Returns:
-            Random state document id safe for Firestore document naming.
+            Random state document id safe for persisted OAuth state keys.
         """
         return secrets.token_urlsafe(24)
 
@@ -861,6 +860,8 @@ class GoogleAuthCoordinator:
             None.
         """
         await self._gateway.aclose()
+
+
 __all__ = [
     "GoogleAuthCoordinator",
     "GoogleOAuthFlowError",

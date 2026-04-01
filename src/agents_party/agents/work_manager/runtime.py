@@ -32,6 +32,9 @@ from .preparer import (
 from .prompts import build_work_manager_execution_input
 from agents_party.config import settings
 from agents_party.domain import utc_now
+from agents_party.infrastructure.postgres.connection import (
+    build_database_engine_from_settings,
+)
 from agents_party.repositories import WorkItemRepository
 
 
@@ -39,24 +42,21 @@ def _build_repository() -> WorkItemRepository | None:
     """Build the configured work-item repository implementation.
 
     Returns:
-        Firestore-backed work-item repository, or `None` when unavailable.
+        PostgreSQL-backed work-item repository, or `None` when unavailable.
     """
-    if not settings.google_cloud_project:
+    if not settings.database_enabled:
         return None
     try:
         module = import_module(
-            "agents_party.infrastructure.firestore.work_item_repository"
+            "agents_party.infrastructure.postgres.work_item_repository"
         )
     except ModuleNotFoundError:
         return None
 
-    repository_cls = getattr(module, "FirestoreWorkItemRepository", None)
+    repository_cls = getattr(module, "PostgresWorkItemRepository", None)
     if repository_cls is None:
         return None
-    return repository_cls(
-        project_id=settings.google_cloud_project,
-        database=settings.firestore_database,
-    )
+    return repository_cls(engine=build_database_engine_from_settings(settings))
 
 
 def _configuration_error_result() -> WorkManagerResult:
@@ -68,8 +68,9 @@ def _configuration_error_result() -> WorkManagerResult:
     return WorkManagerResult(
         action=WorkManagerAction.NO_OP,
         message=(
-            "Work manager is not configured. Set GOOGLE_CLOUD_PROJECT and "
-            "WORK_MANAGER_MODEL, then connect the Firestore repository."
+            "Work manager is not configured. Set DATABASE_URL or the Cloud SQL "
+            "settings (CLOUD_SQL_INSTANCE_CONNECTION_NAME, CLOUD_SQL_DATABASE, "
+            "CLOUD_SQL_IAM_DB_USER), then configure WORK_MANAGER_MODEL."
         ),
     )
 

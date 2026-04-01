@@ -1,6 +1,6 @@
 ---
 name: pydantic-ai-agent-development
-description: Build or refactor `pydantic-ai` agents for this repository. Use when Codex needs to add a new agent, restructure agent modules, wire dependencies or toolsets, choose between single-agent and multi-agent flows, or align agent code with the repository's Slack, domain, repository, and Firestore boundaries.
+description: Build or refactor `pydantic-ai` agents for this repository. Use when Codex needs to add a new agent, restructure agent modules, wire dependencies or toolsets, choose between single-agent and multi-agent flows, or align agent code with the repository's Slack, domain, repository, and PostgreSQL boundaries.
 ---
 
 # Pydantic AI Agent Development
@@ -23,8 +23,8 @@ Start from the smallest package that can work, keep dependencies typed, and keep
 3. Map the change onto the repository boundaries.
    - Put agent builders, dependency containers, and orchestration helpers under `src/agents_party/agents/`.
    - Keep Slack SDK usage under `src/agents_party/slack/`.
-   - Keep Firestore SDK usage under `src/agents_party/infrastructure/firestore/`.
-   - Keep domain models independent from Slack and Firestore.
+   - Keep database access under `src/agents_party/infrastructure/postgres/`.
+   - Keep domain models independent from Slack and database SDK details.
 4. Start from an explicit scaffold instead of hand-rolling the shape every time.
    - Run `scripts/render_agent_module.py` when the task starts with a blank agent module.
    - The scaffold prints a minimal package layout for `__init__.py`, `models.py`, and `runtime.py`.
@@ -53,7 +53,7 @@ Start from the smallest package that can work, keep dependencies typed, and keep
 
 ## References
 
-- Read `references/repo-map.md` before moving logic across package boundaries or wiring Slack and Firestore code.
+- Read `references/repo-map.md` before moving logic across package boundaries or wiring Slack and persistence code.
 - Read `references/pydantic-ai-best-practices.md` before choosing output models, dependencies, toolsets, or multi-agent decomposition.
 
 ## Expected Outcomes
@@ -66,7 +66,7 @@ Start from the smallest package that can work, keep dependencies typed, and keep
 ## Guardrails
 
 - Do not put Slack SDK calls inside domain or repository modules.
-- Do not put Firestore SDK calls outside `src/agents_party/infrastructure/firestore/` without a strong reason.
+- Do not put database SDK calls outside `src/agents_party/infrastructure/postgres/` without a strong reason.
 - Do not add multi-agent coordination when a single typed agent is enough.
 - Do not leave outputs untyped when a stable schema is known.
 - Do not start with a large multi-file split unless the agent already needs separate runtime, prompt, or preparation responsibilities.

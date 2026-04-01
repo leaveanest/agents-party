@@ -149,9 +149,14 @@ def test_build_image_generation_agent_defaults_to_vertex_google_model(
     assert agent.model.system == "google-vertex"
     assert agent.model.model_name == "gemini-2.5-flash-image"
     assert agent.output_type is BinaryImage
-    assert len(agent._builtin_tools) == 1
-    assert isinstance(agent._builtin_tools[0], ImageGenerationTool)
-    assert agent._builtin_tools[0].output_format == "png"
+    builtin_tools = getattr(
+        agent,
+        "_builtin_tools",
+        getattr(agent, "_cap_builtin_tools", []),
+    )
+    assert len(builtin_tools) == 1
+    assert isinstance(builtin_tools[0], ImageGenerationTool)
+    assert builtin_tools[0].output_format == "png"
 
 
 def test_build_image_generation_agent_preserves_provider_qualified_override(

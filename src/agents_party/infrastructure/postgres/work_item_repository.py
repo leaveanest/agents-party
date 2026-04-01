@@ -1,10 +1,14 @@
+"""PostgreSQL-backed repository for work-item persistence and query views."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, cast
 
-from google.cloud import firestore
+from pydantic import BaseModel
+from sqlalchemy import Engine, asc, desc
+from sqlmodel import Session, col, select
 
 from agents_party.domain import (
     AttentionProfile,
@@ -26,6 +30,13 @@ from agents_party.domain import (
     derive_needs_attention_now,
     utc_now,
 )
+from agents_party.infrastructure.postgres.connection import build_database_engine
+from agents_party.infrastructure.postgres.models import (
+    WorkItemAttentionIndexRecord,
+    WorkItemEventRecord,
+    WorkItemParticipantRecord,
+    WorkItemRecord,
+)
 
 
 COMPLETED_STATUSES = {
@@ -35,28 +46,31 @@ COMPLETED_STATUSES = {
 }
 
 
-class FirestoreWorkItemRepository:
+class PostgresWorkItemRepository:
+    """PostgreSQL-backed implementation of the work-item repository boundary."""
+
     def __init__(
         self,
         *,
-        project_id: str | None = None,
-        database: str = "(default)",
-        client: Any | None = None,
+        database_url: str | None = None,
+        engine: Engine | None = None,
     ) -> None:
-        """Create a repository with either an injected client or a new Firestore client.
+        """Create a repository with either an injected engine or a database URL.
 
         Args:
-            project_id: Optional Google Cloud project id for Firestore client creation.
-            database: Firestore database name to connect to.
-            client: Optional injected Firestore-compatible client for tests or overrides.
+            database_url: SQLAlchemy-compatible database URL.
+            engine: Optional injected SQLAlchemy engine for tests or overrides.
 
-        Returns:
-            None.
+        Raises:
+            ValueError: If neither `database_url` nor `engine` is provided.
+
+        Notes:
+            The target schema must already exist. Apply Alembic migrations before
+            constructing this repository in non-test environments.
         """
-        self._client = client or firestore.Client(
-            project=project_id,
-            database=database,
-        )
+        if engine is None and database_url is None:
+            raise ValueError("database_url or engine is required.")
+        self._engine = engine or build_database_engine(cast(str, database_url))
 
     def create_work_item(
         self,
@@ -78,31 +92,29 @@ class FirestoreWorkItemRepository:
             participant.user_id: participant for participant in participants
         }
         events = self._sort_events(initial_events)
-        transaction = self._client.transaction()
 
-        transaction.set(
-            self._work_item_ref(item.team_id, item.work_item_id), self._dump(item)
-        )
-        for participant in participants_by_user.values():
-            transaction.set(
-                self._participant_ref(
-                    item.team_id, item.work_item_id, participant.user_id
-                ),
-                self._dump(participant),
+        with Session(self._engine) as session:
+            session.add(self._work_item_record(item))
+            self._replace_participants(
+                session=session,
+                team_id=item.team_id,
+                work_item_id=item.work_item_id,
+                participants=participants_by_user.values(),
             )
-        for event in events:
-            transaction.set(
-                self._event_ref(item.team_id, item.work_item_id, event.event_id),
-                self._dump(event),
+            self._replace_events(
+                session=session,
+                team_id=item.team_id,
+                work_item_id=item.work_item_id,
+                events=events,
             )
-        self._write_attention_index(
-            transaction=transaction,
-            item=item,
-            participants=participants_by_user,
-            events=events,
-            removed_user_ids=(),
-        )
-        self._commit_transaction(transaction)
+            self._replace_attention_index(
+                session=session,
+                item=item,
+                participants=participants_by_user,
+                events=events,
+            )
+            session.commit()
+
         return self._hydrate_aggregate(
             item=item,
             participants=participants_by_user,
@@ -162,10 +174,11 @@ class FirestoreWorkItemRepository:
         ):
             work_item_ids = self._list_attention_index_work_item_ids(query)
         else:
-            work_item_ids = [
-                snapshot.id
-                for snapshot in self._work_items_collection(query.team_id).stream()
-            ]
+            statement = select(WorkItemRecord.work_item_id).where(
+                WorkItemRecord.team_id == query.team_id
+            )
+            with Session(self._engine) as session:
+                work_item_ids = list(session.exec(statement).all())
 
         aggregates: list[WorkItemAggregate] = []
         for work_item_id in work_item_ids:
@@ -236,41 +249,31 @@ class FirestoreWorkItemRepository:
         next_item = WorkItemDocument.model_validate(next_item.model_dump(mode="python"))
 
         next_events = self._sort_events([*current_events, *mutation.events])
-        transaction = self._client.transaction()
-        transaction.set(
-            self._work_item_ref(team_id, work_item_id), self._dump(next_item)
-        )
-
-        removed_participant_user_ids = set(current_participants) - set(
-            next_participants
-        )
-        for removed_user_id in removed_participant_user_ids:
-            transaction.delete(
-                self._participant_ref(team_id, work_item_id, removed_user_id)
+        with Session(self._engine) as session:
+            item_record = session.get(WorkItemRecord, (team_id, work_item_id))
+            if item_record is None:
+                raise KeyError(f"Work item {work_item_id!r} was not found.")
+            self._apply_work_item_record(item_record, next_item)
+            session.add(item_record)
+            self._replace_participants(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+                participants=next_participants.values(),
             )
-        for participant in next_participants.values():
-            transaction.set(
-                self._participant_ref(team_id, work_item_id, participant.user_id),
-                self._dump(participant),
+            self._replace_events(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+                events=next_events,
             )
-
-        existing_event_ids = {event.event_id for event in current_events}
-        for event in mutation.events:
-            if event.event_id in existing_event_ids:
-                continue
-            transaction.set(
-                self._event_ref(team_id, work_item_id, event.event_id),
-                self._dump(event),
+            self._replace_attention_index(
+                session=session,
+                item=next_item,
+                participants=next_participants,
+                events=next_events,
             )
-
-        self._write_attention_index(
-            transaction=transaction,
-            item=next_item,
-            participants=next_participants,
-            events=next_events,
-            removed_user_ids=removed_participant_user_ids,
-        )
-        self._commit_transaction(transaction)
+            session.commit()
 
         return self._hydrate_aggregate(
             item=next_item,
@@ -279,143 +282,212 @@ class FirestoreWorkItemRepository:
             viewer_user_id=actor_user_id,
         )
 
-    def _workspace_ref(self, team_id: str) -> Any:
-        """Return the workspace document reference for a team.
+    def _work_item_record(self, item: WorkItemDocument) -> WorkItemRecord:
+        """Build the SQLModel record used to persist a work item.
 
         Args:
-            team_id: Slack workspace id.
+            item: Work-item document to serialize.
 
         Returns:
-            Firestore document reference for the workspace.
+            SQLModel record for the `work_items` table.
         """
-        return self._client.collection("workspaces").document(team_id)
-
-    def _work_items_collection(self, team_id: str) -> Any:
-        """Return the work-items collection reference for a team.
-
-        Args:
-            team_id: Slack workspace id.
-
-        Returns:
-            Firestore collection reference for work items in the workspace.
-        """
-        return self._workspace_ref(team_id).collection("work_items")
-
-    def _work_item_ref(self, team_id: str, work_item_id: str) -> Any:
-        """Return the Firestore reference for a specific work item.
-
-        Args:
-            team_id: Slack workspace id.
-            work_item_id: Work item identifier.
-
-        Returns:
-            Firestore document reference for the work item.
-        """
-        return self._work_items_collection(team_id).document(work_item_id)
-
-    def _participants_collection(self, team_id: str, work_item_id: str) -> Any:
-        """Return the participants collection for a work item.
-
-        Args:
-            team_id: Slack workspace id.
-            work_item_id: Work item identifier.
-
-        Returns:
-            Firestore collection reference for participant relations.
-        """
-        return self._work_item_ref(team_id, work_item_id).collection("participants")
-
-    def _participant_ref(self, team_id: str, work_item_id: str, user_id: str) -> Any:
-        """Return the participant document reference for a work item user.
-
-        Args:
-            team_id: Slack workspace id.
-            work_item_id: Work item identifier.
-            user_id: Participant user id.
-
-        Returns:
-            Firestore document reference for the participant relation.
-        """
-        return self._participants_collection(team_id, work_item_id).document(user_id)
-
-    def _events_collection(self, team_id: str, work_item_id: str) -> Any:
-        """Return the events collection for a work item.
-
-        Args:
-            team_id: Slack workspace id.
-            work_item_id: Work item identifier.
-
-        Returns:
-            Firestore collection reference for work-item events.
-        """
-        return self._work_item_ref(team_id, work_item_id).collection("events")
-
-    def _event_ref(self, team_id: str, work_item_id: str, event_id: str) -> Any:
-        """Return the event document reference for a work item event.
-
-        Args:
-            team_id: Slack workspace id.
-            work_item_id: Work item identifier.
-            event_id: Event identifier.
-
-        Returns:
-            Firestore document reference for the event.
-        """
-        return self._events_collection(team_id, work_item_id).document(event_id)
-
-    def _attention_collection(self, team_id: str, user_id: str) -> Any:
-        """Return the attention-index collection for a user in a workspace.
-
-        Args:
-            team_id: Slack workspace id.
-            user_id: User id owning the attention index.
-
-        Returns:
-            Firestore collection reference for the user's attention index entries.
-        """
-        return (
-            self._workspace_ref(team_id)
-            .collection("attention_index")
-            .document(user_id)
-            .collection("work_items")
+        return WorkItemRecord(
+            team_id=item.team_id,
+            work_item_id=item.work_item_id,
+            title=item.title,
+            status=item.status,
+            visibility_kind=item.visibility_kind,
+            audience_channel_id=item.audience_channel_id,
+            primary_assignee_user_id=item.primary_assignee_user_id,
+            due_at=item.due_at,
+            updated_at=item.updated_at,
+            completed_at=item.completed_at,
+            payload=self._dump(item),
         )
 
-    def _attention_ref(self, team_id: str, user_id: str, work_item_id: str) -> Any:
-        """Return the attention-index document reference for a user and work item.
+    def _apply_work_item_record(
+        self,
+        record: WorkItemRecord,
+        item: WorkItemDocument,
+    ) -> None:
+        """Copy work-item document values onto an existing SQLModel record.
 
         Args:
-            team_id: Slack workspace id.
-            user_id: User id owning the attention index entry.
-            work_item_id: Work item identifier.
-
-        Returns:
-            Firestore document reference for the attention index entry.
-        """
-        return self._attention_collection(team_id, user_id).document(work_item_id)
-
-    def _dump(self, document: Any) -> dict[str, Any]:
-        """Serialize a Pydantic document into Firestore-friendly Python data.
-
-        Args:
-            document: Pydantic-like document exposing `model_dump`.
-
-        Returns:
-            Plain Python dictionary ready to write to Firestore.
-        """
-        return cast(dict[str, Any], document.model_dump(mode="python"))
-
-    def _commit_transaction(self, transaction: Any) -> None:
-        """Commit a transaction when the client implementation exposes `commit`.
-
-        Args:
-            transaction: Firestore transaction or transaction-like test double.
+            record: Existing SQLModel record to update in place.
+            item: Work-item document whose values should be stored.
 
         Returns:
             None.
         """
-        commit = getattr(transaction, "commit", None)
-        if callable(commit):
-            commit()
+        record.title = item.title
+        record.status = item.status
+        record.visibility_kind = item.visibility_kind
+        record.audience_channel_id = item.audience_channel_id
+        record.primary_assignee_user_id = item.primary_assignee_user_id
+        record.due_at = item.due_at
+        record.updated_at = item.updated_at
+        record.completed_at = item.completed_at
+        record.payload = self._dump(item)
+
+    def _participant_record(
+        self,
+        team_id: str,
+        participant: ParticipantRelationDocument,
+    ) -> WorkItemParticipantRecord:
+        """Build the SQLModel record used to persist a participant.
+
+        Args:
+            team_id: Slack workspace id owning the work item.
+            participant: Participant relation to serialize.
+
+        Returns:
+            SQLModel record for the `work_item_participants` table.
+        """
+        return WorkItemParticipantRecord(
+            team_id=team_id,
+            work_item_id=participant.work_item_id,
+            user_id=participant.user_id,
+            role=participant.role,
+            attention_profile=participant.attention_profile,
+            next_attention_at=participant.next_attention_at,
+            muted_until=participant.muted_until,
+            last_seen_event_id=participant.last_seen_event_id,
+            updated_at=participant.updated_at,
+            payload=self._dump(participant),
+        )
+
+    def _event_record(
+        self,
+        team_id: str,
+        event: WorkEventDocument,
+    ) -> WorkItemEventRecord:
+        """Build the SQLModel record used to persist a work-item event.
+
+        Args:
+            team_id: Slack workspace id owning the work item.
+            event: Work-event document to serialize.
+
+        Returns:
+            SQLModel record for the `work_item_events` table.
+        """
+        return WorkItemEventRecord(
+            team_id=team_id,
+            work_item_id=event.work_item_id,
+            event_id=event.event_id,
+            type=event.type,
+            occurred_at=event.occurred_at,
+            payload=self._dump(event),
+        )
+
+    def _replace_participants(
+        self,
+        *,
+        session: Session,
+        team_id: str,
+        work_item_id: str,
+        participants: Iterable[ParticipantRelationDocument],
+    ) -> None:
+        """Rewrite participant rows for a work item inside an open transaction.
+
+        Args:
+            session: Open SQLModel session inside a transaction.
+            team_id: Slack workspace id owning the work item.
+            work_item_id: Work item identifier to rewrite.
+            participants: Participant relations to persist.
+
+        Returns:
+            None.
+        """
+        existing_records = session.exec(
+            select(WorkItemParticipantRecord).where(
+                WorkItemParticipantRecord.team_id == team_id,
+                WorkItemParticipantRecord.work_item_id == work_item_id,
+            )
+        ).all()
+        for record in existing_records:
+            session.delete(record)
+        for participant in participants:
+            session.add(self._participant_record(team_id, participant))
+
+    def _replace_events(
+        self,
+        *,
+        session: Session,
+        team_id: str,
+        work_item_id: str,
+        events: Sequence[WorkEventDocument],
+    ) -> None:
+        """Rewrite event rows for a work item inside an open transaction.
+
+        Args:
+            session: Open SQLModel session inside a transaction.
+            team_id: Slack workspace id owning the work item.
+            work_item_id: Work item identifier to rewrite.
+            events: Work-item events to persist in chronological order.
+
+        Returns:
+            None.
+        """
+        existing_records = session.exec(
+            select(WorkItemEventRecord).where(
+                WorkItemEventRecord.team_id == team_id,
+                WorkItemEventRecord.work_item_id == work_item_id,
+            )
+        ).all()
+        for record in existing_records:
+            session.delete(record)
+        for event in events:
+            session.add(self._event_record(team_id, event))
+
+    def _replace_attention_index(
+        self,
+        *,
+        session: Session,
+        item: WorkItemDocument,
+        participants: dict[str, ParticipantRelationDocument],
+        events: Sequence[WorkEventDocument],
+    ) -> None:
+        """Rewrite attention-index rows for the current participant set.
+
+        Args:
+            session: Open SQLModel session inside a transaction.
+            item: Current persisted work item.
+            participants: Participant relations keyed by user id.
+            events: Chronologically sorted work-item events.
+
+        Returns:
+            None.
+        """
+        existing_records = session.exec(
+            select(WorkItemAttentionIndexRecord).where(
+                WorkItemAttentionIndexRecord.team_id == item.team_id,
+                WorkItemAttentionIndexRecord.work_item_id == item.work_item_id,
+            )
+        ).all()
+        for record in existing_records:
+            session.delete(record)
+        now = utc_now()
+        for participant in participants.values():
+            attention_index = self._build_attention_index(
+                item=item,
+                participant=participant,
+                events=events,
+                now=now,
+            )
+            session.add(
+                WorkItemAttentionIndexRecord(
+                    team_id=attention_index.team_id,
+                    user_id=attention_index.user_id,
+                    work_item_id=attention_index.work_item_id,
+                    needs_attention_now=attention_index.needs_attention_now,
+                    status=attention_index.status,
+                    visibility_kind=attention_index.visibility_kind,
+                    audience_channel_id=attention_index.audience_channel_id,
+                    primary_assignee_user_id=attention_index.primary_assignee_user_id,
+                    updated_at=attention_index.updated_at,
+                    payload=self._dump(attention_index),
+                )
+            )
 
     def _read_item(self, team_id: str, work_item_id: str) -> WorkItemDocument | None:
         """Read and validate a stored work-item document.
@@ -427,10 +499,11 @@ class FirestoreWorkItemRepository:
         Returns:
             Validated work-item document, or `None` when not found.
         """
-        snapshot = self._work_item_ref(team_id, work_item_id).get()
-        if not snapshot.exists:
+        with Session(self._engine) as session:
+            record = session.get(WorkItemRecord, (team_id, work_item_id))
+        if record is None:
             return None
-        return WorkItemDocument.model_validate(snapshot.to_dict() or {})
+        return WorkItemDocument.model_validate(record.payload)
 
     def _read_participants(
         self,
@@ -446,11 +519,19 @@ class FirestoreWorkItemRepository:
         Returns:
             Mapping of participant user ids to validated participant relations.
         """
-        participants: dict[str, ParticipantRelationDocument] = {}
-        for snapshot in self._participants_collection(team_id, work_item_id).stream():
-            participant = ParticipantRelationDocument.model_validate(
-                snapshot.to_dict() or {}
+        statement = (
+            select(WorkItemParticipantRecord)
+            .where(
+                WorkItemParticipantRecord.team_id == team_id,
+                WorkItemParticipantRecord.work_item_id == work_item_id,
             )
+            .order_by(asc(col(WorkItemParticipantRecord.user_id)))
+        )
+        with Session(self._engine) as session:
+            rows = session.exec(statement).all()
+        participants: dict[str, ParticipantRelationDocument] = {}
+        for row in rows:
+            participant = ParticipantRelationDocument.model_validate(row.payload)
             participants[participant.user_id] = participant
         return participants
 
@@ -464,11 +545,20 @@ class FirestoreWorkItemRepository:
         Returns:
             Chronologically sorted event documents for the work item.
         """
-        events = [
-            WorkEventDocument.model_validate(snapshot.to_dict() or {})
-            for snapshot in self._events_collection(team_id, work_item_id).stream()
-        ]
-        return self._sort_events(events)
+        statement = (
+            select(WorkItemEventRecord)
+            .where(
+                WorkItemEventRecord.team_id == team_id,
+                WorkItemEventRecord.work_item_id == work_item_id,
+            )
+            .order_by(
+                asc(col(WorkItemEventRecord.occurred_at)),
+                asc(col(WorkItemEventRecord.event_id)),
+            )
+        )
+        with Session(self._engine) as session:
+            rows = session.exec(statement).all()
+        return [WorkEventDocument.model_validate(row.payload) for row in rows]
 
     def _hydrate_aggregate(
         self,
@@ -790,46 +880,6 @@ class FirestoreWorkItemRepository:
             updated_at=now,
         )
 
-    def _write_attention_index(
-        self,
-        *,
-        transaction: Any,
-        item: WorkItemDocument,
-        participants: dict[str, ParticipantRelationDocument],
-        events: Sequence[WorkEventDocument],
-        removed_user_ids: Iterable[str],
-    ) -> None:
-        """Rewrite attention-index entries for current and removed participants.
-
-        Args:
-            transaction: Firestore transaction or transaction-like test double.
-            item: Current persisted work item.
-            participants: Participant relations keyed by user id.
-            events: Chronologically sorted work-item events.
-            removed_user_ids: User ids whose attention index entries should be deleted.
-
-        Returns:
-            None.
-        """
-        now = utc_now()
-        for removed_user_id in removed_user_ids:
-            transaction.delete(
-                self._attention_ref(item.team_id, removed_user_id, item.work_item_id)
-            )
-        for participant in participants.values():
-            attention_index = self._build_attention_index(
-                item=item,
-                participant=participant,
-                events=events,
-                now=now,
-            )
-            transaction.set(
-                self._attention_ref(
-                    item.team_id, participant.user_id, item.work_item_id
-                ),
-                self._dump(attention_index),
-            )
-
     def _build_attention_index(
         self,
         *,
@@ -954,17 +1004,17 @@ class FirestoreWorkItemRepository:
         """
         if not query.viewer_user_id:
             return []
-        work_item_ids: list[str] = []
-        for snapshot in self._attention_collection(
-            query.team_id, query.viewer_user_id
-        ).stream():
-            attention_index = WorkItemAttentionIndexDocument.model_validate(
-                snapshot.to_dict() or {}
+        statement = (
+            select(WorkItemAttentionIndexRecord.work_item_id)
+            .where(
+                WorkItemAttentionIndexRecord.team_id == query.team_id,
+                WorkItemAttentionIndexRecord.user_id == query.viewer_user_id,
+                col(WorkItemAttentionIndexRecord.needs_attention_now).is_(True),
             )
-            if not attention_index.needs_attention_now:
-                continue
-            work_item_ids.append(attention_index.work_item_id)
-        return work_item_ids
+            .order_by(desc(col(WorkItemAttentionIndexRecord.updated_at)))
+        )
+        with Session(self._engine) as session:
+            return list(session.exec(statement).all())
 
     def _matches_query(
         self,
@@ -1102,5 +1152,16 @@ class FirestoreWorkItemRepository:
             )
         return lambda aggregate: aggregate.item.updated_at
 
+    def _dump(self, document: BaseModel) -> dict[str, Any]:
+        """Serialize a Pydantic document into JSON-friendly Python data.
 
-__all__ = ["FirestoreWorkItemRepository"]
+        Args:
+            document: Pydantic document to serialize.
+
+        Returns:
+            Plain Python dictionary ready to persist in a JSON column.
+        """
+        return cast(dict[str, Any], document.model_dump(mode="json"))
+
+
+__all__ = ["PostgresWorkItemRepository"]

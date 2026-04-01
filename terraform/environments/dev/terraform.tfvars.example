@@ -1,0 +1,5 @@
+project_id                     = "your-gcp-project-id"
+container_image                = "asia-northeast1-docker.pkg.dev/your-gcp-project-id/agents-party/agents-party:latest"
+slack_bot_token_secret_id      = "agents-party-slack-bot-token"
+slack_signing_secret_secret_id = "agents-party-slack-signing-secret"
+# slack_app_token_secret_id    = "agents-party-slack-app-token"

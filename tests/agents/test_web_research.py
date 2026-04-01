@@ -54,7 +54,12 @@ def test_build_web_research_agent_registers_expected_builtin_tools() -> None:
     """
     agent = build_web_research_agent(model="google-vertex:gemini-3-flash-preview")
 
-    builtin_tool_types = {type(tool) for tool in agent._builtin_tools}
+    builtin_tools = getattr(
+        agent,
+        "_builtin_tools",
+        getattr(agent, "_cap_builtin_tools", []),
+    )
+    builtin_tool_types = {type(tool) for tool in builtin_tools}
 
     assert builtin_tool_types == {
         WebSearchTool,

@@ -1,3 +1,5 @@
+"""Slack-facing domain documents and routing helpers."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -7,28 +9,16 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class FirestoreDocument(BaseModel):
-    """Base model for Firestore-backed documents."""
+class DocumentModel(BaseModel):
+    """Base model for domain documents stored outside transport layers."""
 
     model_config = ConfigDict(extra="forbid")
-
-
-class InstallationScope(StrEnum):
-    WORKSPACE = "workspace"
-    ENTERPRISE = "enterprise"
 
 
 class AgentRouteScope(StrEnum):
     WORKSPACE = "workspace"
     CHANNEL = "channel"
     THREAD = "thread"
-
-
-class ChannelType(StrEnum):
-    CHANNEL = "channel"
-    PRIVATE_CHANNEL = "private_channel"
-    DM = "dm"
-    MPIM = "mpim"
 
 
 class ThreadStatus(StrEnum):
@@ -45,7 +35,7 @@ class MessageRole(StrEnum):
 
 
 def utc_now() -> datetime:
-    """Return the current UTC timestamp for Firestore document defaults.
+    """Return the current UTC timestamp for domain document defaults.
 
     Returns:
         Timezone-aware UTC timestamp.
@@ -53,35 +43,7 @@ def utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-class TenantSlackIdentityDocument(FirestoreDocument):
-    enterprise_id: str | None = None
-    primary_team_id: str | None = None
-    installation_scope: InstallationScope
-    workspace_ids: list[str] = Field(default_factory=list)
-    updated_at: datetime = Field(default_factory=utc_now)
-
-
-class TenantAppSettingsDocument(FirestoreDocument):
-    default_agent_id: str | None = None
-    allowed_models: list[str] = Field(default_factory=list)
-    thread_auto_reply: bool = True
-    retention_days: int | None = None
-    updated_at: datetime = Field(default_factory=utc_now)
-
-
-class SlackInstallationDocument(FirestoreDocument):
-    installation_id: str
-    installation_scope: InstallationScope
-    enterprise_id: str | None = None
-    team_id: str | None = None
-    bot_user_id: str | None = None
-    installer_user_id: str | None = None
-    scopes: list[str] = Field(default_factory=list)
-    installed_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
-
-
-class AgentDocument(FirestoreDocument):
+class AgentDocument(DocumentModel):
     agent_id: str
     name: str
     description: str | None = None
@@ -96,16 +58,7 @@ class AgentDocument(FirestoreDocument):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
-class WorkspaceDocument(FirestoreDocument):
-    team_id: str
-    enterprise_id: str | None = None
-    team_name: str | None = None
-    is_active: bool = True
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
-
-
-class WorkspaceAppSettingsDocument(FirestoreDocument):
+class WorkspaceAppSettingsDocument(DocumentModel):
     default_agent_id: str | None = None
     enabled_channel_ids: list[str] = Field(default_factory=list)
     locale: str | None = None
@@ -113,25 +66,13 @@ class WorkspaceAppSettingsDocument(FirestoreDocument):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
-class ChannelAppSettingsDocument(FirestoreDocument):
+class ChannelAppSettingsDocument(DocumentModel):
     default_agent_id: str | None = None
     thread_auto_reply: bool | None = None
     updated_at: datetime = Field(default_factory=utc_now)
 
 
-class ChannelDocument(FirestoreDocument):
-    channel_id: str
-    team_id: str
-    enterprise_id: str | None = None
-    name: str | None = None
-    channel_type: ChannelType
-    is_archived: bool = False
-    last_message_ts: str | None = None
-    created_at: datetime = Field(default_factory=utc_now)
-    updated_at: datetime = Field(default_factory=utc_now)
-
-
-class ThreadMessage(FirestoreDocument):
+class ThreadMessage(DocumentModel):
     ts: str
     role: MessageRole
     text: str
@@ -143,7 +84,7 @@ class ThreadMessage(FirestoreDocument):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class ThreadDocument(FirestoreDocument):
+class ThreadDocument(DocumentModel):
     """Thread state and stored message history for a Slack conversation."""
 
     thread_ts: str
@@ -176,7 +117,7 @@ class ThreadDocument(FirestoreDocument):
         return self
 
 
-class ResolvedAgentRoute(FirestoreDocument):
+class ResolvedAgentRoute(DocumentModel):
     scope: AgentRouteScope
     agent: AgentDocument
     team_id: str

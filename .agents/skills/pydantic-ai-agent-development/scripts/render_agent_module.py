@@ -160,7 +160,7 @@ def {builder_name}(
         output_type={output_model},
         instructions=(
             "Describe the agent's job in one or two stable sentences. "
-            "Keep Slack and Firestore specifics outside this package. "
+            "Keep Slack and database specifics outside this package. "
             "Move volatile domain detail into repositories, tools, or adjacent helpers."
         ),
     )

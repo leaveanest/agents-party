@@ -9,11 +9,11 @@ Use this map before deciding where new agent code belongs.
 - `src/agents_party/slack/`
   - Keep Slack Bolt app setup, commands, actions, and event handlers here.
 - `src/agents_party/domain/`
-  - Keep domain concepts free from Slack SDK and Firestore SDK details.
+  - Keep domain concepts free from Slack SDK and persistence SDK details.
 - `src/agents_party/repositories/`
   - Put persistence-facing interfaces and repository logic here.
-- `src/agents_party/infrastructure/firestore/`
-  - Keep Firestore clients and storage implementations here.
+- `src/agents_party/infrastructure/postgres/`
+  - Keep PostgreSQL-backed storage implementations here.
 
 ## Current Entry Points
 

@@ -19,7 +19,7 @@ box "Google Cloud Project"
   participant "Agent Router" as agent_router
   participant "Text Specialist(s)" as text_specialists
   participant "Media Specialist" as media_specialist
-  database "Firestore\nworkspace/channel settings\nthreads/{thread_ts}" as fs_threads
+  database "PostgreSQL\nworkspace/channel settings\nslack_threads" as pg_threads
   participant "Vertex AI" as vertex_ai
   participant "Google Maps Platform" as google_maps
 end box
@@ -42,9 +42,9 @@ else Message event
   alt Message starts with bot mention
     message_handler -> mention_handler : Reuse mention flow
   else Plain follow-up message
-    message_handler -> fs_threads : Read stored thread state
-    fs_threads --> message_handler : active agent_id and status
-    message_handler -> fs_threads : Read auto-reply / channel enablement
+    message_handler -> pg_threads : Read stored thread state
+    pg_threads --> message_handler : active agent_id and status
+    message_handler -> pg_threads : Read auto-reply / channel enablement settings
     alt Active assistant thread and auto-reply enabled
       message_handler -> agent_routing : Continue routed conversation
     else Ignore message
@@ -53,7 +53,7 @@ else Message event
   end
 end
 
-agent_routing -> fs_threads : Check channel enablement
+agent_routing -> pg_threads : Check channel enablement and thread route
 agent_routing -> slack_api : Fetch full thread history
 slack_api --> agent_routing : Root message + thread transcript
 agent_routing -> agent_router : Build Slack invocation with full context
@@ -85,11 +85,11 @@ else Media specialist
 end
 
 alt Text response
-  agent_routing -> fs_threads : Persist active agent_id=`assistant`
+  agent_routing -> pg_threads : Persist active agent_id=`assistant`
   agent_routing -> slack : Post reply in thread
 else Media response
   agent_routing -> slack : Upload generated file to thread
-  agent_routing -> fs_threads : Persist active agent_id=`assistant`
+  agent_routing -> pg_threads : Persist active agent_id=`assistant`
 end
 slack --> slack_user : Show assistant result
 
@@ -106,7 +106,7 @@ end note
 note over message_handler
 Follow-up auto-replies run only when:
 - the message is user-authored text
-- the thread is marked active in Firestore
+- the thread is marked active in PostgreSQL
 - channel auto-reply remains enabled
 end note
 

@@ -1,7 +1,7 @@
 # agents-party
 
-`agents-party` is a Python Slack application built with FastAPI, Slack Bolt, `pydantic-ai`, and Firestore.
-It exposes a public Slack-facing `agent_router` that can answer directly or delegate to specialist runtimes for work management, web research, maps, translation, image generation, and video generation.
+`agents-party` is a Python Slack application built with FastAPI, Slack Bolt, `pydantic-ai`, and PostgreSQL.
+It exposes a Slack-facing `agent_router` that can answer directly or delegate to specialist runtimes for work management, web research, maps, translation, image generation, video generation, and Google OAuth-backed integrations.
 
 ## Current Capabilities
 
@@ -16,16 +16,16 @@ It exposes a public Slack-facing `agent_router` that can answer directly or dele
   - `message`
   - `reaction_added`
 - Mention-based agent routing with full Slack thread context
-- Follow-up auto-replies in active assistant threads stored in Firestore
+- Follow-up auto-replies in active assistant threads stored in PostgreSQL
 - Reaction-based translation for country-flag emoji such as `:flag-jp:` and `:flag-us:`
-- Google OAuth start and callback flow with encrypted token storage in Firestore
+- Google OAuth start and callback flow with encrypted token storage in PostgreSQL
 
 ## Specialist Runtimes
 
 The Slack router can delegate to these specialist runtimes:
 
 - `work_manager`
-  - capture and update work items backed by Firestore
+  - capture and update work items backed by PostgreSQL
 - `web_research`
   - current, source-backed web research using built-in web tools
 - `google_maps`
@@ -60,12 +60,18 @@ Current built-in skills:
 
 Repository-local Codex skills for development live under [`.agents/skills/`](.agents/skills/).
 
-## Setup
+## Local Setup
 
 Install dependencies:
 
 ```bash
 uv sync
+```
+
+Apply database migrations:
+
+```bash
+uv run alembic upgrade head
 ```
 
 Run the app locally:
@@ -76,7 +82,7 @@ uv run agents-party
 
 ## Cloud Run Container
 
-This repository now includes a root `Dockerfile` for Cloud Run deployments.
+This repository includes a root `Dockerfile` for Cloud Run deployments.
 The container installs `ffmpeg`, which is required for transcribing Slack video attachments by extracting an audio track before sending it to Google Cloud Speech-to-Text.
 
 Build locally if needed:
@@ -89,7 +95,7 @@ docker build -t agents-party .
 
 The application reads environment variables from `.env` when present.
 
-Core runtime:
+### Core runtime
 
 ```bash
 APP_ENV=local
@@ -98,22 +104,25 @@ APP_PORT=8000
 DEFAULT_TIMEZONE=UTC
 GOOGLE_CLOUD_PROJECT=...
 GOOGLE_CLOUD_LOCATION=global
-FIRESTORE_DATABASE=(default)
+GOOGLE_CLOUD_SPEECH_LOCATION=us
+GOOGLE_CLOUD_TRANSCRIPTION_MODEL=chirp_3
+GOOGLE_CLOUD_TRANSCRIPTION_LANGUAGE_CODES=["ja-JP"]
+GOOGLE_CLOUD_TRANSCRIPTION_STAGING_BUCKET=...
 ```
 
-Slack:
+### Slack
+
+Use a static bot token locally, or provide `SLACK_CLIENT_ID` together with database settings when using the installation store:
 
 ```bash
 SLACK_BOT_TOKEN=...
 SLACK_SIGNING_SECRET=...
 SLACK_APP_TOKEN=...
+SLACK_CLIENT_ID=...
 AGENT_SELECTOR_MODEL=google-gla:gemini-3-flash-preview
-GOOGLE_CLOUD_PROJECT=...
-FIRESTORE_DATABASE=(default)
-GOOGLE_CLOUD_TRANSCRIPTION_STAGING_BUCKET=...
 ```
 
-Specialists:
+### Specialists
 
 ```bash
 WORK_MANAGER_MODEL=google-gla:gemini-3-flash-preview
@@ -127,7 +136,29 @@ VIDEO_GENERATION_MODEL=veo-3.1-fast-generate-001
 VIDEO_GENERATION_PROMPT_MODEL=gemini-2.5-flash
 ```
 
-Google OAuth:
+### Local database
+
+Use a direct PostgreSQL URL for local development and one-off verification:
+
+```bash
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/agents_party
+```
+
+### Cloud Run with Cloud SQL
+
+Production on Cloud Run uses the Cloud SQL Python Connector with IAM database authentication.
+Do not set `DATABASE_URL` in Cloud Run. Set the following instead:
+
+```bash
+CLOUD_SQL_INSTANCE_CONNECTION_NAME=project:region:instance
+CLOUD_SQL_DATABASE=agents_party
+CLOUD_SQL_IAM_DB_USER=agents-party-runtime@project-id.iam
+CLOUD_SQL_IP_TYPE=PUBLIC
+```
+
+`DATABASE_URL` always wins when both modes are configured, which is intended for local overrides only.
+
+### Google OAuth
 
 ```bash
 GOOGLE_OAUTH_CLIENT_ID=...
@@ -136,6 +167,32 @@ GOOGLE_OAUTH_REDIRECT_BASE_URL=https://...
 GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET=...
 GOOGLE_TOKEN_ENCRYPTION_KEY=...
 ```
+
+## Deployment
+
+Terraform for the initial Cloud Run + Cloud SQL wiring lives under `terraform/environments/dev/`.
+
+1. Apply infrastructure:
+
+```bash
+cd terraform/environments/dev
+terraform init
+terraform apply -var-file=terraform.tfvars
+```
+
+2. Run the Cloud Run migration job before shifting traffic:
+
+```bash
+gcloud run jobs execute agents-party-migrate --region=asia-northeast1 --wait
+```
+
+3. Deploy or update the Cloud Run service image, then point traffic to the latest revision.
+
+Rollback rule:
+
+- App rollback and database rollback are separate operations.
+- Do not pair destructive Alembic revisions with routine app deploys.
+- If an app release fails, roll back the Cloud Run revision first and evaluate schema rollback separately.
 
 ## Development
 
@@ -161,6 +218,12 @@ Run tests:
 
 ```bash
 uv run pytest
+```
+
+Create a new migration revision:
+
+```bash
+uv run alembic revision --autogenerate -m "describe change"
 ```
 
 ## Repository Layout

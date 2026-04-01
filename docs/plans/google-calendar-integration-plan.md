@@ -184,7 +184,7 @@ src/agents_party/
     google_calendar_connection_repository.py
     google_calendar_gateway.py
   infrastructure/
-    firestore/
+    postgres/
       google_calendar_connection_repository.py
     google_calendar/
       google_calendar_gateway.py
@@ -192,10 +192,10 @@ src/agents_party/
 
 ## 保存配置案
 
-接続情報の Firestore 配置は、まず次を基準にする。
+接続情報の PostgreSQL 配置は、まず次を基準にする。
 
 ```text
-workspaces/{team_id}/google_calendar_connections/{slack_user_id}
+google_calendar_connections (team_id, slack_user_id)
 ```
 
 理由:

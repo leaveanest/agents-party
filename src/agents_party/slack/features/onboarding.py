@@ -1,3 +1,5 @@
+"""Slack onboarding action handlers and setup messaging."""
+
 from typing import Any
 
 
@@ -15,7 +17,7 @@ def _build_onboarding_message(user_id: str) -> str:
         "Next steps:\n"
         "1. Configure Slack secrets in `.env`\n"
         "2. Add your first pydantic-ai agent definition\n"
-        "3. Wire Firestore repositories into the agent runner"
+        "3. Apply Alembic migrations and wire PostgreSQL repositories into the agent runner"
     )
 
 

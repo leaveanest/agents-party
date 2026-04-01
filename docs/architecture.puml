@@ -22,6 +22,7 @@ package "Google Cloud Project" {
       component "Google OAuth Router\nGET /oauth/google/start\nGET /oauth/google/callback" as google_oauth_router
       component "Slack Event Handlers\napp_home_opened / app_mention /\nmessage / reaction_added" as slack_handlers
       component "Agent Routing" as agent_routing
+      component "Agent Router" as agent_router
       component "Work Manager" as work_manager
       component "Web Research" as web_research
       component "Google Maps" as google_maps
@@ -35,24 +36,15 @@ package "Google Cloud Project" {
   rectangle "Secret Manager" as secret_manager
   rectangle "Vertex AI" as vertex_ai
 
-  database "Firestore" as firestore {
-    folder "workspaces/{team_id}" as fs_workspace {
-      folder "app_settings/default" as fs_workspace_settings
-
-      folder "channels/{channel_id}" as fs_channel {
-        folder "app_settings/default" as fs_channel_settings
-        folder "threads/{thread_ts}" as fs_threads
-      }
-
-      folder "work_items/{work_item_id}" as fs_work_item {
-        folder "participants/{user_id}" as fs_participants
-        folder "events/{event_id}" as fs_events
-      }
-
-      folder "attention_index/{user_id}/work_items/{work_item_id}" as fs_attention
-      folder "google_connections/{slack_user_id}__{google_sub}" as fs_google_connections
-      folder "google_oauth_states/{state_id}" as fs_google_oauth_states
-    }
+  database "Cloud SQL for PostgreSQL" as postgres {
+    folder "agents" as pg_agents
+    folder "workspace_app_settings" as pg_workspace_settings
+    folder "channel_app_settings" as pg_channel_settings
+    folder "slack_threads" as pg_threads
+    folder "slack_installations / slack_bots" as pg_slack_installations
+    folder "work_items / participants /\nevents / attention_index" as pg_work_items
+    folder "google_auth_connections" as pg_google_connections
+    folder "google_oauth_states" as pg_google_oauth_states
   }
 }
 
@@ -66,25 +58,26 @@ secret_manager --> cloud_run : runtime secrets and config
 
 slack_gateway --> slack_handlers
 slack_handlers --> agent_routing : mentions and active-thread replies
-slack_handlers --> cloud_translation : flag reaction translation via CloudTranslationService
+slack_handlers --> cloud_translation : flag reaction translation
 
-agent_routing --> fs_workspace_settings : channel enablement defaults
-agent_routing --> fs_channel_settings : thread auto-reply overrides
-agent_routing --> fs_threads : active assistant thread state
+agent_routing --> pg_workspace_settings : channel enablement defaults
+agent_routing --> pg_channel_settings : thread auto-reply overrides
+agent_routing --> pg_threads : active assistant thread state
+agent_routing --> pg_agents : configured agents
 agent_routing --> slack : fetch thread history / post replies / upload files
 
-agent_routing --> work_manager : task capture and updates
-agent_routing --> web_research : source-backed research
-agent_routing --> google_maps : place and route lookup
-agent_routing --> translation : text translation
-agent_routing --> image_generation : image generation
-agent_routing --> video_generation : video generation
+agent_routing --> agent_router : Slack invocation with full context
+agent_router --> vertex_ai : decide direct reply or delegation
+
+agent_router --> work_manager
+agent_router --> web_research
+agent_router --> google_maps
+agent_router --> translation
+agent_router --> image_generation
+agent_router --> video_generation
 
 work_manager --> vertex_ai : structured task execution
-work_manager --> fs_work_item : create / read / update
-work_manager --> fs_participants : assignees / roles / attention
-work_manager --> fs_events : work item history
-work_manager --> fs_attention : per-user attention index
+work_manager --> pg_work_items : relational task persistence
 
 web_research --> vertex_ai : web tool orchestration
 google_maps --> vertex_ai : maps reasoning
@@ -95,16 +88,17 @@ video_generation --> vertex_ai : Gemini prompt planning and Veo rendering
 
 browser --> google_oauth_router : open signed OAuth start URL
 google_oauth_router --> google_oauth
-google_oauth --> fs_google_oauth_states : create / consume state
-google_oauth --> fs_google_connections : encrypted token storage
+google_oauth --> pg_google_oauth_states : create / consume state
+google_oauth --> pg_google_connections : encrypted token storage
 google_oauth --> google_identity : authorization and token exchange
 google_identity --> browser : consent and redirect
 browser --> google_oauth_router : callback redirect
 
-note bottom of firestore
+note bottom of postgres
 Stored data:
 - workspace and channel app settings
 - active assistant thread state
+- Slack installation store records
 - work items, participants, events, and attention index
 - Google OAuth connection documents
 - short-lived Google OAuth state documents
@@ -113,6 +107,12 @@ end note
 note top of cloud_run
 Cloud Run hosts one FastAPI service for Slack events,
 health checks, and Google OAuth browser callbacks.
+Schema migrations run separately via a Cloud Run Job.
+end note
+
+note right of postgres
+Production relational storage runs on Cloud SQL for PostgreSQL
+and is deployed through terraform/environments/dev/.
 end note
 
 @enduml

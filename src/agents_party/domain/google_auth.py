@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agents_party.domain.slack_documents import FirestoreDocument, utc_now
+from agents_party.domain.slack_documents import DocumentModel, utc_now
 
 
 GOOGLE_OAUTH_SCOPES = (
@@ -40,7 +40,7 @@ class GoogleOAuthStartContext(BaseModel):
     )
 
 
-class GoogleOAuthStateDocument(FirestoreDocument):
+class GoogleOAuthStateDocument(DocumentModel):
     """Server-side state stored for Google OAuth callbacks."""
 
     state_id: str
@@ -66,7 +66,7 @@ class GoogleOAuthStateToken(BaseModel):
     expires_at: datetime
 
 
-class GoogleAuthConnectionDocument(FirestoreDocument):
+class GoogleAuthConnectionDocument(DocumentModel):
     """Stored Google OAuth connection for a Slack user and Google account."""
 
     team_id: str

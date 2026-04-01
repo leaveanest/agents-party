@@ -9,9 +9,12 @@ from agents_party.config import (
     read_secret,
 )
 from agents_party.google_auth.service import GoogleAuthCoordinator
-from agents_party.infrastructure.firestore import (
-    FirestoreGoogleAuthConnectionRepository,
-    FirestoreGoogleOAuthStateRepository,
+from agents_party.infrastructure.postgres import (
+    PostgresGoogleAuthConnectionRepository,
+    PostgresGoogleOAuthStateRepository,
+)
+from agents_party.infrastructure.postgres.connection import (
+    build_database_engine_from_settings,
 )
 from agents_party.infrastructure.google_auth import (
     FernetTokenCipher,
@@ -29,17 +32,16 @@ def build_google_auth_coordinator(settings: Settings) -> GoogleAuthCoordinator |
     Returns:
         Configured Google OAuth coordinator, or `None` when Google OAuth is disabled.
     """
-    if not settings.google_oauth_enabled:
+    if not settings.google_oauth_enabled or not settings.database_enabled:
         return None
+    engine = build_database_engine_from_settings(settings)
 
     return GoogleAuthCoordinator(
-        connection_repository=FirestoreGoogleAuthConnectionRepository(
-            project_id=settings.google_cloud_project,
-            database=settings.firestore_database,
+        connection_repository=PostgresGoogleAuthConnectionRepository(
+            engine=engine,
         ),
-        state_repository=FirestoreGoogleOAuthStateRepository(
-            project_id=settings.google_cloud_project,
-            database=settings.firestore_database,
+        state_repository=PostgresGoogleOAuthStateRepository(
+            engine=engine,
         ),
         gateway=HttpxGoogleOAuthGateway(
             client_id=read_non_blank_text(
