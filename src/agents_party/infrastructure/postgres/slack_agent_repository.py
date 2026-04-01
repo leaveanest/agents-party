@@ -1,9 +1,12 @@
+"""PostgreSQL-backed repository for Slack routing configuration and thread state."""
+
 from __future__ import annotations
 
-from typing import Any, TypeVar, cast
+from typing import Any, cast
 
-from google.cloud import firestore
 from pydantic import BaseModel
+from sqlalchemy import Engine, asc
+from sqlmodel import Session, col, select
 
 from agents_party.domain import (
     AgentDocument,
@@ -15,35 +18,40 @@ from agents_party.domain import (
     resolve_agent_id_for_slack_context,
     utc_now,
 )
+from agents_party.infrastructure.postgres.connection import build_database_engine
+from agents_party.infrastructure.postgres.models import (
+    AgentRecord,
+    ChannelAppSettingsRecord,
+    SlackThreadRecord,
+    WorkspaceAppSettingsRecord,
+)
 
 
-DocumentT = TypeVar("DocumentT", bound=BaseModel)
-
-
-class FirestoreSlackAgentRepository:
-    """Firestore-backed repository for Slack agent routing settings."""
+class PostgresSlackAgentRepository:
+    """PostgreSQL-backed repository for Slack agent routing settings."""
 
     def __init__(
         self,
         *,
-        project_id: str | None = None,
-        database: str = "(default)",
-        client: Any | None = None,
+        database_url: str | None = None,
+        engine: Engine | None = None,
     ) -> None:
-        """Create a repository with either an injected client or a new Firestore client.
+        """Create a repository with either an injected engine or a database URL.
 
         Args:
-            project_id: Optional Google Cloud project id for Firestore client creation.
-            database: Firestore database name to connect to.
-            client: Optional injected Firestore-compatible client for tests or overrides.
+            database_url: SQLAlchemy-compatible database URL.
+            engine: Optional injected SQLAlchemy engine for tests or overrides.
 
-        Returns:
-            None.
+        Raises:
+            ValueError: If neither `database_url` nor `engine` is provided.
+
+        Notes:
+            The target schema must already exist. Apply Alembic migrations before
+            constructing this repository in non-test environments.
         """
-        self._client = client or firestore.Client(
-            project=project_id,
-            database=database,
-        )
+        if engine is None and database_url is None:
+            raise ValueError("database_url or engine is required.")
+        self._engine = engine or build_database_engine(cast(str, database_url))
 
     def resolve_agent(
         self,
@@ -62,10 +70,7 @@ class FirestoreSlackAgentRepository:
         Returns:
             Resolved route containing the enabled agent, or `None` when none applies.
         """
-        workspace_settings = self._read_model(
-            self._workspace_settings_ref(team_id),
-            WorkspaceAppSettingsDocument,
-        )
+        workspace_settings = self._read_workspace_settings(team_id)
         if (
             workspace_settings is not None
             and workspace_settings.enabled_channel_ids
@@ -73,13 +78,12 @@ class FirestoreSlackAgentRepository:
         ):
             return None
 
-        channel_settings = self._read_model(
-            self._channel_settings_ref(team_id, channel_id),
-            ChannelAppSettingsDocument,
-        )
+        channel_settings = self._read_channel_settings(team_id, channel_id)
         thread = (
-            self._read_model(
-                self._thread_ref(team_id, channel_id, thread_ts), ThreadDocument
+            self.get_thread_document(
+                team_id=team_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
             )
             if thread_ts is not None
             else None
@@ -101,7 +105,7 @@ class FirestoreSlackAgentRepository:
         if agent_id is None or scope is None:
             return None
 
-        agent = self._read_model(self._agent_ref(agent_id), AgentDocument)
+        agent = self._read_agent(agent_id)
         if agent is None or not agent.enabled:
             return None
 
@@ -131,10 +135,7 @@ class FirestoreSlackAgentRepository:
             Enabled agent documents that are allowed in the supplied context.
         """
         del thread_ts
-        workspace_settings = self._read_model(
-            self._workspace_settings_ref(team_id),
-            WorkspaceAppSettingsDocument,
-        )
+        workspace_settings = self._read_workspace_settings(team_id)
         if (
             workspace_settings is not None
             and workspace_settings.enabled_channel_ids
@@ -142,15 +143,14 @@ class FirestoreSlackAgentRepository:
         ):
             return []
 
-        agents: list[AgentDocument] = []
-        for snapshot in self._client.collection("agents").stream():
-            if not snapshot.exists:
-                continue
-            data = snapshot.to_dict() or {}
-            agent = AgentDocument.model_validate(cast(dict[str, Any], data))
-            if agent.enabled:
-                agents.append(agent)
-        return agents
+        statement = (
+            select(AgentRecord)
+            .where(col(AgentRecord.enabled).is_(True))
+            .order_by(asc(col(AgentRecord.agent_id)))
+        )
+        with Session(self._engine) as session:
+            rows = session.exec(statement).all()
+        return [AgentDocument.model_validate(row.payload) for row in rows]
 
     def get_thread_document(
         self,
@@ -169,10 +169,11 @@ class FirestoreSlackAgentRepository:
         Returns:
             Stored thread document, or `None` when no thread state exists.
         """
-        return self._read_model(
-            self._thread_ref(team_id, channel_id, thread_ts),
-            ThreadDocument,
-        )
+        with Session(self._engine) as session:
+            record = session.get(SlackThreadRecord, (team_id, channel_id, thread_ts))
+        if record is None:
+            return None
+        return ThreadDocument.model_validate(record.payload)
 
     def activate_thread_agent(
         self,
@@ -218,7 +219,7 @@ class FirestoreSlackAgentRepository:
             created_at=current_thread.created_at if current_thread is not None else now,
             updated_at=now,
         )
-        document_data = self._dump(thread)
+        payload = self._dump(thread)
         for field_name in (
             "enterprise_id",
             "title",
@@ -227,8 +228,33 @@ class FirestoreSlackAgentRepository:
             "message_count",
             "summary",
         ):
-            document_data.pop(field_name, None)
-        self._thread_ref(team_id, channel_id, thread_ts).set(document_data)
+            payload.pop(field_name, None)
+
+        with Session(self._engine) as session:
+            record = session.get(SlackThreadRecord, (team_id, channel_id, thread_ts))
+            if record is None:
+                record = SlackThreadRecord(
+                    team_id=team_id,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    agent_id=agent_id,
+                    root_message_ts=thread.root_message_ts,
+                    last_message_ts=last_message_ts,
+                    status=thread.status,
+                    created_at=thread.created_at,
+                    updated_at=thread.updated_at,
+                    payload=payload,
+                )
+            else:
+                record.agent_id = agent_id
+                record.root_message_ts = thread.root_message_ts
+                record.last_message_ts = last_message_ts
+                record.status = thread.status
+                record.created_at = thread.created_at
+                record.updated_at = thread.updated_at
+                record.payload = payload
+            session.add(record)
+            session.commit()
         return thread
 
     def is_thread_auto_reply_enabled(
@@ -246,10 +272,7 @@ class FirestoreSlackAgentRepository:
         Returns:
             `True` when follow-up thread replies should trigger auto-routing.
         """
-        workspace_settings = self._read_model(
-            self._workspace_settings_ref(team_id),
-            WorkspaceAppSettingsDocument,
-        )
+        workspace_settings = self._read_workspace_settings(team_id)
         if (
             workspace_settings is not None
             and workspace_settings.enabled_channel_ids
@@ -257,10 +280,7 @@ class FirestoreSlackAgentRepository:
         ):
             return False
 
-        channel_settings = self._read_model(
-            self._channel_settings_ref(team_id, channel_id),
-            ChannelAppSettingsDocument,
-        )
+        channel_settings = self._read_channel_settings(team_id, channel_id)
         if (
             channel_settings is not None
             and channel_settings.thread_auto_reply is not None
@@ -273,116 +293,69 @@ class FirestoreSlackAgentRepository:
             return workspace_settings.thread_auto_reply
         return True
 
-    def _workspace_ref(self, team_id: str) -> Any:
-        """Return the workspace document reference for a team.
+    def _read_agent(self, agent_id: str) -> AgentDocument | None:
+        """Read one enabled or disabled agent definition from the relational store.
 
         Args:
-            team_id: Slack workspace id.
+            agent_id: Agent identifier to fetch.
 
         Returns:
-            Firestore document reference for the workspace.
+            Validated agent document, or `None` when the row does not exist.
         """
-        return self._client.collection("workspaces").document(team_id)
-
-    def _workspace_settings_ref(self, team_id: str) -> Any:
-        """Return the workspace app settings document reference.
-
-        Args:
-            team_id: Slack workspace id.
-
-        Returns:
-            Firestore document reference for the workspace app settings.
-        """
-        return (
-            self._workspace_ref(team_id).collection("app_settings").document("default")
-        )
-
-    def _channel_ref(self, team_id: str, channel_id: str) -> Any:
-        """Return the channel document reference within a workspace.
-
-        Args:
-            team_id: Slack workspace id.
-            channel_id: Slack channel id.
-
-        Returns:
-            Firestore document reference for the channel.
-        """
-        return self._workspace_ref(team_id).collection("channels").document(channel_id)
-
-    def _channel_settings_ref(self, team_id: str, channel_id: str) -> Any:
-        """Return the channel app settings document reference.
-
-        Args:
-            team_id: Slack workspace id.
-            channel_id: Slack channel id.
-
-        Returns:
-            Firestore document reference for the channel app settings.
-        """
-        return (
-            self._channel_ref(team_id, channel_id)
-            .collection("app_settings")
-            .document("default")
-        )
-
-    def _thread_ref(self, team_id: str, channel_id: str, thread_ts: str) -> Any:
-        """Return the thread document reference within a channel.
-
-        Args:
-            team_id: Slack workspace id.
-            channel_id: Slack channel id.
-            thread_ts: Thread timestamp identifying the Slack thread.
-
-        Returns:
-            Firestore document reference for the thread.
-        """
-        return (
-            self._channel_ref(team_id, channel_id)
-            .collection("threads")
-            .document(thread_ts)
-        )
-
-    def _agent_ref(self, agent_id: str) -> Any:
-        """Return the global agent definition document reference.
-
-        Args:
-            agent_id: Agent identifier stored in the global agents collection.
-
-        Returns:
-            Firestore document reference for the agent definition.
-        """
-        return self._client.collection("agents").document(agent_id)
-
-    def _read_model(
-        self,
-        reference: Any,
-        model_type: type[DocumentT],
-    ) -> DocumentT | None:
-        """Read and validate a Firestore document as the requested model type.
-
-        Args:
-            reference: Firestore document reference to load.
-            model_type: Pydantic model type used to validate the document payload.
-
-        Returns:
-            Validated model instance, or `None` when the document does not exist.
-        """
-        snapshot = reference.get()
-        if not snapshot.exists:
+        with Session(self._engine) as session:
+            record = session.get(AgentRecord, agent_id)
+        if record is None:
             return None
-        data = snapshot.to_dict() or {}
-        return model_type.model_validate(cast(dict[str, Any], data))
+        return AgentDocument.model_validate(record.payload)
+
+    def _read_workspace_settings(
+        self,
+        team_id: str,
+    ) -> WorkspaceAppSettingsDocument | None:
+        """Read workspace app settings for the supplied Slack team.
+
+        Args:
+            team_id: Slack workspace id.
+
+        Returns:
+            Validated workspace settings, or `None` when missing.
+        """
+        with Session(self._engine) as session:
+            record = session.get(WorkspaceAppSettingsRecord, team_id)
+        if record is None:
+            return None
+        return WorkspaceAppSettingsDocument.model_validate(record.payload)
+
+    def _read_channel_settings(
+        self,
+        team_id: str,
+        channel_id: str,
+    ) -> ChannelAppSettingsDocument | None:
+        """Read channel app settings for the supplied Slack channel.
+
+        Args:
+            team_id: Slack workspace id.
+            channel_id: Slack channel id.
+
+        Returns:
+            Validated channel settings, or `None` when missing.
+        """
+        with Session(self._engine) as session:
+            record = session.get(ChannelAppSettingsRecord, (team_id, channel_id))
+        if record is None:
+            return None
+        return ChannelAppSettingsDocument.model_validate(record.payload)
 
     def _dump(self, document: BaseModel) -> dict[str, Any]:
-        """Serialize a Pydantic document into Firestore-friendly Python data.
+        """Serialize a Pydantic document into JSON-friendly Python data.
 
         Args:
             document: Pydantic document to serialize.
 
         Returns:
-            Plain Python dictionary ready to write to Firestore.
+            Plain Python dictionary ready to persist in a JSON column.
         """
-        return cast(dict[str, Any], document.model_dump(mode="python"))
+        return cast(dict[str, Any], document.model_dump(mode="json"))
 
 
-__all__ = ["FirestoreSlackAgentRepository"]
+__all__ = ["PostgresSlackAgentRepository"]

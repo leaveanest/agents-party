@@ -8,12 +8,16 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.18.4",
+    "cloud-sql-python-connector[pg8000]>=1.20.1",
     "fastapi>=0.135.1",
-    "google-cloud-firestore>=2.25.0",
+    "psycopg[binary]>=3.2.0",
     "pydantic-ai>=1.70.0",
     "pydantic-ai-skills>=0.5.1",
     "pydantic-settings>=2.13.1",
     "slack-bolt>=1.27.0",
+    "sqlalchemy>=2.0.0",
+    "sqlmodel>=0.0.37",
     "uvicorn>=0.42.0",
 ]
 

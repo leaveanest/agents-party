@@ -1,6 +1,6 @@
 # agents-party
 
-`agents-party` is a Python Slack application built with FastAPI, Slack Bolt, `pydantic-ai`, and Firestore.
+`agents-party` is a Python Slack application built with FastAPI, Slack Bolt, `pydantic-ai`, and PostgreSQL.
 It is intended to orchestrate agent-based workflows inside Slack.
 
 ## Stack
@@ -12,7 +12,9 @@ It is intended to orchestrate agent-based workflows inside Slack.
 - FastAPI for the web application entrypoint
 - Slack Bolt for Slack event handling
 - `pydantic-ai` and `pydantic-ai-skills` for agent behavior
-- Firestore for persistence
+- PostgreSQL for persistence
+- SQLModel for relational table models
+- Alembic for schema migrations
 - Terraform for infrastructure layout
 
 ## Current Status
@@ -30,12 +32,18 @@ The agent that responds to an `app_mention` is intended to be selected by worksp
 and thread settings. The repository may contain multiple agent implementations even though the
 Slack app itself is a single app.
 
-## Setup
+## Local Setup
 
 Install dependencies:
 
 ```bash
 uv sync
+```
+
+Apply database migrations:
+
+```bash
+uv run alembic upgrade head
 ```
 
 Run the app locally:
@@ -55,16 +63,59 @@ Repository-local Codex skills live under `.agents/skills/`.
 
 ## Environment Variables
 
-Set the following environment variables before using Slack integration:
+### Local development
+
+Use a direct PostgreSQL URL for local development and one-off verification:
 
 ```bash
 SLACK_BOT_TOKEN=...
 SLACK_SIGNING_SECRET=...
-GOOGLE_CLOUD_PROJECT=...
-FIRESTORE_DATABASE=(default)
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/agents_party
 ```
 
-The application reads environment variables from `.env` if present.
+### Cloud Run with Cloud SQL
+
+Production on Cloud Run uses the Cloud SQL Python Connector with IAM database authentication.
+Do not set `DATABASE_URL` in Cloud Run. Set the following instead:
+
+```bash
+SLACK_BOT_TOKEN=...
+SLACK_SIGNING_SECRET=...
+CLOUD_SQL_INSTANCE_CONNECTION_NAME=project:region:instance
+CLOUD_SQL_DATABASE=agents_party
+CLOUD_SQL_IAM_DB_USER=agents-party-runtime@project-id.iam
+CLOUD_SQL_IP_TYPE=PUBLIC
+```
+
+The application reads environment variables from `.env` if present. `DATABASE_URL`
+always wins when both modes are configured, which is intended for local overrides only.
+
+## Deployment
+
+Terraform for the initial Cloud Run + Cloud SQL wiring lives under
+`terraform/environments/dev/`.
+
+1. Apply infrastructure:
+
+```bash
+cd terraform/environments/dev
+terraform init
+terraform apply -var-file=terraform.tfvars
+```
+
+2. Run the Cloud Run migration job before shifting traffic:
+
+```bash
+gcloud run jobs execute agents-party-migrate --region=asia-northeast1 --wait
+```
+
+3. Deploy or update the Cloud Run service image, then point traffic to the latest revision.
+
+Rollback rule:
+
+- App rollback and database rollback are separate operations.
+- Do not pair destructive Alembic revisions with routine app deploys.
+- If an app release fails, roll back the Cloud Run revision first and evaluate schema rollback separately.
 
 ## Development
 
@@ -98,13 +149,19 @@ Run tests with coverage:
 uv run pytest --cov=agents_party --cov-report=term-missing
 ```
 
+Create a new migration revision:
+
+```bash
+uv run alembic revision --autogenerate -m "describe change"
+```
+
 ## Repository Layout
 
 ```text
 src/agents_party/
   agents/
   domain/
-  infrastructure/firestore/
+  infrastructure/postgres/
   repositories/
   slack/
 terraform/

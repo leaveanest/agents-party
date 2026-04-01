@@ -1,3 +1,5 @@
+"""Work-management domain models and derived state helpers."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -6,7 +8,7 @@ from typing import Any, Iterable
 
 from pydantic import Field, model_validator
 
-from agents_party.domain.slack_documents import FirestoreDocument
+from agents_party.domain.slack_documents import DocumentModel
 
 
 class WorkItemStatus(StrEnum):
@@ -102,7 +104,7 @@ def utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
 
-class WorkItemDocument(FirestoreDocument):
+class WorkItemDocument(DocumentModel):
     work_item_id: str
     team_id: str
     title: str
@@ -141,7 +143,7 @@ class WorkItemDocument(FirestoreDocument):
         return self
 
 
-class ParticipantRelationDocument(FirestoreDocument):
+class ParticipantRelationDocument(DocumentModel):
     work_item_id: str
     user_id: str
     role: ParticipantRole
@@ -172,7 +174,7 @@ class ParticipantRelationDocument(FirestoreDocument):
         return self
 
 
-class WorkItemAttentionIndexDocument(FirestoreDocument):
+class WorkItemAttentionIndexDocument(DocumentModel):
     team_id: str
     user_id: str
     work_item_id: str
@@ -189,7 +191,7 @@ class WorkItemAttentionIndexDocument(FirestoreDocument):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
-class WorkEventDocument(FirestoreDocument):
+class WorkEventDocument(DocumentModel):
     event_id: str
     work_item_id: str
     type: WorkEventType
@@ -199,14 +201,14 @@ class WorkEventDocument(FirestoreDocument):
     occurred_at: datetime = Field(default_factory=utc_now)
 
 
-class WorkItemAggregate(FirestoreDocument):
+class WorkItemAggregate(DocumentModel):
     item: WorkItemDocument
     participants: list[ParticipantRelationDocument] = Field(default_factory=list)
     recent_events: list[WorkEventDocument] = Field(default_factory=list)
     viewer_relation: ParticipantRelationDocument | None = None
 
 
-class WorkItemPatch(FirestoreDocument):
+class WorkItemPatch(DocumentModel):
     title: str | None = None
     description: str | None = None
     status: WorkItemStatus | None = None
@@ -220,7 +222,7 @@ class WorkItemPatch(FirestoreDocument):
     clear_fields: list[str] = Field(default_factory=list)
 
 
-class ParticipantAttentionUpdate(FirestoreDocument):
+class ParticipantAttentionUpdate(DocumentModel):
     user_id: str
     attention_profile: AttentionProfile | None = None
     next_attention_at: datetime | None = None
@@ -231,7 +233,7 @@ class ParticipantAttentionUpdate(FirestoreDocument):
     role_if_missing: ParticipantRole = ParticipantRole.FOLLOWER
 
 
-class WorkItemMutation(FirestoreDocument):
+class WorkItemMutation(DocumentModel):
     item_patch: WorkItemPatch = Field(default_factory=WorkItemPatch)
     primary_assignee_user_id: str | None = None
     clear_primary_assignee: bool = False
@@ -243,7 +245,7 @@ class WorkItemMutation(FirestoreDocument):
     events: list[WorkEventDocument] = Field(default_factory=list)
 
 
-class WorkItemQuery(FirestoreDocument):
+class WorkItemQuery(DocumentModel):
     team_id: str
     viewer_user_id: str | None = None
     viewer_channel_id: str | None = None

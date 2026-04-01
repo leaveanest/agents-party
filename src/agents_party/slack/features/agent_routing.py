@@ -17,6 +17,9 @@ from agents_party.domain import (
     ThreadMessage,
     ThreadStatus,
 )
+from agents_party.infrastructure.postgres.connection import (
+    build_database_engine_from_settings,
+)
 from agents_party.repositories import SlackAgentRepository, WorkItemRepository
 
 _SUPPORTED_ASSISTANT_MESSAGE_SUBTYPES = frozenset({"bot_message"})
@@ -315,28 +318,27 @@ def build_agent_invocation_from_message(
 
 
 def _build_repository() -> SlackAgentRepository | None:
-    """Instantiate the Slack agent repository from configured Firestore settings.
+    """Instantiate the Slack agent repository from configured PostgreSQL settings.
 
     Returns:
-        Firestore-backed Slack agent repository, or `None` when unavailable.
+        PostgreSQL-backed Slack agent repository, or `None` when unavailable.
     """
+    if not settings.database_enabled:
+        return None
     try:
         module = import_module(
-            "agents_party.infrastructure.firestore.slack_agent_repository"
+            "agents_party.infrastructure.postgres.slack_agent_repository"
         )
     except ModuleNotFoundError:
         return None
 
-    repository_cls = getattr(module, "FirestoreSlackAgentRepository", None)
+    repository_cls = getattr(module, "PostgresSlackAgentRepository", None)
     if repository_cls is None:
         return None
 
     return cast(
         SlackAgentRepository,
-        repository_cls(
-            project_id=settings.google_cloud_project,
-            database=settings.firestore_database,
-        ),
+        repository_cls(engine=build_database_engine_from_settings(settings)),
     )
 
 

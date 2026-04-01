@@ -45,7 +45,7 @@ Salesforce 連携で先に共通化したいのは、認証と接続状態の扱
 - 将来の OAuth callback も同じ FastAPI アプリに追加する
 - Slack SDK 依存は `src/agents_party/slack/` に閉じ込める
 - Salesforce API 呼び出しは infrastructure 層に閉じ込める
-- Firestore は接続情報の保存先として継続利用する
+- PostgreSQL は接続情報の保存先として継続利用する
 - まだ Salesforce 連携は未実装であり、既存の互換制約はない
 
 ## 認証方式の結論
@@ -173,7 +173,7 @@ callback 検証用の短命 state。
 補足:
 
 - TTL は短く保ち、使い捨てにする
-- Firestore 保存でもよいが、署名付き state に最小情報だけ載せる案も比較対象に残す
+- PostgreSQL 保存でもよいが、署名付き state に最小情報だけ載せる案も比較対象に残す
 - 初期は実装単純性を優先して server-side 保存を推奨する
 
 ## 接続単位
@@ -277,7 +277,7 @@ refresh に成功したら、少なくとも次を同時に更新する。
 同じ接続に対する同時 refresh は抑止する。
 
 - 同一 `team_id` / `slack_user_id` / `salesforce_org_id` の refresh は直列化する
-- 実装時は Firestore transaction または version field による楽観ロックを使う
+- 実装時は PostgreSQL transaction または version field による楽観ロックを使う
 - 先行 refresh が成功した場合、後続処理は新しい token を読み直して再利用する
 
 ### 非採用方針
@@ -321,7 +321,7 @@ src/agents_party/
     salesforce_oauth_state_repository.py
     salesforce_gateway.py
   infrastructure/
-    firestore/
+    postgres/
       salesforce_connection_repository.py
       salesforce_workspace_auth_config_repository.py
       salesforce_oauth_state_repository.py
@@ -336,12 +336,12 @@ src/agents_party/
 
 ## 保存配置案
 
-Firestore 上の初期配置は次を基準にする。
+PostgreSQL 上の初期配置は次を基準にする。
 
 ```text
-workspaces/{team_id}/salesforce_auth_configs/{salesforce_org_id}
-workspaces/{team_id}/salesforce_connections/{slack_user_id}_{salesforce_org_id}
-workspaces/{team_id}/salesforce_oauth_states/{state_id}
+salesforce_auth_configs (team_id, salesforce_org_id)
+salesforce_connections (team_id, slack_user_id, salesforce_org_id)
+salesforce_oauth_states (state_id)
 ```
 
 理由:
@@ -373,7 +373,7 @@ OAuth 用のルート追加は比較的素直に行える。
 
 補足:
 
-- `client_id` と `client_secret` は workspace ごとに変わりうるため、環境変数ではなく Firestore 管理を基本にする
+- `client_id` と `client_secret` は workspace ごとに変わりうるため、環境変数ではなく PostgreSQL 管理を基本にする
 - ただし、単一 org 固定の社内利用で始めるなら env-only 運用でもよい
 - 初期 plan では multi-workspace / multi-org へ拡張できる設計を優先する
 
