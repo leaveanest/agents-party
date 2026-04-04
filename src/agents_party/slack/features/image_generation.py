@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from slack_bolt.context.ack.async_ack import AsyncAck
+from slack_sdk.web.async_client import AsyncWebClient
+
 from agents_party.agents.image_generation import (
     ImageGenerationInvocation,
     run_image_generation,
@@ -110,7 +113,7 @@ def _build_generation_comment(prompt: str) -> str:
     return f"Generated image for prompt:\n{prompt}"
 
 
-async def _open_user_messages_channel(client: Any, user_id: str) -> str:
+async def _open_user_messages_channel(client: AsyncWebClient, user_id: str) -> str:
     """Open the Slack DM channel used to deliver generated images.
 
     Args:
@@ -157,9 +160,9 @@ def _build_image_generation_invocation(
 
 
 async def handle_image_generation_action(
-    ack: Any,
+    ack: AsyncAck,
     body: Mapping[str, Any],
-    client: Any,
+    client: AsyncWebClient,
 ) -> None:
     """Open the image-generation modal from the registered Slack action.
 
@@ -183,9 +186,9 @@ async def handle_image_generation_action(
 
 
 async def handle_image_generation_submission(
-    ack: Any,
+    ack: AsyncAck,
     body: Mapping[str, Any],
-    client: Any,
+    client: AsyncWebClient,
 ) -> None:
     """Generate an image from a submitted modal prompt and upload it to Slack.
 

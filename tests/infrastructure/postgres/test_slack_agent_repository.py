@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import create_engine, insert
 from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, col, select
 
 from agents_party.domain import AgentRouteScope, ThreadStatus
 from agents_party.infrastructure.postgres import PostgresSlackAgentRepository
@@ -247,6 +248,63 @@ def test_activate_thread_agent_upserts_minimal_state_only() -> None:
     assert stored.messages == []
     assert stored.participant_user_ids == []
     assert stored.summary is None
+
+
+def test_set_enabled_agents_updates_relational_and_payload_state() -> None:
+    """Verify enabling agents updates both row columns and JSON payloads.
+
+    Returns:
+        None.
+    """
+    engine = build_seeded_engine()
+    repository = PostgresSlackAgentRepository(engine=engine)
+
+    with engine.begin() as connection:
+        connection.execute(
+            insert(AgentRecord),
+            [
+                {
+                    "agent_id": "image-generation",
+                    "enabled": True,
+                    "updated_at": seed_timestamp(),
+                    "payload": {
+                        "agent_id": "image-generation",
+                        "name": "Image Generation",
+                        "model_provider": "google-gla",
+                        "model_name": "gemini-2.5-flash",
+                        "enabled": True,
+                    },
+                },
+                {
+                    "agent_id": "web-research",
+                    "enabled": False,
+                    "updated_at": seed_timestamp(),
+                    "payload": {
+                        "agent_id": "web-research",
+                        "name": "Web Research",
+                        "model_provider": "google-gla",
+                        "model_name": "gemini-2.5-flash",
+                        "enabled": False,
+                    },
+                },
+            ],
+        )
+
+    updated_agents = repository.set_enabled_agents(agent_ids=["web-research"])
+
+    assert [agent.agent_id for agent in updated_agents] == [
+        "image-generation",
+        "web-research",
+    ]
+    assert [agent.enabled for agent in updated_agents] == [False, True]
+
+    with Session(engine) as session:
+        stored_rows = session.exec(
+            select(AgentRecord).order_by(col(AgentRecord.agent_id))
+        ).all()
+
+    assert [row.enabled for row in stored_rows] == [False, True]
+    assert [row.payload["enabled"] for row in stored_rows] == [False, True]
 
 
 def test_is_thread_auto_reply_enabled_prefers_channel_then_workspace_then_default() -> (

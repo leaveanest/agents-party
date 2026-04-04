@@ -2,6 +2,9 @@
 
 from typing import Any
 
+from slack_bolt.context.ack.async_ack import AsyncAck
+from slack_bolt.context.respond.async_respond import AsyncRespond
+
 
 def _build_onboarding_message(user_id: str) -> str:
     """Build the onboarding text shown after the onboarding action.
@@ -22,7 +25,9 @@ def _build_onboarding_message(user_id: str) -> str:
 
 
 async def handle_onboarding_action(
-    ack: Any, body: dict[str, Any], respond: Any
+    ack: AsyncAck,
+    body: dict[str, Any],
+    respond: AsyncRespond,
 ) -> None:
     """Acknowledge the onboarding action and send setup guidance.
 

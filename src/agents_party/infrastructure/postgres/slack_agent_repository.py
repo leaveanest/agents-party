@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, cast
 
 from pydantic import BaseModel
@@ -52,6 +53,53 @@ class PostgresSlackAgentRepository:
         if engine is None and database_url is None:
             raise ValueError("database_url or engine is required.")
         self._engine = engine or build_database_engine(cast(str, database_url))
+
+    def list_agents(self) -> list[AgentDocument]:
+        """Return all stored agent documents ordered for deterministic display.
+
+        Returns:
+            Stored agent documents including enabled and disabled rows.
+        """
+        statement = select(AgentRecord).order_by(asc(col(AgentRecord.agent_id)))
+        with Session(self._engine) as session:
+            rows = session.exec(statement).all()
+        return [self._agent_document_from_record(row) for row in rows]
+
+    def set_enabled_agents(
+        self,
+        *,
+        agent_ids: Sequence[str],
+    ) -> list[AgentDocument]:
+        """Persist which agents should remain enabled for routing.
+
+        Args:
+            agent_ids: Agent ids that should be marked as enabled.
+
+        Returns:
+            Updated agent documents ordered for deterministic presentation.
+        """
+        enabled_agent_ids = {agent_id.strip() for agent_id in agent_ids if agent_id}
+        updated_at = utc_now()
+        updated_agents: list[AgentDocument] = []
+
+        with Session(self._engine) as session:
+            statement = select(AgentRecord).order_by(asc(col(AgentRecord.agent_id)))
+            rows = session.exec(statement).all()
+
+            for row in rows:
+                is_enabled = row.agent_id in enabled_agent_ids
+                payload = dict(row.payload)
+                payload["enabled"] = is_enabled
+                payload["updated_at"] = updated_at.isoformat()
+                row.enabled = is_enabled
+                row.updated_at = updated_at
+                row.payload = payload
+                session.add(row)
+                updated_agents.append(AgentDocument.model_validate(payload))
+
+            session.commit()
+
+        return updated_agents
 
     def is_channel_enabled(
         self,
@@ -165,7 +213,7 @@ class PostgresSlackAgentRepository:
         )
         with Session(self._engine) as session:
             rows = session.exec(statement).all()
-        return [AgentDocument.model_validate(row.payload) for row in rows]
+        return [self._agent_document_from_record(row) for row in rows]
 
     def get_thread_document(
         self,
@@ -317,7 +365,21 @@ class PostgresSlackAgentRepository:
             record = session.get(AgentRecord, agent_id)
         if record is None:
             return None
-        return AgentDocument.model_validate(record.payload)
+        return self._agent_document_from_record(record)
+
+    def _agent_document_from_record(self, record: AgentRecord) -> AgentDocument:
+        """Build a normalized agent document from a persisted relational row.
+
+        Args:
+            record: Persisted agent row storing both indexed columns and payload.
+
+        Returns:
+            Agent document with indexed enablement reflected in the payload view.
+        """
+        payload = dict(record.payload)
+        payload["enabled"] = record.enabled
+        payload["updated_at"] = record.updated_at.isoformat()
+        return AgentDocument.model_validate(payload)
 
     def _read_workspace_settings(
         self,

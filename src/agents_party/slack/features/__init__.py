@@ -2,6 +2,12 @@
 
 from slack_bolt.async_app import AsyncApp
 
+from agents_party.slack.features.agent_settings import (
+    AGENT_SETTINGS_ACTION_ID,
+    AGENT_SETTINGS_VIEW_CALLBACK_ID,
+    handle_agent_settings_action,
+    handle_agent_settings_submission,
+)
 from agents_party.slack.features.image_generation import (
     IMAGE_GENERATION_ACTION_ID,
     IMAGE_GENERATION_VIEW_CALLBACK_ID,
@@ -29,7 +35,9 @@ def register_feature_handlers(app: AsyncApp) -> None:
         None.
     """
     app.action("onboarding:start")(handle_onboarding_action)
+    app.action(AGENT_SETTINGS_ACTION_ID)(handle_agent_settings_action)
     app.action(IMAGE_GENERATION_ACTION_ID)(handle_image_generation_action)
     app.action(VIDEO_GENERATION_ACTION_ID)(handle_video_generation_action)
+    app.view(AGENT_SETTINGS_VIEW_CALLBACK_ID)(handle_agent_settings_submission)
     app.view(IMAGE_GENERATION_VIEW_CALLBACK_ID)(handle_image_generation_submission)
     app.view(VIDEO_GENERATION_VIEW_CALLBACK_ID)(handle_video_generation_submission)

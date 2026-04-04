@@ -1,12 +1,38 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol
 
-from agents_party.domain import ThreadDocument
+from agents_party.domain import AgentDocument, ThreadDocument
 
 
 class SlackAgentRepository(Protocol):
     """Repository boundary for Slack assistant channel enablement and thread state."""
+
+    def list_agents(self) -> list[AgentDocument]:
+        """Return all stored agent definitions for workspace configuration surfaces.
+
+        Returns:
+            Stored agent documents ordered for deterministic presentation.
+        """
+
+        ...
+
+    def set_enabled_agents(
+        self,
+        *,
+        agent_ids: Sequence[str],
+    ) -> list[AgentDocument]:
+        """Persist which agent ids are enabled for subsequent routing.
+
+        Args:
+            agent_ids: Agent ids that should remain enabled after the update.
+
+        Returns:
+            Updated agent documents ordered for deterministic presentation.
+        """
+
+        ...
 
     def is_channel_enabled(
         self,

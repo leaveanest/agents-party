@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from slack_bolt.context.ack.async_ack import AsyncAck
+from slack_sdk.web.async_client import AsyncWebClient
+
 from agents_party.agents.video_generation import (
     VideoGenerationInvocation,
     run_video_generation,
@@ -108,7 +111,7 @@ def _build_generation_comment(prompt: str) -> str:
     return f"Generated video for prompt:\n{prompt}"
 
 
-async def _open_user_messages_channel(client: Any, user_id: str) -> str:
+async def _open_user_messages_channel(client: AsyncWebClient, user_id: str) -> str:
     """Open the Slack DM channel used to deliver generated videos.
 
     Args:
@@ -155,9 +158,9 @@ def _build_video_generation_invocation(
 
 
 async def handle_video_generation_action(
-    ack: Any,
+    ack: AsyncAck,
     body: Mapping[str, Any],
-    client: Any,
+    client: AsyncWebClient,
 ) -> None:
     """Open the video-generation modal from the registered Slack action.
 
@@ -181,9 +184,9 @@ async def handle_video_generation_action(
 
 
 async def handle_video_generation_submission(
-    ack: Any,
+    ack: AsyncAck,
     body: Mapping[str, Any],
-    client: Any,
+    client: AsyncWebClient,
 ) -> None:
     """Generate a video from a submitted modal prompt and upload it to Slack.
 
