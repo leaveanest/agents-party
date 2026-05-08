@@ -28,6 +28,20 @@ class WorkItemPriority(StrEnum):
     URGENT = "urgent"
 
 
+class CalendarProviderKind(StrEnum):
+    """External calendar providers that can be linked to work items."""
+
+    GOOGLE_CALENDAR = "google_calendar"
+
+
+class WorkItemCalendarSyncStatus(StrEnum):
+    """Cached synchronization state for a linked external calendar event."""
+
+    ACTIVE = "active"
+    CANCELED = "canceled"
+    NOT_FOUND = "not_found"
+
+
 class VisibilityPolicyKind(StrEnum):
     PRIVATE = "private"
     CONTEXT = "context"
@@ -61,6 +75,10 @@ class WorkEventType(StrEnum):
     MENTIONED = "mentioned"
     COMPLETED = "completed"
     REOPENED = "reopened"
+    CALENDAR_EVENT_LINKED = "calendar_event_linked"
+    CALENDAR_EVENT_UNLINKED = "calendar_event_unlinked"
+    CALENDAR_EVENT_RESCHEDULED = "calendar_event_rescheduled"
+    CALENDAR_EVENT_CANCELED = "calendar_event_canceled"
 
 
 class WorkItemQueryView(StrEnum):
@@ -90,6 +108,10 @@ RELEVANT_ATTENTION_EVENT_TYPES = frozenset(
         WorkEventType.ATTENTION_SCHEDULED,
         WorkEventType.COMPLETED,
         WorkEventType.REOPENED,
+        WorkEventType.CALENDAR_EVENT_LINKED,
+        WorkEventType.CALENDAR_EVENT_UNLINKED,
+        WorkEventType.CALENDAR_EVENT_RESCHEDULED,
+        WorkEventType.CALENDAR_EVENT_CANCELED,
     }
     | DIRECTED_ATTENTION_EVENT_TYPES
 )
@@ -201,10 +223,51 @@ class WorkEventDocument(DocumentModel):
     occurred_at: datetime = Field(default_factory=utc_now)
 
 
+class WorkItemCalendarLinkDocument(DocumentModel):
+    """Cached external calendar event linked to a work item.
+
+    Attributes:
+        link_id: Stable local identifier for this work item to calendar event link.
+        team_id: Slack workspace id that owns the work item.
+        work_item_id: Work item identifier the external event is linked to.
+        provider_kind: Calendar provider backing the external event.
+        external_calendar_id: Provider-side calendar identifier.
+        external_event_id: Provider-side event identifier.
+        event_title_snapshot: Cached event title or summary for display and search.
+        starts_at: Cached event start timestamp when available.
+        ends_at: Cached event end timestamp when available.
+        is_all_day: Whether the linked event is an all-day event.
+        response_status: Cached viewer response status when known.
+        sync_status: Cached synchronization state for the external event.
+        last_synced_at: Timestamp of the most recent external calendar sync.
+        created_at: Timestamp when the local link was first created.
+        updated_at: Timestamp when the local link cache was last updated.
+    """
+
+    link_id: str
+    team_id: str
+    work_item_id: str
+    provider_kind: CalendarProviderKind
+    external_calendar_id: str
+    external_event_id: str
+    event_title_snapshot: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    is_all_day: bool = False
+    response_status: str | None = None
+    sync_status: WorkItemCalendarSyncStatus = WorkItemCalendarSyncStatus.ACTIVE
+    last_synced_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class WorkItemAggregate(DocumentModel):
+    """Hydrated work item with participants, events, and external links."""
+
     item: WorkItemDocument
     participants: list[ParticipantRelationDocument] = Field(default_factory=list)
     recent_events: list[WorkEventDocument] = Field(default_factory=list)
+    calendar_links: list[WorkItemCalendarLinkDocument] = Field(default_factory=list)
     viewer_relation: ParticipantRelationDocument | None = None
 
 

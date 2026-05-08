@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from agents_party.domain.work_management import (
     AttentionProfile,
+    CalendarProviderKind,
     ParticipantAttentionUpdate,
     ParticipantRelationDocument,
     ParticipantRole,
@@ -16,6 +17,8 @@ from agents_party.domain.work_management import (
     WorkEventDocument,
     WorkEventType,
     WorkItemDocument,
+    WorkItemCalendarLinkDocument,
+    WorkItemCalendarSyncStatus,
     WorkItemMutation,
     WorkItemPatch,
     WorkItemPriority,
@@ -141,6 +144,39 @@ def make_event(
     )
 
 
+def make_calendar_link(
+    *,
+    link_id: str = "L1",
+    work_item_id: str = "W1",
+    starts_at: datetime | None = None,
+    sync_status: WorkItemCalendarSyncStatus = WorkItemCalendarSyncStatus.ACTIVE,
+) -> WorkItemCalendarLinkDocument:
+    """Build a representative calendar link for repository tests.
+
+    Args:
+        link_id: Local calendar-link identifier to assign.
+        work_item_id: Work item identifier the link belongs to.
+        starts_at: Optional event start timestamp.
+        sync_status: Cached sync state for the linked event.
+
+    Returns:
+        Calendar link document configured for repository tests.
+    """
+    return WorkItemCalendarLinkDocument(
+        link_id=link_id,
+        team_id="T1",
+        work_item_id=work_item_id,
+        provider_kind=CalendarProviderKind.GOOGLE_CALENDAR,
+        external_calendar_id="primary",
+        external_event_id=f"event-{link_id}",
+        event_title_snapshot="Planning meeting",
+        starts_at=starts_at,
+        ends_at=None if starts_at is None else datetime(2026, 3, 24, 10, tzinfo=UTC),
+        sync_status=sync_status,
+        last_synced_at=datetime(2026, 3, 22, tzinfo=UTC),
+    )
+
+
 def test_create_work_item_writes_source_of_truth_and_attention_index() -> None:
     """Verify creation writes the item, related documents, and attention index.
 
@@ -201,6 +237,140 @@ def test_mutate_work_item_updates_cached_fields_and_attention() -> None:
     assert aggregate.item.primary_assignee_user_id == "U2"
     assert aggregate.viewer_relation is not None
     assert aggregate.viewer_relation.next_attention_at == next_attention_at
+
+
+def test_link_calendar_event_persists_snapshot_without_changing_due_at() -> None:
+    """Verify linking stores a calendar snapshot without implicit time changes.
+
+    Returns:
+        None.
+    """
+    repository = PostgresWorkItemRepository(engine=build_seeded_engine())
+    repository.create_work_item(
+        make_item(work_item_id="W1"),
+        [make_participant(work_item_id="W1", user_id="U1")],
+        [make_event(event_id="E1", work_item_id="W1")],
+    )
+    starts_at = datetime(2026, 3, 24, 9, tzinfo=UTC)
+
+    aggregate = repository.link_calendar_event(
+        work_item_id="W1",
+        team_id="T1",
+        calendar_link=make_calendar_link(starts_at=starts_at),
+        actor_user_id="U1",
+    )
+    fetched = repository.get_work_item("W1", "T1", "U1", ["C123"])
+
+    assert aggregate.item.due_at is None
+    assert aggregate.calendar_links[0].starts_at == starts_at
+    assert aggregate.recent_events[-1].type == WorkEventType.CALENDAR_EVENT_LINKED
+    assert fetched is not None
+    assert fetched.calendar_links[0].external_event_id == "event-L1"
+
+
+def test_link_calendar_event_can_apply_event_start_explicitly() -> None:
+    """Verify explicit flags copy event start to due and attention timestamps.
+
+    Returns:
+        None.
+    """
+    repository = PostgresWorkItemRepository(engine=build_seeded_engine())
+    repository.create_work_item(
+        make_item(work_item_id="W1"),
+        [make_participant(work_item_id="W1", user_id="U1")],
+        [make_event(event_id="E1", work_item_id="W1")],
+    )
+    starts_at = datetime(2026, 3, 24, 9, tzinfo=UTC)
+
+    aggregate = repository.link_calendar_event(
+        work_item_id="W1",
+        team_id="T1",
+        calendar_link=make_calendar_link(starts_at=starts_at),
+        actor_user_id="U1",
+        apply_starts_at_to_due_at=True,
+        apply_starts_at_to_next_attention_at_for_user_id="U1",
+    )
+
+    assert aggregate.item.due_at == starts_at
+    assert aggregate.viewer_relation is not None
+    assert aggregate.viewer_relation.next_attention_at == starts_at
+    assert {event.type for event in aggregate.recent_events} >= {
+        WorkEventType.CALENDAR_EVENT_LINKED,
+        WorkEventType.DUE_AT_CHANGED,
+        WorkEventType.ATTENTION_SCHEDULED,
+    }
+
+
+def test_unlink_calendar_event_removes_snapshot_and_appends_event() -> None:
+    """Verify unlinking removes the calendar link and records semantic history.
+
+    Returns:
+        None.
+    """
+    repository = PostgresWorkItemRepository(engine=build_seeded_engine())
+    repository.create_work_item(
+        make_item(work_item_id="W1"),
+        [make_participant(work_item_id="W1", user_id="U1")],
+        [make_event(event_id="E1", work_item_id="W1")],
+    )
+    repository.link_calendar_event(
+        work_item_id="W1",
+        team_id="T1",
+        calendar_link=make_calendar_link(),
+        actor_user_id="U1",
+    )
+
+    aggregate = repository.unlink_calendar_event(
+        work_item_id="W1",
+        team_id="T1",
+        link_id="L1",
+        actor_user_id="U1",
+    )
+
+    assert aggregate.calendar_links == []
+    assert aggregate.recent_events[-1].type == WorkEventType.CALENDAR_EVENT_UNLINKED
+
+
+def test_link_calendar_event_records_canceled_and_not_found_sync_statuses() -> None:
+    """Verify sync-status snapshots survive for canceled and missing events.
+
+    Returns:
+        None.
+    """
+    repository = PostgresWorkItemRepository(engine=build_seeded_engine())
+    repository.create_work_item(
+        make_item(work_item_id="W1"),
+        [make_participant(work_item_id="W1", user_id="U1")],
+        [make_event(event_id="E1", work_item_id="W1")],
+    )
+
+    canceled = repository.link_calendar_event(
+        work_item_id="W1",
+        team_id="T1",
+        calendar_link=make_calendar_link(
+            link_id="L-canceled",
+            sync_status=WorkItemCalendarSyncStatus.CANCELED,
+        ),
+        actor_user_id="U1",
+    )
+    missing = repository.link_calendar_event(
+        work_item_id="W1",
+        team_id="T1",
+        calendar_link=make_calendar_link(
+            link_id="L-missing",
+            sync_status=WorkItemCalendarSyncStatus.NOT_FOUND,
+        ),
+        actor_user_id="U1",
+    )
+
+    assert {link.link_id: link.sync_status for link in missing.calendar_links} == {
+        "L-canceled": WorkItemCalendarSyncStatus.CANCELED,
+        "L-missing": WorkItemCalendarSyncStatus.NOT_FOUND,
+    }
+    assert any(
+        event.type == WorkEventType.CALENDAR_EVENT_CANCELED
+        for event in canceled.recent_events
+    )
 
 
 def test_list_work_items_respects_visibility_and_needs_attention_view() -> None:

@@ -16,6 +16,7 @@ from agents_party.domain import (
     AttentionProfile,
     ThreadMessage,
     WorkItemAggregate,
+    WorkItemCalendarLinkDocument,
     WorkItemPriority,
     WorkItemStatus,
     derive_attention_reason,
@@ -147,6 +148,7 @@ class WorkManagerWorkItem(BaseModel):
     next_attention_at_for_me: datetime | None = None
     needs_attention_now: bool = False
     attention_reason: str | None = None
+    calendar_links: list[WorkItemCalendarLinkDocument] = Field(default_factory=list)
 
     @classmethod
     def from_aggregate(
@@ -174,6 +176,7 @@ class WorkManagerWorkItem(BaseModel):
                 due_at=aggregate.item.due_at,
                 primary_assignee_user_id=aggregate.item.primary_assignee_user_id,
                 audience_channel_id=aggregate.item.audience_channel_id,
+                calendar_links=aggregate.calendar_links,
             )
 
         unseen_event_types = _unseen_event_types(aggregate)
@@ -187,6 +190,7 @@ class WorkManagerWorkItem(BaseModel):
             audience_channel_id=aggregate.item.audience_channel_id,
             attention_profile=viewer_relation.attention_profile,
             next_attention_at_for_me=viewer_relation.next_attention_at,
+            calendar_links=aggregate.calendar_links,
             needs_attention_now=derive_needs_attention_now(
                 attention_profile=viewer_relation.attention_profile,
                 now=now,

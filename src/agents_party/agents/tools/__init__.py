@@ -12,6 +12,8 @@ from agents_party.agents.tools.queries import (
 from agents_party.agents.tools.work_items import (
     capture_work_item,
     complete_work_item,
+    link_google_calendar_event,
+    unlink_google_calendar_event,
     update_work_item_fields,
     update_work_item_status,
 )
@@ -38,6 +40,8 @@ def register_work_manager_tools(
     agent.tool(set_my_attention)
     agent.tool(complete_work_item)
     agent.tool(find_work_item_candidates)
+    agent.tool(link_google_calendar_event)
+    agent.tool(unlink_google_calendar_event)
 
 
 __all__ = [
@@ -46,8 +50,10 @@ __all__ = [
     "find_work_item_candidates",
     "get_time_context",
     "list_work_items",
+    "link_google_calendar_event",
     "register_work_manager_tools",
     "set_my_attention",
+    "unlink_google_calendar_event",
     "update_participants",
     "update_work_item_fields",
     "update_work_item_status",

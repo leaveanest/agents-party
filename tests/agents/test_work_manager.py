@@ -29,16 +29,21 @@ from agents_party.agents.tools import (
     complete_work_item,
     find_work_item_candidates,
     get_time_context,
+    link_google_calendar_event,
     list_work_items,
     set_my_attention,
+    unlink_google_calendar_event,
     update_participants,
 )
 from agents_party.domain.work_management import (
     AttentionProfile,
+    WorkItemCalendarLinkDocument,
+    WorkItemCalendarSyncStatus,
     ParticipantRelationDocument,
     ParticipantRole,
     VisibilityPolicyKind,
     WorkEventDocument,
+    WorkEventType,
     WorkItemAggregate,
     WorkItemDocument,
     WorkItemMutation,
@@ -55,6 +60,7 @@ class InMemoryRepository:
     items: dict[str, WorkItemDocument]
     participants: dict[str, dict[str, ParticipantRelationDocument]]
     events: dict[str, list[WorkEventDocument]]
+    calendar_links: dict[str, dict[str, WorkItemCalendarLinkDocument]]
 
     def __init__(self) -> None:
         """Initialize empty in-memory storage for work-manager tests.
@@ -65,6 +71,7 @@ class InMemoryRepository:
         self.items = {}
         self.participants = {}
         self.events = {}
+        self.calendar_links = {}
 
     def create_work_item(
         self,
@@ -87,6 +94,7 @@ class InMemoryRepository:
             participant.user_id: participant for participant in participants
         }
         self.events[item.work_item_id] = list(initial_events)
+        self.calendar_links[item.work_item_id] = {}
         return self._aggregate(item.work_item_id, item.created_by_user_id)
 
     def get_work_item(
@@ -257,6 +265,96 @@ class InMemoryRepository:
         self.events[work_item_id].extend(mutation.events)
         return self._aggregate(work_item_id, actor_user_id)
 
+    def link_calendar_event(
+        self,
+        work_item_id: str,
+        team_id: str,
+        calendar_link: WorkItemCalendarLinkDocument,
+        actor_user_id: str,
+        apply_starts_at_to_due_at: bool = False,
+        apply_starts_at_to_next_attention_at_for_user_id: str | None = None,
+    ) -> WorkItemAggregate:
+        """Link a calendar event snapshot in the in-memory store.
+
+        Args:
+            work_item_id: Work item identifier to mutate.
+            team_id: Workspace id, unused by the in-memory fake.
+            calendar_link: Calendar link snapshot to store.
+            actor_user_id: User id used to resolve the viewer relation in the result.
+            apply_starts_at_to_due_at: Whether to copy the start time to `due_at`.
+            apply_starts_at_to_next_attention_at_for_user_id: Optional user id whose
+                next attention time should receive the event start.
+
+        Returns:
+            Hydrated aggregate after the link operation.
+        """
+        del team_id
+        self.calendar_links[work_item_id][calendar_link.link_id] = calendar_link
+        self.events[work_item_id].append(
+            WorkEventDocument(
+                event_id=f"calendar-{len(self.events[work_item_id])}",
+                work_item_id=work_item_id,
+                type=WorkEventType.CALENDAR_EVENT_LINKED,
+                actor_user_id=actor_user_id,
+                payload={"calendar_link_id": calendar_link.link_id},
+            )
+        )
+        if calendar_link.sync_status == WorkItemCalendarSyncStatus.CANCELED:
+            self.events[work_item_id].append(
+                WorkEventDocument(
+                    event_id=f"calendar-{len(self.events[work_item_id])}",
+                    work_item_id=work_item_id,
+                    type=WorkEventType.CALENDAR_EVENT_CANCELED,
+                    actor_user_id=actor_user_id,
+                    payload={"calendar_link_id": calendar_link.link_id},
+                )
+            )
+        if apply_starts_at_to_due_at:
+            self.items[work_item_id] = self.items[work_item_id].model_copy(
+                update={"due_at": calendar_link.starts_at}
+            )
+        if apply_starts_at_to_next_attention_at_for_user_id is not None:
+            participant = self.participants[work_item_id][
+                apply_starts_at_to_next_attention_at_for_user_id
+            ]
+            self.participants[work_item_id][
+                apply_starts_at_to_next_attention_at_for_user_id
+            ] = participant.model_copy(
+                update={"next_attention_at": calendar_link.starts_at}
+            )
+        return self._aggregate(work_item_id, actor_user_id)
+
+    def unlink_calendar_event(
+        self,
+        work_item_id: str,
+        team_id: str,
+        link_id: str,
+        actor_user_id: str,
+    ) -> WorkItemAggregate:
+        """Remove a calendar event link from the in-memory store.
+
+        Args:
+            work_item_id: Work item identifier to mutate.
+            team_id: Workspace id, unused by the in-memory fake.
+            link_id: Calendar link identifier to remove.
+            actor_user_id: User id used to resolve the viewer relation in the result.
+
+        Returns:
+            Hydrated aggregate after the unlink operation.
+        """
+        del team_id
+        del self.calendar_links[work_item_id][link_id]
+        self.events[work_item_id].append(
+            WorkEventDocument(
+                event_id=f"calendar-{len(self.events[work_item_id])}",
+                work_item_id=work_item_id,
+                type=WorkEventType.CALENDAR_EVENT_UNLINKED,
+                actor_user_id=actor_user_id,
+                payload={"calendar_link_id": link_id},
+            )
+        )
+        return self._aggregate(work_item_id, actor_user_id)
+
     def _aggregate(self, work_item_id: str, viewer_user_id: str) -> WorkItemAggregate:
         """Build a work-item aggregate from the in-memory store.
 
@@ -271,6 +369,7 @@ class InMemoryRepository:
             item=self.items[work_item_id],
             participants=list(self.participants[work_item_id].values()),
             recent_events=list(self.events[work_item_id]),
+            calendar_links=list(self.calendar_links[work_item_id].values()),
             viewer_relation=self.participants[work_item_id].get(viewer_user_id),
         )
 
@@ -344,6 +443,8 @@ async def test_build_work_manager_agent_registers_expected_tools() -> None:
         "set_my_attention",
         "complete_work_item",
         "find_work_item_candidates",
+        "link_google_calendar_event",
+        "unlink_google_calendar_event",
     }
 
 
@@ -627,3 +728,118 @@ def test_capture_list_update_attention_complete_and_clarify() -> None:
     assert completed.action.value == "completed"
     assert completed.work_items[0].status == WorkItemStatus.DONE
     assert candidates.needs_confirmation is True
+
+
+def test_link_and_unlink_google_calendar_event_tools() -> None:
+    """Verify work-manager tools expose calendar links in result snapshots.
+
+    Returns:
+        None.
+    """
+    repository = InMemoryRepository()
+    ctx = make_ctx(repository)
+    created = capture_work_item(ctx, title="Prepare meeting notes")
+
+    linked = link_google_calendar_event(
+        ctx,
+        work_item_id=created.work_items[0].work_item_id,
+        google_calendar_id="primary",
+        google_event_id="event-1",
+        event_title_snapshot="Planning meeting",
+        starts_at=datetime(2026, 3, 24, 9, tzinfo=UTC),
+        ends_at=datetime(2026, 3, 24, 10, tzinfo=UTC),
+    )
+    link_id = linked.work_items[0].calendar_links[0].link_id
+    unlinked = unlink_google_calendar_event(
+        ctx,
+        work_item_id=created.work_items[0].work_item_id,
+        link_id=link_id,
+    )
+
+    assert linked.work_items[0].calendar_links[0].external_event_id == "event-1"
+    assert linked.work_items[0].calendar_links[0].link_id.startswith("google-")
+    assert linked.work_items[0].due_at is None
+    assert unlinked.work_items[0].calendar_links == []
+
+
+def test_link_google_calendar_event_tool_is_idempotent_for_same_event() -> None:
+    """Verify repeated links to the same Google event update one snapshot.
+
+    Returns:
+        None.
+    """
+    repository = InMemoryRepository()
+    ctx = make_ctx(repository)
+    created = capture_work_item(ctx, title="Prepare meeting notes")
+
+    first = link_google_calendar_event(
+        ctx,
+        work_item_id=created.work_items[0].work_item_id,
+        google_calendar_id="primary",
+        google_event_id="event-1",
+        event_title_snapshot="Planning meeting",
+    )
+    second = link_google_calendar_event(
+        ctx,
+        work_item_id=created.work_items[0].work_item_id,
+        google_calendar_id="primary",
+        google_event_id="event-1",
+        event_title_snapshot="Updated planning meeting",
+    )
+
+    assert len(second.work_items[0].calendar_links) == 1
+    assert second.work_items[0].calendar_links[0].link_id == (
+        first.work_items[0].calendar_links[0].link_id
+    )
+    assert (
+        second.work_items[0].calendar_links[0].event_title_snapshot
+        == "Updated planning meeting"
+    )
+
+
+def test_link_google_calendar_event_tool_requires_start_for_time_application() -> None:
+    """Verify missing start time returns a clarification instead of raising.
+
+    Returns:
+        None.
+    """
+    repository = InMemoryRepository()
+    ctx = make_ctx(repository)
+    created = capture_work_item(ctx, title="Review agenda")
+
+    result = link_google_calendar_event(
+        ctx,
+        work_item_id=created.work_items[0].work_item_id,
+        google_calendar_id="primary",
+        google_event_id="event-2",
+        apply_starts_at_to_due_at=True,
+    )
+
+    assert result.action == WorkManagerAction.CLARIFICATION_NEEDED
+    assert result.needs_confirmation is True
+    assert result.follow_up_question == "What start time should I apply?"
+
+
+def test_link_google_calendar_event_tool_can_apply_start_time_explicitly() -> None:
+    """Verify calendar event times only affect due and attention by request.
+
+    Returns:
+        None.
+    """
+    repository = InMemoryRepository()
+    ctx = make_ctx(repository)
+    created = capture_work_item(ctx, title="Review agenda")
+    starts_at = datetime(2026, 3, 24, 9, tzinfo=UTC)
+
+    linked = link_google_calendar_event(
+        ctx,
+        work_item_id=created.work_items[0].work_item_id,
+        google_calendar_id="primary",
+        google_event_id="event-2",
+        starts_at=starts_at,
+        apply_starts_at_to_due_at=True,
+        apply_starts_at_to_next_attention_at_for_me=True,
+    )
+
+    assert linked.work_items[0].due_at == starts_at
+    assert linked.work_items[0].next_attention_at_for_me == starts_at

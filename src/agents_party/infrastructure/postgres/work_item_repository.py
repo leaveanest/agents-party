@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Any, cast
+from uuid import uuid4
 
 from pydantic import BaseModel
 from sqlalchemy import Engine, asc, desc
@@ -17,8 +18,11 @@ from agents_party.domain import (
     ParticipantRole,
     VisibilityPolicyKind,
     WorkEventDocument,
+    WorkEventType,
     WorkItemAggregate,
     WorkItemAttentionIndexDocument,
+    WorkItemCalendarLinkDocument,
+    WorkItemCalendarSyncStatus,
     WorkItemDocument,
     WorkItemMutation,
     WorkItemPatch,
@@ -33,6 +37,7 @@ from agents_party.domain import (
 from agents_party.infrastructure.postgres.connection import build_database_engine
 from agents_party.infrastructure.postgres.models import (
     WorkItemAttentionIndexRecord,
+    WorkItemCalendarLinkRecord,
     WorkItemEventRecord,
     WorkItemParticipantRecord,
     WorkItemRecord,
@@ -152,10 +157,12 @@ class PostgresWorkItemRepository:
         ):
             return None
         events = self._read_events(team_id, work_item_id)
+        calendar_links = self._read_calendar_links(team_id, work_item_id)
         return self._hydrate_aggregate(
             item=item,
             participants=participants,
             events=events,
+            calendar_links=calendar_links,
             viewer_user_id=viewer_user_id,
         )
 
@@ -279,6 +286,303 @@ class PostgresWorkItemRepository:
             item=next_item,
             participants=next_participants,
             events=next_events,
+            calendar_links=self._read_calendar_links(team_id, work_item_id),
+            viewer_user_id=actor_user_id,
+        )
+
+    def link_calendar_event(
+        self,
+        work_item_id: str,
+        team_id: str,
+        calendar_link: WorkItemCalendarLinkDocument,
+        actor_user_id: str,
+        apply_starts_at_to_due_at: bool = False,
+        apply_starts_at_to_next_attention_at_for_user_id: str | None = None,
+    ) -> WorkItemAggregate:
+        """Persist a calendar link and append semantic work events transactionally.
+
+        Args:
+            work_item_id: Work item identifier to mutate.
+            team_id: Slack workspace id owning the work item.
+            calendar_link: Calendar event link snapshot to persist.
+            actor_user_id: User id responsible for the link operation.
+            apply_starts_at_to_due_at: Whether to explicitly copy the event start to
+                the work item's `due_at`.
+            apply_starts_at_to_next_attention_at_for_user_id: Optional user id whose
+                `next_attention_at` should explicitly receive the event start.
+
+        Returns:
+            Hydrated aggregate after the link and requested time updates.
+
+        Raises:
+            KeyError: If the target work item does not exist.
+            ValueError: If the link points at another work item or cannot provide a
+                start timestamp for an explicitly requested time update.
+        """
+        if (
+            calendar_link.team_id != team_id
+            or calendar_link.work_item_id != work_item_id
+        ):
+            raise ValueError("calendar_link must belong to the target work item.")
+        if (
+            apply_starts_at_to_due_at
+            or apply_starts_at_to_next_attention_at_for_user_id is not None
+        ) and calendar_link.starts_at is None:
+            raise ValueError("calendar_link.starts_at is required for time updates.")
+
+        now = utc_now()
+        with Session(self._engine) as session:
+            item_record = session.get(WorkItemRecord, (team_id, work_item_id))
+            if item_record is None:
+                raise KeyError(f"Work item {work_item_id!r} was not found.")
+
+            current_item = WorkItemDocument.model_validate(item_record.payload)
+            participants = self._read_participants_in_session(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+            )
+            current_events = self._read_events_in_session(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+            )
+            existing_link_record = session.get(
+                WorkItemCalendarLinkRecord,
+                (team_id, work_item_id, calendar_link.link_id),
+            )
+            existing_link = (
+                WorkItemCalendarLinkDocument.model_validate(
+                    existing_link_record.payload
+                )
+                if existing_link_record is not None
+                else None
+            )
+
+            persisted_link = calendar_link.model_copy(
+                update={
+                    "created_at": existing_link.created_at
+                    if existing_link is not None
+                    else calendar_link.created_at,
+                    "updated_at": now,
+                }
+            )
+            self._upsert_calendar_link_record(
+                session=session,
+                calendar_link=persisted_link,
+                existing_record=existing_link_record,
+            )
+
+            next_item = current_item.model_copy(update={"updated_at": now})
+            events = list(current_events)
+            if existing_link is None:
+                events.append(
+                    self._calendar_event(
+                        work_item_id=work_item_id,
+                        event_type=WorkEventType.CALENDAR_EVENT_LINKED,
+                        actor_user_id=actor_user_id,
+                        calendar_link=persisted_link,
+                        occurred_at=now,
+                    )
+                )
+            elif self._calendar_link_time_changed(existing_link, persisted_link):
+                events.append(
+                    self._calendar_event(
+                        work_item_id=work_item_id,
+                        event_type=WorkEventType.CALENDAR_EVENT_RESCHEDULED,
+                        actor_user_id=actor_user_id,
+                        calendar_link=persisted_link,
+                        occurred_at=now,
+                    )
+                )
+
+            if persisted_link.sync_status == WorkItemCalendarSyncStatus.CANCELED and (
+                existing_link is None
+                or existing_link.sync_status != WorkItemCalendarSyncStatus.CANCELED
+            ):
+                events.append(
+                    self._calendar_event(
+                        work_item_id=work_item_id,
+                        event_type=WorkEventType.CALENDAR_EVENT_CANCELED,
+                        actor_user_id=actor_user_id,
+                        calendar_link=persisted_link,
+                        occurred_at=now,
+                    )
+                )
+
+            if apply_starts_at_to_due_at:
+                next_item = next_item.model_copy(
+                    update={"due_at": persisted_link.starts_at, "updated_at": now}
+                )
+                events.append(
+                    WorkEventDocument(
+                        event_id=self._new_event_id(),
+                        work_item_id=work_item_id,
+                        type=WorkEventType.DUE_AT_CHANGED,
+                        actor_user_id=actor_user_id,
+                        payload={
+                            "from_due_at": current_item.due_at.isoformat()
+                            if current_item.due_at
+                            else None,
+                            "to_due_at": persisted_link.starts_at.isoformat()
+                            if persisted_link.starts_at
+                            else None,
+                            "calendar_link_id": persisted_link.link_id,
+                        },
+                        occurred_at=now,
+                    )
+                )
+
+            if apply_starts_at_to_next_attention_at_for_user_id is not None:
+                self._apply_attention_update(
+                    participants=participants,
+                    update=ParticipantAttentionUpdate(
+                        user_id=apply_starts_at_to_next_attention_at_for_user_id,
+                        next_attention_at=persisted_link.starts_at,
+                    ),
+                    work_item_id=work_item_id,
+                    now=now,
+                )
+                events.append(
+                    WorkEventDocument(
+                        event_id=self._new_event_id(),
+                        work_item_id=work_item_id,
+                        type=WorkEventType.ATTENTION_SCHEDULED,
+                        actor_user_id=actor_user_id,
+                        affected_user_ids=[
+                            apply_starts_at_to_next_attention_at_for_user_id
+                        ],
+                        payload={
+                            "next_attention_at": persisted_link.starts_at.isoformat()
+                            if persisted_link.starts_at
+                            else None,
+                            "calendar_link_id": persisted_link.link_id,
+                        },
+                        occurred_at=now,
+                    )
+                )
+
+            next_item = WorkItemDocument.model_validate(
+                next_item.model_dump(mode="python")
+            )
+            next_events = self._sort_events(events)
+            self._apply_work_item_record(item_record, next_item)
+            session.add(item_record)
+            self._replace_participants(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+                participants=participants.values(),
+            )
+            self._replace_events(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+                events=next_events,
+            )
+            self._replace_attention_index(
+                session=session,
+                item=next_item,
+                participants=participants,
+                events=next_events,
+            )
+            session.commit()
+
+        return self._hydrate_aggregate(
+            item=next_item,
+            participants=participants,
+            events=next_events,
+            calendar_links=self._read_calendar_links(team_id, work_item_id),
+            viewer_user_id=actor_user_id,
+        )
+
+    def unlink_calendar_event(
+        self,
+        work_item_id: str,
+        team_id: str,
+        link_id: str,
+        actor_user_id: str,
+    ) -> WorkItemAggregate:
+        """Delete a calendar link and append a semantic unlink event atomically.
+
+        Args:
+            work_item_id: Work item identifier to mutate.
+            team_id: Slack workspace id owning the work item.
+            link_id: Local calendar link identifier to delete.
+            actor_user_id: User id responsible for the unlink operation.
+
+        Returns:
+            Hydrated aggregate after the calendar link is removed.
+
+        Raises:
+            KeyError: If the target work item or calendar link does not exist.
+        """
+        now = utc_now()
+        with Session(self._engine) as session:
+            item_record = session.get(WorkItemRecord, (team_id, work_item_id))
+            if item_record is None:
+                raise KeyError(f"Work item {work_item_id!r} was not found.")
+            link_record = session.get(
+                WorkItemCalendarLinkRecord,
+                (team_id, work_item_id, link_id),
+            )
+            if link_record is None:
+                raise KeyError(f"Calendar link {link_id!r} was not found.")
+
+            current_item = WorkItemDocument.model_validate(item_record.payload)
+            participants = self._read_participants_in_session(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+            )
+            current_events = self._read_events_in_session(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+            )
+            removed_link = WorkItemCalendarLinkDocument.model_validate(
+                link_record.payload
+            )
+            session.delete(link_record)
+
+            next_item = WorkItemDocument.model_validate(
+                current_item.model_copy(update={"updated_at": now}).model_dump(
+                    mode="python"
+                )
+            )
+            next_events = self._sort_events(
+                [
+                    *current_events,
+                    self._calendar_event(
+                        work_item_id=work_item_id,
+                        event_type=WorkEventType.CALENDAR_EVENT_UNLINKED,
+                        actor_user_id=actor_user_id,
+                        calendar_link=removed_link,
+                        occurred_at=now,
+                    ),
+                ]
+            )
+            self._apply_work_item_record(item_record, next_item)
+            session.add(item_record)
+            self._replace_events(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+                events=next_events,
+            )
+            self._replace_attention_index(
+                session=session,
+                item=next_item,
+                participants=participants,
+                events=next_events,
+            )
+            session.commit()
+
+        return self._hydrate_aggregate(
+            item=next_item,
+            participants=participants,
+            events=next_events,
+            calendar_links=self._read_calendar_links(team_id, work_item_id),
             viewer_user_id=actor_user_id,
         )
 
@@ -378,6 +682,73 @@ class PostgresWorkItemRepository:
             occurred_at=event.occurred_at,
             payload=self._dump(event),
         )
+
+    def _calendar_link_record(
+        self,
+        calendar_link: WorkItemCalendarLinkDocument,
+    ) -> WorkItemCalendarLinkRecord:
+        """Build the SQLModel record used to persist a calendar link.
+
+        Args:
+            calendar_link: Calendar link document to serialize.
+
+        Returns:
+            SQLModel record for the `work_item_calendar_links` table.
+        """
+        return WorkItemCalendarLinkRecord(
+            team_id=calendar_link.team_id,
+            work_item_id=calendar_link.work_item_id,
+            link_id=calendar_link.link_id,
+            provider_kind=calendar_link.provider_kind,
+            external_calendar_id=calendar_link.external_calendar_id,
+            external_event_id=calendar_link.external_event_id,
+            event_title_snapshot=calendar_link.event_title_snapshot,
+            starts_at=calendar_link.starts_at,
+            ends_at=calendar_link.ends_at,
+            is_all_day=calendar_link.is_all_day,
+            response_status=calendar_link.response_status,
+            sync_status=calendar_link.sync_status,
+            last_synced_at=calendar_link.last_synced_at,
+            created_at=calendar_link.created_at,
+            updated_at=calendar_link.updated_at,
+            payload=self._dump(calendar_link),
+        )
+
+    def _upsert_calendar_link_record(
+        self,
+        *,
+        session: Session,
+        calendar_link: WorkItemCalendarLinkDocument,
+        existing_record: WorkItemCalendarLinkRecord | None,
+    ) -> None:
+        """Insert or update a calendar-link record inside an open transaction.
+
+        Args:
+            session: Open SQLModel session inside a transaction.
+            calendar_link: Calendar link document to persist.
+            existing_record: Existing row for the same local link id, if any.
+
+        Returns:
+            None.
+        """
+        if existing_record is None:
+            session.add(self._calendar_link_record(calendar_link))
+            return
+
+        existing_record.provider_kind = calendar_link.provider_kind
+        existing_record.external_calendar_id = calendar_link.external_calendar_id
+        existing_record.external_event_id = calendar_link.external_event_id
+        existing_record.event_title_snapshot = calendar_link.event_title_snapshot
+        existing_record.starts_at = calendar_link.starts_at
+        existing_record.ends_at = calendar_link.ends_at
+        existing_record.is_all_day = calendar_link.is_all_day
+        existing_record.response_status = calendar_link.response_status
+        existing_record.sync_status = calendar_link.sync_status
+        existing_record.last_synced_at = calendar_link.last_synced_at
+        existing_record.created_at = calendar_link.created_at
+        existing_record.updated_at = calendar_link.updated_at
+        existing_record.payload = self._dump(calendar_link)
+        session.add(existing_record)
 
     def _replace_participants(
         self,
@@ -519,6 +890,30 @@ class PostgresWorkItemRepository:
         Returns:
             Mapping of participant user ids to validated participant relations.
         """
+        with Session(self._engine) as session:
+            return self._read_participants_in_session(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+            )
+
+    def _read_participants_in_session(
+        self,
+        *,
+        session: Session,
+        team_id: str,
+        work_item_id: str,
+    ) -> dict[str, ParticipantRelationDocument]:
+        """Read participant relations using an existing SQLModel session.
+
+        Args:
+            session: Open SQLModel session to use for the read.
+            team_id: Slack workspace id.
+            work_item_id: Work item identifier.
+
+        Returns:
+            Mapping of participant user ids to validated participant relations.
+        """
         statement = (
             select(WorkItemParticipantRecord)
             .where(
@@ -527,8 +922,7 @@ class PostgresWorkItemRepository:
             )
             .order_by(asc(col(WorkItemParticipantRecord.user_id)))
         )
-        with Session(self._engine) as session:
-            rows = session.exec(statement).all()
+        rows = session.exec(statement).all()
         participants: dict[str, ParticipantRelationDocument] = {}
         for row in rows:
             participant = ParticipantRelationDocument.model_validate(row.payload)
@@ -539,6 +933,30 @@ class PostgresWorkItemRepository:
         """Read and sort persisted events for a work item.
 
         Args:
+            team_id: Slack workspace id.
+            work_item_id: Work item identifier.
+
+        Returns:
+            Chronologically sorted event documents for the work item.
+        """
+        with Session(self._engine) as session:
+            return self._read_events_in_session(
+                session=session,
+                team_id=team_id,
+                work_item_id=work_item_id,
+            )
+
+    def _read_events_in_session(
+        self,
+        *,
+        session: Session,
+        team_id: str,
+        work_item_id: str,
+    ) -> list[WorkEventDocument]:
+        """Read sorted work events using an existing SQLModel session.
+
+        Args:
+            session: Open SQLModel session to use for the read.
             team_id: Slack workspace id.
             work_item_id: Work item identifier.
 
@@ -556,9 +974,39 @@ class PostgresWorkItemRepository:
                 asc(col(WorkItemEventRecord.event_id)),
             )
         )
+        rows = session.exec(statement).all()
+        return [WorkEventDocument.model_validate(row.payload) for row in rows]
+
+    def _read_calendar_links(
+        self,
+        team_id: str,
+        work_item_id: str,
+    ) -> list[WorkItemCalendarLinkDocument]:
+        """Read calendar links for a work item.
+
+        Args:
+            team_id: Slack workspace id.
+            work_item_id: Work item identifier.
+
+        Returns:
+            Calendar link snapshots sorted by creation time and link id.
+        """
+        statement = (
+            select(WorkItemCalendarLinkRecord)
+            .where(
+                WorkItemCalendarLinkRecord.team_id == team_id,
+                WorkItemCalendarLinkRecord.work_item_id == work_item_id,
+            )
+            .order_by(
+                asc(col(WorkItemCalendarLinkRecord.created_at)),
+                asc(col(WorkItemCalendarLinkRecord.link_id)),
+            )
+        )
         with Session(self._engine) as session:
             rows = session.exec(statement).all()
-        return [WorkEventDocument.model_validate(row.payload) for row in rows]
+        return [
+            WorkItemCalendarLinkDocument.model_validate(row.payload) for row in rows
+        ]
 
     def _hydrate_aggregate(
         self,
@@ -567,6 +1015,7 @@ class PostgresWorkItemRepository:
         participants: dict[str, ParticipantRelationDocument],
         events: Sequence[WorkEventDocument],
         viewer_user_id: str,
+        calendar_links: Sequence[WorkItemCalendarLinkDocument] = (),
     ) -> WorkItemAggregate:
         """Hydrate a repository aggregate from its stored document components.
 
@@ -574,6 +1023,7 @@ class PostgresWorkItemRepository:
             item: Work item document.
             participants: Participant relations keyed by user id.
             events: Chronologically sorted work-item events.
+            calendar_links: Calendar event links stored for the work item.
             viewer_user_id: Viewer user id used to resolve `viewer_relation`.
 
         Returns:
@@ -583,6 +1033,7 @@ class PostgresWorkItemRepository:
             item=item,
             participants=list(participants.values()),
             recent_events=list(events),
+            calendar_links=list(calendar_links),
             viewer_relation=participants.get(viewer_user_id),
         )
 
@@ -599,6 +1050,67 @@ class PostgresWorkItemRepository:
             Sorted list of event documents.
         """
         return sorted(events, key=lambda event: (event.occurred_at, event.event_id))
+
+    def _calendar_event(
+        self,
+        *,
+        work_item_id: str,
+        event_type: WorkEventType,
+        actor_user_id: str,
+        calendar_link: WorkItemCalendarLinkDocument,
+        occurred_at: datetime,
+    ) -> WorkEventDocument:
+        """Build a semantic work event for a calendar-link change.
+
+        Args:
+            work_item_id: Work item identifier the event belongs to.
+            event_type: Calendar-related semantic event type to create.
+            actor_user_id: User id responsible for the change.
+            calendar_link: Calendar link snapshot associated with the change.
+            occurred_at: Timestamp when the semantic event occurred.
+
+        Returns:
+            Work event document with a calendar-link snapshot payload.
+        """
+        return WorkEventDocument(
+            event_id=self._new_event_id(),
+            work_item_id=work_item_id,
+            type=event_type,
+            actor_user_id=actor_user_id,
+            payload={
+                "calendar_link": calendar_link.model_dump(mode="json"),
+                "calendar_link_id": calendar_link.link_id,
+                "sync_status": calendar_link.sync_status.value,
+            },
+            occurred_at=occurred_at,
+        )
+
+    def _calendar_link_time_changed(
+        self,
+        current: WorkItemCalendarLinkDocument,
+        next_link: WorkItemCalendarLinkDocument,
+    ) -> bool:
+        """Return whether a calendar link snapshot changed its cached time window.
+
+        Args:
+            current: Previously persisted calendar link snapshot.
+            next_link: Replacement calendar link snapshot.
+
+        Returns:
+            `True` when the event start or end timestamp changed.
+        """
+        return (
+            current.starts_at != next_link.starts_at
+            or current.ends_at != next_link.ends_at
+        )
+
+    def _new_event_id(self) -> str:
+        """Generate a new opaque work-event identifier.
+
+        Returns:
+            Hex-encoded unique work-event id.
+        """
+        return uuid4().hex
 
     def _primary_assignee_user_id(
         self,

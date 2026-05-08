@@ -27,6 +27,7 @@ from agents_party.domain.slack_documents import (
 )
 from agents_party.domain.work_management import (
     AttentionProfile,
+    CalendarProviderKind,
     DIRECTED_ATTENTION_EVENT_TYPES,
     ParticipantAttentionUpdate,
     ParticipantRelationDocument,
@@ -37,6 +38,8 @@ from agents_party.domain.work_management import (
     WorkEventType,
     WorkItemAggregate,
     WorkItemAttentionIndexDocument,
+    WorkItemCalendarLinkDocument,
+    WorkItemCalendarSyncStatus,
     WorkItemDocument,
     WorkItemMutation,
     WorkItemPatch,
@@ -58,6 +61,7 @@ __all__ = [
     "AttentionProfile",
     "AgentDocument",
     "AgentRouteScope",
+    "CalendarProviderKind",
     "ChannelAppSettingsDocument",
     "DIRECTED_ATTENTION_EVENT_TYPES",
     "DocumentModel",
@@ -84,6 +88,8 @@ __all__ = [
     "WorkEventType",
     "WorkItemAggregate",
     "WorkItemAttentionIndexDocument",
+    "WorkItemCalendarLinkDocument",
+    "WorkItemCalendarSyncStatus",
     "WorkItemDocument",
     "WorkItemMutation",
     "WorkItemPatch",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 
 from pydantic_ai import RunContext
 
@@ -23,9 +24,12 @@ from agents_party.agents.work_manager import (
     build_updated_message,
 )
 from agents_party.domain import (
+    CalendarProviderKind,
     VisibilityPolicyKind,
     WorkEventDocument,
     WorkEventType,
+    WorkItemCalendarLinkDocument,
+    WorkItemCalendarSyncStatus,
     WorkItemDocument,
     WorkItemMutation,
     WorkItemPatch,
@@ -346,9 +350,175 @@ def complete_work_item(
     )
 
 
+def link_google_calendar_event(
+    ctx: RunContext[WorkManagerDeps],
+    work_item_id: str,
+    google_calendar_id: str,
+    google_event_id: str,
+    event_title_snapshot: str | None = None,
+    starts_at: datetime | None = None,
+    ends_at: datetime | None = None,
+    is_all_day: bool = False,
+    response_status: str | None = None,
+    sync_status: WorkItemCalendarSyncStatus = WorkItemCalendarSyncStatus.ACTIVE,
+    last_synced_at: datetime | None = None,
+    apply_starts_at_to_due_at: bool = False,
+    apply_starts_at_to_next_attention_at_for_me: bool = False,
+) -> WorkManagerResult:
+    """Link a Google Calendar event snapshot to a visible work item.
+
+    Args:
+        ctx: Tool execution context carrying work-manager dependencies.
+        work_item_id: Work item identifier to link.
+        google_calendar_id: Google Calendar calendar identifier.
+        google_event_id: Google Calendar event identifier.
+        event_title_snapshot: Optional cached event title.
+        starts_at: Optional cached event start timestamp.
+        ends_at: Optional cached event end timestamp.
+        is_all_day: Whether the linked event is an all-day event.
+        response_status: Optional cached viewer response status.
+        sync_status: Cached sync state for the Google Calendar event.
+        last_synced_at: Optional timestamp when the snapshot was fetched.
+        apply_starts_at_to_due_at: Whether to explicitly copy the event start to
+            the work-item due date.
+        apply_starts_at_to_next_attention_at_for_me: Whether to explicitly copy the
+            event start to the caller's next attention time.
+
+    Returns:
+        Work-manager result describing the updated work item.
+    """
+
+    current = get_work_item_or_none(ctx, work_item_id)
+    if current is None:
+        return missing_item_result()
+    if (
+        apply_starts_at_to_due_at or apply_starts_at_to_next_attention_at_for_me
+    ) and starts_at is None:
+        return WorkManagerResult(
+            action=WorkManagerAction.CLARIFICATION_NEEDED,
+            message=(
+                "I need the calendar event start time before I can apply it to the task."
+            ),
+            work_items=[WorkManagerWorkItem.from_aggregate(current, now=now(ctx))],
+            needs_confirmation=True,
+            follow_up_question="What start time should I apply?",
+        )
+
+    current_time = now(ctx)
+    request_context = ctx.deps.request_context
+    calendar_link = WorkItemCalendarLinkDocument(
+        link_id=_stable_google_calendar_link_id(
+            google_calendar_id=google_calendar_id,
+            google_event_id=google_event_id,
+        ),
+        team_id=request_context.team_id,
+        work_item_id=work_item_id,
+        provider_kind=CalendarProviderKind.GOOGLE_CALENDAR,
+        external_calendar_id=google_calendar_id,
+        external_event_id=google_event_id,
+        event_title_snapshot=event_title_snapshot,
+        starts_at=starts_at,
+        ends_at=ends_at,
+        is_all_day=is_all_day,
+        response_status=response_status,
+        sync_status=sync_status,
+        last_synced_at=last_synced_at,
+        created_at=current_time,
+        updated_at=current_time,
+    )
+    aggregate = ctx.deps.work_item_repository.link_calendar_event(
+        work_item_id=work_item_id,
+        team_id=request_context.team_id,
+        calendar_link=calendar_link,
+        actor_user_id=request_context.user_id,
+        apply_starts_at_to_due_at=apply_starts_at_to_due_at,
+        apply_starts_at_to_next_attention_at_for_user_id=(
+            request_context.user_id
+            if apply_starts_at_to_next_attention_at_for_me
+            else None
+        ),
+    )
+    summary = WorkManagerWorkItem.from_aggregate(aggregate, now=current_time)
+    return WorkManagerResult(
+        action=WorkManagerAction.UPDATED,
+        message=build_updated_message(
+            summary,
+            timezone_name=ctx.deps.default_timezone,
+            action_word="Linked calendar event to",
+        ),
+        work_items=[summary],
+    )
+
+
+def _stable_google_calendar_link_id(
+    *,
+    google_calendar_id: str,
+    google_event_id: str,
+) -> str:
+    """Build a deterministic local link id for one Google Calendar event.
+
+    Args:
+        google_calendar_id: Google Calendar calendar identifier.
+        google_event_id: Google Calendar event identifier.
+
+    Returns:
+        Stable local link id that lets repeated links update the same snapshot.
+    """
+    digest = hashlib.sha256(
+        f"{google_calendar_id}\0{google_event_id}".encode("utf-8")
+    ).hexdigest()
+    return f"google-{digest[:32]}"
+
+
+def unlink_google_calendar_event(
+    ctx: RunContext[WorkManagerDeps],
+    work_item_id: str,
+    link_id: str,
+) -> WorkManagerResult:
+    """Remove a Google Calendar event link from a visible work item.
+
+    Args:
+        ctx: Tool execution context carrying work-manager dependencies.
+        work_item_id: Work item identifier to unlink.
+        link_id: Local calendar link id to remove.
+
+    Returns:
+        Work-manager result describing the updated work item.
+    """
+
+    current = get_work_item_or_none(ctx, work_item_id)
+    if current is None:
+        return missing_item_result()
+
+    current_time = now(ctx)
+    request_context = ctx.deps.request_context
+    try:
+        aggregate = ctx.deps.work_item_repository.unlink_calendar_event(
+            work_item_id=work_item_id,
+            team_id=request_context.team_id,
+            link_id=link_id,
+            actor_user_id=request_context.user_id,
+        )
+    except KeyError:
+        return missing_item_result()
+
+    summary = WorkManagerWorkItem.from_aggregate(aggregate, now=current_time)
+    return WorkManagerResult(
+        action=WorkManagerAction.UPDATED,
+        message=build_updated_message(
+            summary,
+            timezone_name=ctx.deps.default_timezone,
+            action_word="Unlinked calendar event from",
+        ),
+        work_items=[summary],
+    )
+
+
 __all__ = [
     "capture_work_item",
     "complete_work_item",
+    "link_google_calendar_event",
+    "unlink_google_calendar_event",
     "update_work_item_fields",
     "update_work_item_status",
 ]

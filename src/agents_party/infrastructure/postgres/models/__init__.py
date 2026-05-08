@@ -24,6 +24,7 @@ from agents_party.infrastructure.postgres.models.slack_installations import (
 )
 from agents_party.infrastructure.postgres.models.work_management import (
     WorkItemAttentionIndexRecord,
+    WorkItemCalendarLinkRecord,
     WorkItemEventRecord,
     WorkItemParticipantRecord,
     WorkItemRecord,
@@ -45,6 +46,7 @@ __all__ = [
     "SlackInstallationRecord",
     "WorkspaceAppSettingsRecord",
     "WorkItemAttentionIndexRecord",
+    "WorkItemCalendarLinkRecord",
     "WorkItemEventRecord",
     "WorkItemParticipantRecord",
     "WorkItemRecord",
