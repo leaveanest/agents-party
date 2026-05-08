@@ -130,6 +130,18 @@ class Settings(BaseSettings):
         default=None,
         alias="GOOGLE_TOKEN_ENCRYPTION_KEY",
     )
+    salesforce_oauth_redirect_base_url: str | None = Field(
+        default=None,
+        alias="SALESFORCE_OAUTH_REDIRECT_BASE_URL",
+    )
+    salesforce_oauth_context_signing_secret: SecretStr | None = Field(
+        default=None,
+        alias="SALESFORCE_OAUTH_CONTEXT_SIGNING_SECRET",
+    )
+    salesforce_token_encryption_key: SecretStr | None = Field(
+        default=None,
+        alias="SALESFORCE_TOKEN_ENCRYPTION_KEY",
+    )
 
     @property
     def slack_enabled(self) -> bool:
@@ -208,6 +220,39 @@ class Settings(BaseSettings):
         return (
             read_google_oauth_redirect_base_url(self.google_oauth_redirect_base_url)
             + "/oauth/google/callback"
+        )
+
+    @property
+    def salesforce_oauth_enabled(self) -> bool:
+        """Return whether the minimum Salesforce OAuth settings are configured.
+
+        Returns:
+            `True` when all shared Salesforce OAuth settings are present.
+        """
+        return bool(
+            has_valid_salesforce_oauth_redirect_base_url(
+                self.salesforce_oauth_redirect_base_url
+            )
+            and has_secret(self.salesforce_oauth_context_signing_secret)
+            and has_secret(self.salesforce_token_encryption_key)
+            and self.database_enabled
+        )
+
+    @property
+    def salesforce_oauth_callback_url(self) -> str:
+        """Return the registered Salesforce OAuth callback URL.
+
+        Returns:
+            Absolute callback URL under the configured redirect base URL.
+
+        Raises:
+            ValueError: If the Salesforce OAuth redirect base URL is not configured.
+        """
+        return (
+            read_salesforce_oauth_redirect_base_url(
+                self.salesforce_oauth_redirect_base_url
+            )
+            + "/oauth/salesforce/callback"
         )
 
     @field_validator("google_cloud_transcription_language_codes", mode="before")
@@ -359,6 +404,57 @@ def read_google_oauth_redirect_base_url(value: str | None) -> str:
     if split_url.query or split_url.fragment:
         raise ValueError(
             "GOOGLE_OAUTH_REDIRECT_BASE_URL must not include a query string or fragment."
+        )
+    normalized_split = SplitResult(
+        scheme=split_url.scheme,
+        netloc=split_url.netloc,
+        path=split_url.path.rstrip("/"),
+        query="",
+        fragment="",
+    )
+    return urlunsplit(normalized_split)
+
+
+def has_valid_salesforce_oauth_redirect_base_url(value: str | None) -> bool:
+    """Return whether the Salesforce OAuth redirect base URL is valid.
+
+    Args:
+        value: Optional Salesforce OAuth redirect base URL.
+
+    Returns:
+        `True` when the value is a usable absolute HTTP(S) base URL.
+    """
+    try:
+        read_salesforce_oauth_redirect_base_url(value)
+    except ValueError:
+        return False
+    return True
+
+
+def read_salesforce_oauth_redirect_base_url(value: str | None) -> str:
+    """Return a validated Salesforce OAuth redirect base URL.
+
+    Args:
+        value: Optional Salesforce OAuth redirect base URL.
+
+    Returns:
+        Normalized absolute HTTP(S) base URL without query or fragment.
+
+    Raises:
+        ValueError: If the URL is missing, blank, relative, or otherwise invalid.
+    """
+    base_url = read_non_blank_text(
+        value,
+        env_name="SALESFORCE_OAUTH_REDIRECT_BASE_URL",
+    )
+    split_url = urlsplit(base_url)
+    if split_url.scheme not in {"http", "https"} or not split_url.netloc:
+        raise ValueError(
+            "SALESFORCE_OAUTH_REDIRECT_BASE_URL must be an absolute http(s) URL."
+        )
+    if split_url.query or split_url.fragment:
+        raise ValueError(
+            "SALESFORCE_OAUTH_REDIRECT_BASE_URL must not include a query string or fragment."
         )
     normalized_split = SplitResult(
         scheme=split_url.scheme,

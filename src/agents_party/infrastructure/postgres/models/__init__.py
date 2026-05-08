@@ -7,6 +7,11 @@ from agents_party.infrastructure.postgres.models.google_auth import (
     GoogleAuthConnectionRecord,
     GoogleOAuthStateRecord,
 )
+from agents_party.infrastructure.postgres.models.salesforce_auth import (
+    SalesforceAuthConfigRecord,
+    SalesforceConnectionRecord,
+    SalesforceOAuthStateRecord,
+)
 from agents_party.infrastructure.postgres.models.slack_routing import (
     AgentRecord,
     ChannelAppSettingsRecord,
@@ -32,6 +37,9 @@ __all__ = [
     "ChannelAppSettingsRecord",
     "GoogleAuthConnectionRecord",
     "GoogleOAuthStateRecord",
+    "SalesforceAuthConfigRecord",
+    "SalesforceConnectionRecord",
+    "SalesforceOAuthStateRecord",
     "SlackThreadRecord",
     "SlackBotRecord",
     "SlackInstallationRecord",

@@ -14,6 +14,11 @@ from agents_party.google_auth import (
     create_google_auth_router,
 )
 from agents_party.google_auth.wiring import build_google_auth_coordinator
+from agents_party.salesforce_auth import (
+    SalesforceAuthCoordinator,
+    create_salesforce_auth_router,
+)
+from agents_party.salesforce_auth.wiring import build_salesforce_auth_coordinator
 from agents_party.slack.app import SlackBoltGateway
 
 
@@ -25,6 +30,7 @@ def create_app() -> FastAPI:
     """
     slack_gateway = SlackBoltGateway(settings)
     google_auth_coordinator: GoogleAuthCoordinator | None = None
+    salesforce_auth_coordinator: SalesforceAuthCoordinator | None = None
 
     def get_google_auth_coordinator() -> GoogleAuthCoordinator | None:
         """Return the current app-scoped Google OAuth coordinator.
@@ -33,6 +39,14 @@ def create_app() -> FastAPI:
             Active Google OAuth coordinator, or `None` when disabled.
         """
         return google_auth_coordinator
+
+    def get_salesforce_auth_coordinator() -> SalesforceAuthCoordinator | None:
+        """Return the current app-scoped Salesforce OAuth coordinator.
+
+        Returns:
+            Active Salesforce OAuth coordinator, or `None` when disabled.
+        """
+        return salesforce_auth_coordinator
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -44,19 +58,29 @@ def create_app() -> FastAPI:
         Yields:
             Control back to FastAPI while the application is running.
         """
-        nonlocal google_auth_coordinator
+        nonlocal google_auth_coordinator, salesforce_auth_coordinator
         google_auth_coordinator = build_google_auth_coordinator(settings)
+        salesforce_auth_coordinator = build_salesforce_auth_coordinator(settings)
         try:
             yield
         finally:
             current_coordinator = google_auth_coordinator
+            current_salesforce_coordinator = salesforce_auth_coordinator
             google_auth_coordinator = None
+            salesforce_auth_coordinator = None
             if current_coordinator is not None:
                 await current_coordinator.aclose()
+            if current_salesforce_coordinator is not None:
+                await current_salesforce_coordinator.aclose()
 
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.include_router(
         create_google_auth_router(coordinator_provider=get_google_auth_coordinator)
+    )
+    app.include_router(
+        create_salesforce_auth_router(
+            coordinator_provider=get_salesforce_auth_coordinator
+        )
     )
 
     @app.get("/healthz")
