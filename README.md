@@ -271,9 +271,10 @@ When present, the TypeScript Google Maps specialist uses the Places Text Search 
 ```bash
 IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
 VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
+GOOGLE_GENERATIVE_AI_API_KEY=...
 ```
 
-The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities before returning typed media handoff results.
+The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call the Google Gen AI SDK when `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` is configured.
 
 ## Deployment
 

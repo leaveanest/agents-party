@@ -16,6 +16,7 @@ export type AppSettings = {
   googleOAuthStartPath: string;
   googleTokenEncryptionKey: string | undefined;
   googleMapsApiKey: string | undefined;
+  googleGenerativeAiApiKey: string | undefined;
   videoGenerationModelId: string;
   slackBotToken: string | undefined;
   slackClientId: string | undefined;
@@ -73,6 +74,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
   );
   const googleTokenEncryptionKey = readText(env.GOOGLE_TOKEN_ENCRYPTION_KEY);
   const googleMapsApiKey = readText(env.GOOGLE_MAPS_API_KEY);
+  const googleGenerativeAiApiKey =
+    readText(env.GOOGLE_GENERATIVE_AI_API_KEY) ?? readText(env.GEMINI_API_KEY);
   const slackBotToken = readText(env.SLACK_BOT_TOKEN);
   const slackClientId = readText(env.SLACK_CLIENT_ID);
   const slackClientSecret = readText(env.SLACK_CLIENT_SECRET);
@@ -138,6 +141,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     googleOAuthStartPath,
     googleTokenEncryptionKey,
     googleMapsApiKey,
+    googleGenerativeAiApiKey,
     videoGenerationModelId:
       readText(env.VIDEO_GENERATION_MODEL) ?? DEFAULT_VIDEO_GENERATION_MODEL_ID,
     slackBotToken,

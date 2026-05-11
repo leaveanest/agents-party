@@ -21,6 +21,7 @@ const baseSettings: AppSettings = {
   googleOAuthStartPath: "/oauth/google/start",
   googleTokenEncryptionKey: undefined,
   googleMapsApiKey: undefined,
+  googleGenerativeAiApiKey: undefined,
   videoGenerationModelId: "google:veo-3.1-fast-generate-001",
   slackBotToken: undefined,
   slackClientId: undefined,

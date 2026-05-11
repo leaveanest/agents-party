@@ -119,25 +119,72 @@ describe("specialist runtimes", () => {
   });
 
   it("returns typed media handoffs for image and video generation", async () => {
-    const image = await createImageGenerationRuntime(imageModel.id)({
+    const mediaGateway = {
+      async generateImage() {
+        return { dataBase64: "aW1hZ2U=", mimeType: "image/png" };
+      },
+      async generateVideo() {
+        return { operationName: "operations/video-1", status: "in_progress" as const };
+      },
+    };
+    const image = await createImageGenerationRuntime(
+      imageModel.id,
+      mediaGateway,
+    )({
       invocation: invocation("draw a product sketch"),
       model,
       providerRouter: new FakeProviderRouter({ content: "" }),
     });
-    const video = await createVideoGenerationRuntime(videoModel.id)({
+    const video = await createVideoGenerationRuntime(
+      videoModel.id,
+      mediaGateway,
+    )({
       invocation: invocation("make a vertical video"),
       model,
       providerRouter: new FakeProviderRouter({ content: "" }),
     });
 
     expect(image.structuredResult).toMatchObject({
-      action: "media_handoff",
-      media: { kind: "image", status: "ready_for_native_generation" },
+      action: "generated",
+      media: { dataBase64: "aW1hZ2U=", kind: "image", status: "generated" },
     });
     expect(video.structuredResult).toMatchObject({
-      action: "media_handoff",
-      media: { aspectRatio: "9:16", kind: "video", status: "ready_for_native_generation" },
+      action: "in_progress",
+      media: {
+        aspectRatio: "9:16",
+        kind: "video",
+        operationName: "operations/video-1",
+        status: "in_progress",
+      },
     });
+  });
+
+  it("parses Japanese route requests into Google Maps route calls", async () => {
+    const calls: unknown[] = [];
+    const runtime = createGoogleMapsRuntime({
+      async computeRoute(input) {
+        calls.push(input);
+        return {
+          destination: input.destination,
+          origin: input.origin,
+          travelMode: input.travelMode ?? "driving",
+        };
+      },
+      async searchNearby() {
+        throw new Error("Unexpected nearby call.");
+      },
+      async searchPlaces() {
+        throw new Error("Unexpected place call.");
+      },
+    });
+
+    await runtime({
+      invocation: invocation("東京駅から大阪駅への経路"),
+      model,
+      providerRouter: new FakeProviderRouter({ content: "" }),
+    });
+
+    expect(calls).toEqual([expect.objectContaining({ destination: "大阪駅", origin: "東京駅" })]);
   });
 
   it("AgentRunner dispatches configured native specialist runtimes before generic prompts", async () => {

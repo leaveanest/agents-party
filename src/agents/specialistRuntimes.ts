@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GoogleGenAI } from "@google/genai";
 
 import type { AppSettings } from "../config.js";
 import type { ConversationHistory, JsonValue } from "../domain/messageHistory.js";
@@ -34,6 +35,30 @@ export type GoogleMapsGateway = {
     radiusMeters?: number;
   }): Promise<GoogleMapsPlace[]>;
   searchPlaces(query: string): Promise<GoogleMapsPlace[]>;
+};
+
+export type GeneratedImageAsset = {
+  dataBase64?: string;
+  mimeType?: string;
+  uri?: string;
+};
+
+export type GeneratedVideoAsset = {
+  dataBase64?: string;
+  mimeType?: string;
+  operationName?: string;
+  status: "generated" | "in_progress";
+  uri?: string;
+};
+
+export type MediaGenerationGateway = {
+  generateImage(input: { model: ModelInfo; prompt: string }): Promise<GeneratedImageAsset>;
+  generateVideo(input: {
+    aspectRatio: "16:9" | "9:16";
+    durationSeconds: number;
+    model: ModelInfo;
+    prompt: string;
+  }): Promise<GeneratedVideoAsset>;
 };
 
 export const webResearchResultSchema = z
@@ -88,14 +113,17 @@ export const googleMapsResultSchema = z
 
 export const imageGenerationResultSchema = z
   .object({
-    action: z.enum(["media_handoff"]).default("media_handoff"),
+    action: z.enum(["generated", "unconfigured"]).default("generated"),
     media: z
       .object({
+        dataBase64: z.string().optional(),
         kind: z.literal("image"),
+        mimeType: z.string().optional(),
         modelId: z.string().min(1),
         prompt: z.string().min(1),
         provider: z.string().min(1),
-        status: z.literal("ready_for_native_generation"),
+        status: z.literal("generated"),
+        uri: z.string().url().optional(),
       })
       .strict(),
     message: z.string().min(1),
@@ -104,16 +132,20 @@ export const imageGenerationResultSchema = z
 
 export const videoGenerationResultSchema = z
   .object({
-    action: z.enum(["media_handoff"]).default("media_handoff"),
+    action: z.enum(["generated", "in_progress", "unconfigured"]).default("generated"),
     media: z
       .object({
         aspectRatio: z.enum(["16:9", "9:16"]).default("16:9"),
+        dataBase64: z.string().optional(),
         durationSeconds: z.number().int().positive().default(8),
         kind: z.literal("video"),
+        mimeType: z.string().optional(),
         modelId: z.string().min(1),
+        operationName: z.string().optional(),
         prompt: z.string().min(1),
         provider: z.string().min(1),
-        status: z.literal("ready_for_native_generation"),
+        status: z.enum(["generated", "in_progress"]),
+        uri: z.string().url().optional(),
       })
       .strict(),
     message: z.string().min(1),
@@ -130,10 +162,14 @@ export function createDefaultSpecialistRuntimes(
     settings.googleMapsApiKey === undefined
       ? undefined
       : new FetchGoogleMapsGateway(settings.googleMapsApiKey);
+  const mediaGateway =
+    settings.googleGenerativeAiApiKey === undefined
+      ? undefined
+      : new GoogleGenAiMediaGateway(settings.googleGenerativeAiApiKey);
   return {
     google_maps: createGoogleMapsRuntime(googleMapsGateway),
-    image_generation: createImageGenerationRuntime(settings.imageGenerationModelId),
-    video_generation: createVideoGenerationRuntime(settings.videoGenerationModelId),
+    image_generation: createImageGenerationRuntime(settings.imageGenerationModelId, mediaGateway),
+    video_generation: createVideoGenerationRuntime(settings.videoGenerationModelId, mediaGateway),
     web_research: createWebResearchRuntime(),
   };
 }
@@ -211,19 +247,45 @@ export function createGoogleMapsRuntime(
   };
 }
 
-export function createImageGenerationRuntime(modelId: string): AgentSpecialistRuntime {
+export function createImageGenerationRuntime(
+  modelId: string,
+  gateway?: MediaGenerationGateway,
+): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
     const model = providerRouter.registry.get(modelId);
     providerRouter.registry.assertCapabilities(model, ["image_generation"]);
+    if (gateway === undefined) {
+      const structured = imageGenerationResultSchema.parse({
+        action: "unconfigured",
+        media: {
+          kind: "image",
+          modelId: model.id,
+          prompt: invocation.text,
+          provider: model.provider,
+          status: "generated",
+        },
+        message:
+          "Image generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+      });
+      return {
+        message: structured.message,
+        structuredResult: structured,
+      };
+    }
+    const generated = await gateway.generateImage({ model, prompt: invocation.text });
     const structured = imageGenerationResultSchema.parse({
+      action: "generated",
       media: {
+        dataBase64: generated.dataBase64,
         kind: "image",
+        mimeType: generated.mimeType,
         modelId: model.id,
         prompt: invocation.text,
         provider: model.provider,
-        status: "ready_for_native_generation",
+        status: "generated",
+        uri: generated.uri,
       },
-      message: "Image generation request prepared for the native provider path.",
+      message: "Image generated by the native provider path.",
     });
     return {
       message: structured.message,
@@ -232,29 +294,118 @@ export function createImageGenerationRuntime(modelId: string): AgentSpecialistRu
   };
 }
 
-export function createVideoGenerationRuntime(modelId: string): AgentSpecialistRuntime {
+export function createVideoGenerationRuntime(
+  modelId: string,
+  gateway?: MediaGenerationGateway,
+): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
     const model = providerRouter.registry.get(modelId);
     providerRouter.registry.assertCapabilities(model, ["video_generation"]);
+    const aspectRatio = /\b(vertical|portrait|reels|shorts|9:16)\b/iu.test(invocation.text)
+      ? "9:16"
+      : "16:9";
+    const durationSeconds = 8;
+    if (gateway === undefined) {
+      const structured = videoGenerationResultSchema.parse({
+        action: "unconfigured",
+        media: {
+          aspectRatio,
+          durationSeconds,
+          kind: "video",
+          modelId: model.id,
+          prompt: invocation.text,
+          provider: model.provider,
+          status: "in_progress",
+        },
+        message:
+          "Video generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+      });
+      return {
+        message: structured.message,
+        structuredResult: structured,
+      };
+    }
+    const generated = await gateway.generateVideo({
+      aspectRatio,
+      durationSeconds,
+      model,
+      prompt: invocation.text,
+    });
     const structured = videoGenerationResultSchema.parse({
+      action: generated.status,
       media: {
-        aspectRatio: /\b(vertical|portrait|reels|shorts|9:16)\b/iu.test(invocation.text)
-          ? "9:16"
-          : "16:9",
-        durationSeconds: 8,
+        aspectRatio,
+        dataBase64: generated.dataBase64,
+        durationSeconds,
         kind: "video",
+        mimeType: generated.mimeType,
         modelId: model.id,
+        operationName: generated.operationName,
         prompt: invocation.text,
         provider: model.provider,
-        status: "ready_for_native_generation",
+        status: generated.status,
+        uri: generated.uri,
       },
-      message: "Video generation request prepared for the native provider path.",
+      message:
+        generated.status === "generated"
+          ? "Video generated by the native provider path."
+          : "Video generation started by the native provider path.",
     });
     return {
       message: structured.message,
       structuredResult: structured,
     };
   };
+}
+
+export class GoogleGenAiMediaGateway implements MediaGenerationGateway {
+  private readonly client: GoogleGenAI;
+
+  constructor(apiKey: string) {
+    this.client = new GoogleGenAI({ apiKey });
+  }
+
+  async generateImage(input: { model: ModelInfo; prompt: string }): Promise<GeneratedImageAsset> {
+    const response = await this.client.models.generateImages({
+      config: { numberOfImages: 1 },
+      model: input.model.providerModelId,
+      prompt: input.prompt,
+    });
+    const image = response.generatedImages?.[0]?.image;
+    if (image?.imageBytes === undefined && image?.gcsUri === undefined) {
+      throw new Error("Google image generation did not return an image.");
+    }
+    return {
+      dataBase64: image.imageBytes,
+      mimeType: image.mimeType,
+      uri: image.gcsUri,
+    };
+  }
+
+  async generateVideo(input: {
+    aspectRatio: "16:9" | "9:16";
+    durationSeconds: number;
+    model: ModelInfo;
+    prompt: string;
+  }): Promise<GeneratedVideoAsset> {
+    const operation = await this.client.models.generateVideos({
+      config: {
+        aspectRatio: input.aspectRatio,
+        durationSeconds: input.durationSeconds,
+        numberOfVideos: 1,
+      },
+      model: input.model.providerModelId,
+      prompt: input.prompt,
+    });
+    const video = operation.response?.generatedVideos?.[0]?.video;
+    return {
+      dataBase64: video?.videoBytes,
+      mimeType: video?.mimeType,
+      operationName: operation.name,
+      status: operation.done === true ? "generated" : "in_progress",
+      uri: video?.uri,
+    };
+  }
 }
 
 export class FetchGoogleMapsGateway implements GoogleMapsGateway {
@@ -435,14 +586,23 @@ function renderGoogleMaps(result: z.infer<typeof googleMapsResultSchema>): strin
 function parseRouteRequest(
   text: string,
 ): { destination: string; origin: string; travelMode?: string } | undefined {
-  const match = /\b(?:route|directions?)\s+from\s+(.+?)\s+to\s+(.+)$/iu.exec(text.trim());
-  if (match?.[1] === undefined || match[2] === undefined) {
+  const trimmed = text.trim();
+  const englishMatch = /\b(?:route|directions?)\s+from\s+(.+?)\s+to\s+(.+)$/iu.exec(trimmed);
+  if (englishMatch?.[1] !== undefined && englishMatch[2] !== undefined) {
+    return {
+      destination: englishMatch[2].trim(),
+      origin: englishMatch[1].trim(),
+      travelMode: /\b(walk|walking)\b/iu.test(text) ? "walking" : "driving",
+    };
+  }
+  const japaneseMatch = /^(.+?)から(.+?)(?:まで|への|の)?経路/u.exec(trimmed);
+  if (japaneseMatch?.[1] === undefined || japaneseMatch[2] === undefined) {
     return undefined;
   }
   return {
-    destination: match[2].trim(),
-    origin: match[1].trim(),
-    travelMode: /\b(walk|walking)\b/iu.test(text) ? "walking" : "driving",
+    destination: japaneseMatch[2].trim(),
+    origin: japaneseMatch[1].trim(),
+    travelMode: /徒歩/u.test(text) ? "walking" : "driving",
   };
 }
 

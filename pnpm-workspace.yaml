@@ -1,5 +1,7 @@
 allowBuilds:
+  "@google/genai": true
   esbuild: true
+  protobufjs: true
 
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.1.20
