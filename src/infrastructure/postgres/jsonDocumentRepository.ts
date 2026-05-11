@@ -99,6 +99,16 @@ export class PostgresJsonDocumentRepository<
     );
   }
 
+  async consume(key: TKey): Promise<TPayload | undefined> {
+    const result = await this.pool.query<{ payload: TPayload }>(
+      `delete from ${quoteIdentifier(this.table.tableName)}
+       where ${whereClause(this.table.keyColumns)}
+       returning ${quoteIdentifier(this.payloadColumn)} as payload`,
+      this.table.keyColumns.map((column) => requiredValue(key, column)),
+    );
+    return result.rows[0]?.payload;
+  }
+
   async list(where: Partial<TKey> = {}): Promise<TPayload[]> {
     const entries = Object.entries(where);
     const clauses = entries.map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`);
@@ -203,6 +213,18 @@ export const postgresDocumentTables = {
     ],
     keyColumns: ["team_id", "work_item_id", "link_id"],
     tableName: "work_item_calendar_links",
+  },
+  workItemAttentionIndex: {
+    columns: [
+      "needs_attention_now",
+      "status",
+      "visibility_kind",
+      "audience_channel_id",
+      "primary_assignee_user_id",
+      "updated_at",
+    ],
+    keyColumns: ["team_id", "user_id", "work_item_id"],
+    tableName: "work_item_attention_index",
   },
   workItemEvent: {
     columns: ["type", "occurred_at"],

@@ -8,7 +8,10 @@ if (databaseUrl === undefined || databaseUrl.trim() === "") {
   process.exit(1);
 }
 
-const runner = new PostgresMigrationRunner({ databaseUrl });
+const runner = new PostgresMigrationRunner({
+  allowAlembicBaseline: process.env.POSTGRES_ALLOW_ALEMBIC_BASELINE === "true",
+  databaseUrl,
+});
 
 try {
   const applied = await runner.migrate(postgresMigrations);

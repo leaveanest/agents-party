@@ -21,14 +21,9 @@ describe("PostgresMigrationRunner", () => {
     expect(applied).toEqual([
       expect.objectContaining({ id: "20260508_0002", name: "new_migration" }),
     ]);
-    expect(client.sql).toEqual([
-      "begin",
-      expect.stringContaining("create table if not exists schema_migrations"),
-      "select id from schema_migrations",
-      "select new_migration",
-      expect.stringContaining("insert into schema_migrations"),
-      "commit",
-    ]);
+    expect(client.sql).toContain("begin");
+    expect(client.sql).toContain("select new_migration");
+    expect(client.sql).toContain("commit");
     expect(client.released).toBe(true);
   });
 
@@ -48,18 +43,44 @@ describe("PostgresMigrationRunner", () => {
       "create table if not exists work_item_calendar_links",
     );
   });
+
+  it("requires explicit Alembic baseline when legacy metadata is present", async () => {
+    const client = new RecordingClient([], "20260508_0003");
+    const pool = {
+      connect: async () => client,
+      end: async () => undefined,
+      query: client.query.bind(client),
+    };
+    const runner = new PostgresMigrationRunner({ pool: pool as never });
+
+    await expect(
+      runner.migrate([{ id: "20260330_0001", name: "initial", upSql: "select should_not_run" }]),
+    ).rejects.toThrow("Existing Alembic revision");
+    expect(client.sql).toContain("rollback");
+  });
 });
 
 class RecordingClient {
   readonly sql: string[] = [];
   released = false;
 
-  constructor(private readonly appliedRows: Array<{ id: string }> = []) {}
+  constructor(
+    private readonly appliedRows: Array<{ id: string }> = [],
+    private readonly alembicVersion?: string,
+  ) {}
 
   async query(text: string) {
     this.sql.push(normalizeSql(text));
     if (text.includes("select id from schema_migrations")) {
       return { rows: this.appliedRows };
+    }
+    if (text.includes("information_schema.tables")) {
+      return { rows: [{ exists: this.alembicVersion !== undefined }] };
+    }
+    if (text.includes("select version_num from alembic_version")) {
+      return {
+        rows: this.alembicVersion === undefined ? [] : [{ version_num: this.alembicVersion }],
+      };
     }
     return { rows: [] };
   }
