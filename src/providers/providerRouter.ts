@@ -68,19 +68,21 @@ export class ProviderRouter {
   }
 
   async generate(request: LlmRequest) {
+    const canonicalRequest = this.canonicalRequest(request);
     const requiredCapabilities = requiredCapabilitiesForRequest(request);
-    this.registry.assertCapabilities(request.model, requiredCapabilities);
-    return this.adapterFor(request).generate(request);
+    this.registry.assertCapabilities(canonicalRequest.model, requiredCapabilities);
+    return this.adapterFor(canonicalRequest).generate(canonicalRequest);
   }
 
   stream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
+    const canonicalRequest = this.canonicalRequest(request);
     const requiredCapabilities = [...requiredCapabilitiesForRequest(request), "streaming"] as const;
-    this.registry.assertCapabilities(request.model, requiredCapabilities);
-    const adapter = this.adapterFor(request);
+    this.registry.assertCapabilities(canonicalRequest.model, requiredCapabilities);
+    const adapter = this.adapterFor(canonicalRequest);
     if (adapter.stream === undefined) {
-      throw new MissingProviderAdapterError(`${request.model.provider} streaming`);
+      throw new MissingProviderAdapterError(`${canonicalRequest.model.provider} streaming`);
     }
-    return adapter.stream(request);
+    return adapter.stream(canonicalRequest);
   }
 
   private adapterFor(request: LlmRequest): LlmAdapter {
@@ -89,6 +91,13 @@ export class ProviderRouter {
       throw new MissingProviderAdapterError(request.model.provider);
     }
     return adapter;
+  }
+
+  private canonicalRequest(request: LlmRequest): LlmRequest {
+    return {
+      ...request,
+      model: this.registry.get(request.model.id),
+    };
   }
 }
 

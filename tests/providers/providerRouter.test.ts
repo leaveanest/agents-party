@@ -82,6 +82,23 @@ describe("ProviderRouter", () => {
     expect(adapter.requests).toHaveLength(0);
   });
 
+  it("uses registry capabilities instead of caller-supplied model capabilities", async () => {
+    const adapter = recordingAdapter();
+    const router = new ProviderRouter([adapter], registry());
+    const model = {
+      ...router.resolveModel({ workspaceModelId: "example:text-only" }).model,
+      capabilities: ["text", "image_input"] as const,
+    };
+
+    await expect(
+      router.generate({
+        history: imageHistory,
+        model,
+      }),
+    ).rejects.toThrow(MissingModelCapabilityError);
+    expect(adapter.requests).toHaveLength(0);
+  });
+
   it("routes generation to the provider adapter after capability checks", async () => {
     const adapter = recordingAdapter();
     const router = new ProviderRouter([adapter], registry());

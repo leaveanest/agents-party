@@ -32,6 +32,23 @@ export class DuplicateModelError extends Error {
   }
 }
 
+export class DuplicateModelAliasError extends Error {
+  constructor(
+    readonly alias: string,
+    readonly existingModelId: string,
+  ) {
+    super(`Model alias '${alias}' is already registered for '${existingModelId}'.`);
+    this.name = "DuplicateModelAliasError";
+  }
+}
+
+export class ModelAliasCollisionError extends Error {
+  constructor(readonly alias: string) {
+    super(`Model alias '${alias}' collides with a registered model id.`);
+    this.name = "ModelAliasCollisionError";
+  }
+}
+
 export class InvalidModelInfoError extends Error {
   constructor(
     readonly modelId: string,
@@ -57,6 +74,18 @@ export class ModelRegistry {
     if (this.models.has(model.id)) {
       throw new DuplicateModelError(model.id);
     }
+    if (this.aliases.has(model.id)) {
+      throw new ModelAliasCollisionError(model.id);
+    }
+    for (const alias of model.aliases ?? []) {
+      const existingModelId = this.aliases.get(alias);
+      if (existingModelId !== undefined) {
+        throw new DuplicateModelAliasError(alias, existingModelId);
+      }
+      if (this.models.has(alias)) {
+        throw new ModelAliasCollisionError(alias);
+      }
+    }
     this.models.set(model.id, freezeModel(model));
     for (const alias of model.aliases ?? []) {
       this.aliases.set(alias, model.id);
@@ -64,8 +93,7 @@ export class ModelRegistry {
   }
 
   get(modelId: string): ModelInfo {
-    const resolvedId = this.aliases.get(modelId) ?? modelId;
-    const model = this.models.get(resolvedId);
+    const model = this.models.get(modelId) ?? this.models.get(this.aliases.get(modelId) ?? "");
     if (model === undefined) {
       throw new UnknownModelError(modelId);
     }

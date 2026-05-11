@@ -2,6 +2,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   createDefaultModelRegistry,
+  DuplicateModelAliasError,
+  ModelAliasCollisionError,
   MissingModelCapabilityError,
   ModelRegistry,
   UnknownModelError,
@@ -59,5 +61,69 @@ describe("ModelRegistry", () => {
     expect(() => registry.assertCapabilities(model, ["image_input"])).toThrow(
       MissingModelCapabilityError,
     );
+  });
+
+  it("rejects duplicate aliases", () => {
+    expect(
+      () =>
+        new ModelRegistry([
+          {
+            aliases: ["shared"],
+            capabilities: ["text"],
+            id: "example:first",
+            provider: "openai",
+            providerModelId: "first",
+          },
+          {
+            aliases: ["shared"],
+            capabilities: ["text"],
+            id: "example:second",
+            provider: "anthropic",
+            providerModelId: "second",
+          },
+        ]),
+    ).toThrow(DuplicateModelAliasError);
+  });
+
+  it("rejects aliases that collide with registered model ids", () => {
+    const registry = new ModelRegistry([
+      {
+        capabilities: ["text"],
+        id: "example:first",
+        provider: "openai",
+        providerModelId: "first",
+      },
+    ]);
+
+    expect(() =>
+      registry.register({
+        aliases: ["example:first"],
+        capabilities: ["text"],
+        id: "example:second",
+        provider: "anthropic",
+        providerModelId: "second",
+      }),
+    ).toThrow(ModelAliasCollisionError);
+  });
+
+  it("rejects model ids that collide with registered aliases", () => {
+    const registry = new ModelRegistry([
+      {
+        aliases: ["example:second"],
+        capabilities: ["text"],
+        id: "example:first",
+        provider: "openai",
+        providerModelId: "first",
+      },
+    ]);
+
+    expect(() =>
+      registry.register({
+        capabilities: ["text"],
+        id: "example:second",
+        provider: "anthropic",
+        providerModelId: "second",
+      }),
+    ).toThrow(ModelAliasCollisionError);
   });
 });
