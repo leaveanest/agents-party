@@ -65,7 +65,7 @@ export function createAgentSlackHandlers(
       await handleMessage(args, runner, options);
     },
     async handleReactionAdded(args) {
-      await handleReactionAdded(args, runner);
+      await handleReactionAdded(args, runner, options);
     },
   };
 }
@@ -173,9 +173,11 @@ async function handleMessage(
 
   let text: string;
   try {
+    const specialist = stringField(thread, "agent_id");
     const result = await runner.run({
       channelId: event.channel,
       messageTs: event.ts,
+      specialist,
       teamId,
       text: readString(event, "text") ?? "",
       threadMessages: await readThreadTextMessages(client, event.channel, threadTs),
@@ -219,6 +221,7 @@ async function handleMessage(
 async function handleReactionAdded(
   { body, client, event, logger }: SlackEventArgs<"reaction_added">,
   runner: AgentRunner,
+  options: AgentSlackHandlerOptions,
 ): Promise<void> {
   const targetLanguage = resolveTranslationLanguageFromReaction(readString(event, "reaction"));
   if (targetLanguage === undefined) {
@@ -232,6 +235,12 @@ async function handleReactionAdded(
   const channelId = typeof item.channel === "string" ? item.channel : undefined;
   const messageTs = typeof item.ts === "string" ? item.ts : undefined;
   if (channelId === undefined || messageTs === undefined) {
+    return;
+  }
+  if (
+    options.routingRepository !== undefined &&
+    !(await options.routingRepository.isChannelEnabled(teamId, channelId))
+  ) {
     return;
   }
 
@@ -262,6 +271,7 @@ async function handleReactionAdded(
     const result = await runner.run({
       channelId,
       messageTs,
+      specialist: "translation",
       teamId,
       text: `Translate the following Slack message to ${targetLanguage}:\n\n${sourceText}`,
       threadTs,

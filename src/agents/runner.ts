@@ -126,6 +126,14 @@ export function createDefaultAgentRunner(settings: AppSettings): AgentRunner {
 }
 
 export function selectSpecialist(invocation: SlackAgentInvocation): AgentRouterDecision {
+  if (invocation.specialist !== undefined) {
+    return agentRouterDecisionSchema.parse({
+      confidence: 1,
+      reason: "forced_invocation",
+      specialist: invocation.specialist,
+    });
+  }
+
   const text = invocation.text.toLocaleLowerCase();
   const specialist: AgentSpecialist = matchesAny(text, [
     /\b(todo|tasks?|work items?|remind|due)\b/u,
