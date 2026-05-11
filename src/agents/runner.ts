@@ -100,7 +100,11 @@ export class AgentRunner {
     }
     const { model, result, toolResults } = await this.runSpecialist(invocation, decision);
 
-    return normalizeRunnerResult(decision, model, result, toolResults);
+    try {
+      return normalizeRunnerResult(decision, model, result, toolResults);
+    } catch (error) {
+      throw new AgentRunnerExecutionError(decision.specialist, modelTrace(model), error);
+    }
   }
 
   private async runSpecialist(

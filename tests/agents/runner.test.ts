@@ -195,6 +195,28 @@ describe("AgentRunner", () => {
       }),
     ).rejects.toThrow("Invalid output from agent tool");
   });
+
+  it("wraps structured output validation failures with specialist and model context", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({
+        content: JSON.stringify({ action: "listed", workItems: [] }),
+      }),
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "list my tasks",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "google:gemini-2.5-flash", provider: "google" },
+      specialist: "work_manager",
+    });
+  });
 });
 
 class FakeProviderRouter {
