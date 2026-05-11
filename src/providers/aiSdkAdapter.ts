@@ -105,6 +105,12 @@ export class AiSdkLlmAdapter implements LlmAdapter {
   }
 
   supports(_request: LlmRequest, requiredCapabilities: readonly LlmCapability[]): boolean {
+    if (
+      _request.model.provider === "google" &&
+      requiredCapabilities.some((capability) => googleNativeOnlyCapabilities.has(capability))
+    ) {
+      return false;
+    }
     return !requiredCapabilities.some((capability) => nativeOnlyCapabilities.has(capability));
   }
 
@@ -200,6 +206,8 @@ const nativeOnlyCapabilities = new Set<LlmCapability>([
   "thinking",
   "web_search",
 ]);
+
+const googleNativeOnlyCapabilities = new Set<LlmCapability>(["file_input"]);
 
 function assertSupportedResponseFormat(request: LlmRequest): void {
   if (request.responseFormat !== undefined && request.responseFormat.type !== "text") {

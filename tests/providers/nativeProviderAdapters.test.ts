@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { ConversationHistory } from "../../src/domain/messageHistory.js";
 import type { LlmAdapter } from "../../src/providers/contracts.js";
+import { createAiSdkAdapters } from "../../src/providers/aiSdkAdapter.js";
 import { ModelRegistry } from "../../src/providers/modelRegistry.js";
 import {
   createNativeProviderAdapters,
@@ -15,6 +16,25 @@ import {
 
 const history: ConversationHistory = {
   messages: [],
+};
+
+const fileHistory: ConversationHistory = {
+  messages: [
+    {
+      author: { id: "U1", kind: "user" },
+      content: [
+        {
+          filename: "brief.pdf",
+          id: "file-1",
+          mediaType: "application/pdf",
+          source: { data: new Uint8Array([1]), type: "bytes" },
+          type: "file",
+        },
+      ],
+      id: "message-1",
+      role: "user",
+    },
+  ],
 };
 
 describe("native provider adapters", () => {
@@ -80,6 +100,28 @@ describe("native provider adapters", () => {
       "bedrock",
       "dify",
     ]);
+  });
+
+  it("routes Gemini file input to the native stub with common adapters registered first", async () => {
+    const router = new ProviderRouter(
+      [...createAiSdkAdapters(), ...createNativeProviderAdapters()],
+      new ModelRegistry([
+        {
+          capabilities: ["text", "streaming", "file_input"],
+          id: "google:gemini-2.5-flash",
+          provider: "google",
+          providerModelId: "gemini-2.5-flash",
+        },
+      ]),
+    );
+    const model = router.resolveModel({ workspaceModelId: "google:gemini-2.5-flash" }).model;
+
+    await expect(
+      router.generate({
+        history: fileHistory,
+        model,
+      }),
+    ).rejects.toThrow(NativeProviderUnsupportedError);
   });
 });
 

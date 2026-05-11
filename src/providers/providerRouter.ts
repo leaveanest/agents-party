@@ -85,14 +85,16 @@ export class ProviderRouter {
     const canonicalRequest = this.canonicalRequest(request);
     const requiredCapabilities = requiredCapabilitiesForRequest(request);
     this.registry.assertCapabilities(canonicalRequest.model, requiredCapabilities);
-    return this.adapterFor(canonicalRequest, requiredCapabilities).generate(canonicalRequest);
+    return this.adapterFor(canonicalRequest, requiredCapabilities, "generate").generate(
+      canonicalRequest,
+    );
   }
 
   stream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
     const canonicalRequest = this.canonicalRequest(request);
     const requiredCapabilities = [...requiredCapabilitiesForRequest(request), "streaming"] as const;
     this.registry.assertCapabilities(canonicalRequest.model, requiredCapabilities);
-    const adapter = this.adapterFor(canonicalRequest, requiredCapabilities);
+    const adapter = this.adapterFor(canonicalRequest, requiredCapabilities, "stream");
     if (adapter.stream === undefined) {
       throw new MissingProviderAdapterError(`${canonicalRequest.model.provider} streaming`);
     }
@@ -102,13 +104,16 @@ export class ProviderRouter {
   private adapterFor(
     request: LlmRequest,
     requiredCapabilities: readonly LlmCapability[],
+    mode: "generate" | "stream",
   ): LlmAdapter {
     const providerAdapters = this.adapters.get(request.model.provider);
     if (providerAdapters === undefined || providerAdapters.length === 0) {
       throw new MissingProviderAdapterError(request.model.provider);
     }
     const adapter = providerAdapters.find(
-      (candidate) => candidate.supports?.(request, requiredCapabilities) ?? true,
+      (candidate) =>
+        (mode === "generate" || candidate.stream !== undefined) &&
+        (candidate.supports?.(request, requiredCapabilities) ?? true),
     );
     if (adapter === undefined) {
       throw new NoProviderAdapterForCapabilitiesError(request.model.provider, requiredCapabilities);
