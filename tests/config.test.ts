@@ -20,6 +20,7 @@ describe("loadSettings", () => {
       googleOAuthRedirectBaseUrl: undefined,
       googleOAuthStartPath: "/oauth/google/start",
       googleTokenEncryptionKey: undefined,
+      googleMapsApiKey: undefined,
       slackBotToken: undefined,
       slackClientId: undefined,
       slackClientSecret: undefined,
@@ -126,6 +127,10 @@ describe("loadSettings", () => {
     expect(settings.salesforceOAuthCallbackUrl).toBe(
       "https://app.example.com/base/oauth/salesforce/callback",
     );
+  });
+
+  it("reads the Google Maps API key for the TypeScript maps specialist", () => {
+    expect(loadSettings({ GOOGLE_MAPS_API_KEY: "maps-key" }).googleMapsApiKey).toBe("maps-key");
   });
 });
 

@@ -19,6 +19,7 @@ const baseSettings: AppSettings = {
   googleOAuthRedirectBaseUrl: undefined,
   googleOAuthStartPath: "/oauth/google/start",
   googleTokenEncryptionKey: undefined,
+  googleMapsApiKey: undefined,
   slackBotToken: undefined,
   slackClientId: undefined,
   slackClientSecret: undefined,

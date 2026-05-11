@@ -94,6 +94,7 @@ describe("native provider adapters", () => {
     const adapters = createNativeProviderAdapters();
 
     expect(adapters.map((adapter) => adapter.provider)).toEqual([
+      "google",
       "openai",
       "anthropic",
       "google",

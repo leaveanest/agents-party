@@ -14,6 +14,7 @@ export type AppSettings = {
   googleOAuthRedirectBaseUrl: string | undefined;
   googleOAuthStartPath: string;
   googleTokenEncryptionKey: string | undefined;
+  googleMapsApiKey: string | undefined;
   slackBotToken: string | undefined;
   slackClientId: string | undefined;
   slackClientSecret: string | undefined;
@@ -67,6 +68,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     "GOOGLE_OAUTH_REDIRECT_BASE_URL",
   );
   const googleTokenEncryptionKey = readText(env.GOOGLE_TOKEN_ENCRYPTION_KEY);
+  const googleMapsApiKey = readText(env.GOOGLE_MAPS_API_KEY);
   const slackBotToken = readText(env.SLACK_BOT_TOKEN);
   const slackClientId = readText(env.SLACK_CLIENT_ID);
   const slackClientSecret = readText(env.SLACK_CLIENT_SECRET);
@@ -129,6 +131,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     googleOAuthRedirectBaseUrl,
     googleOAuthStartPath,
     googleTokenEncryptionKey,
+    googleMapsApiKey,
     slackBotToken,
     slackClientId,
     slackClientSecret,

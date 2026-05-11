@@ -59,13 +59,17 @@ AWS Bedrock and Dify are intentionally left for native adapter lanes because the
 
 ## Native Provider Escape Hatches
 
-`createNativeProviderAdapters()` registers explicit native-provider stubs under the same `LlmAdapter` interface. These adapters are selected by required capability, not model-name checks, and currently return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added.
+`createNativeProviderAdapters()` registers explicit native-provider paths under the same `LlmAdapter` interface. These adapters are selected by required capability, not model-name checks.
+
+The first concrete native path is Gemini web search through AI SDK's Google native search tool. It is used when a request requires `web_search`, so web research does not fall back to the common text-only lane.
+
+Unsupported native paths still return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added.
 
 Native stubs currently cover:
 
 - OpenAI Responses/native tools for `web_search` and `image_generation`
 - Anthropic thinking and web search
-- Gemini grounding and file APIs
+- Gemini file APIs
 - AWS Bedrock Claude
 - Dify endpoint invocation
 

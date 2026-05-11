@@ -14,6 +14,10 @@ import {
   translationResultSchema,
   workManagerResultSchema,
 } from "./schemas.js";
+import {
+  createDefaultSpecialistRuntimes,
+  type AgentSpecialistRuntime,
+} from "./specialistRuntimes.js";
 import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 
 export type AgentRunnerResult = {
@@ -28,6 +32,7 @@ export type AgentRunnerOptions = {
   defaultModelId: string;
   maxToolRounds?: number;
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
+  specialistRuntimes?: Partial<Record<AgentSpecialist, AgentSpecialistRuntime>>;
   specialistPrompts?: Partial<Record<AgentSpecialist, string>>;
   toolRegistry?: AgentToolRegistry;
 };
@@ -54,6 +59,22 @@ export class AgentRunner {
   async run(invocationInput: unknown): Promise<AgentRunnerResult> {
     const invocation = slackAgentInvocationSchema.parse(invocationInput);
     const decision = selectSpecialist(invocation);
+    const nativeRuntime = this.options.specialistRuntimes?.[decision.specialist];
+    if (nativeRuntime !== undefined) {
+      const model = this.options.providerRouter.registry.get(this.options.defaultModelId);
+      const result = await nativeRuntime({
+        invocation,
+        model,
+        providerRouter: this.options.providerRouter,
+      });
+      return {
+        decision,
+        message: result.message,
+        raw: result.raw,
+        structuredResult: result.structuredResult,
+        toolResults: [],
+      };
+    }
     const { result, toolResults } = await this.runSpecialist(invocation, decision);
 
     return normalizeRunnerResult(decision, result, toolResults);
@@ -121,6 +142,7 @@ export function createDefaultAgentRunner(settings: AppSettings): AgentRunner {
       ...createNativeProviderAdapters(),
       ...createAiSdkAdapters(),
     ]),
+    specialistRuntimes: createDefaultSpecialistRuntimes(settings),
     toolRegistry: new AgentToolRegistry(),
   });
 }
