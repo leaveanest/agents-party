@@ -13,6 +13,10 @@ The TypeScript runtime currently exposes:
 - `POST /slack/events`
 - `GET /slack/install` when Slack OAuth install settings are present
 - `GET /slack/oauth_redirect` when Slack OAuth install settings are present
+- `GET /oauth/google/start` when Google OAuth settings are present
+- `GET /oauth/google/callback` when Google OAuth settings are present
+- `GET /oauth/salesforce/start` when Salesforce OAuth settings are present
+- `GET /oauth/salesforce/callback` when Salesforce OAuth settings are present
 
 The TypeScript Slack ingress initializes Bolt for JavaScript/TypeScript, validates Slack signatures through Bolt, acknowledges Events API deliveries, and suppresses duplicate event deliveries by Slack `event_id`.
 See [`docs/slack-typescript-ingress.md`](docs/slack-typescript-ingress.md) for the current ingress boundary.
@@ -23,7 +27,7 @@ See [`docs/message-history-model.md`](docs/message-history-model.md) for the con
 The TypeScript provider boundary defines `ProviderRouter`, model registry, provider contracts, capability checks, and an AI SDK common adapter lane for OpenAI, Azure OpenAI, Anthropic, Google, Groq, xAI, PLaMo, NVIDIA, and LiteLLM.
 See [`docs/provider-router.md`](docs/provider-router.md) for the routing and capability boundary.
 
-Agent routing, specialist execution, full App Home settings, Google/Salesforce OAuth routes, and native provider adapters for Bedrock/Dify/provider-specific features are planned migration work and are not yet available in the TypeScript runtime.
+Agent routing through `app_mention`, specialist placeholder execution, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, and encrypted token persistence are available in the TypeScript runtime. Thread auto-routing, reaction-triggered specialist commands, full App Home settings, and native provider adapters for Bedrock/Dify/provider-specific features remain planned migration work.
 
 ## Legacy Python Capabilities
 
@@ -242,6 +246,18 @@ GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET=...
 GOOGLE_TOKEN_ENCRYPTION_KEY=...
 ```
 
+The registered Google redirect URI is `${GOOGLE_OAUTH_REDIRECT_BASE_URL}/oauth/google/callback` unless `GOOGLE_OAUTH_CALLBACK_PATH` is overridden.
+
+### Salesforce OAuth
+
+```bash
+SALESFORCE_OAUTH_REDIRECT_BASE_URL=https://...
+SALESFORCE_OAUTH_CONTEXT_SIGNING_SECRET=...
+SALESFORCE_TOKEN_ENCRYPTION_KEY=...
+```
+
+The registered Salesforce redirect URI is `${SALESFORCE_OAUTH_REDIRECT_BASE_URL}/oauth/salesforce/callback` unless `SALESFORCE_OAUTH_CALLBACK_PATH` is overridden. Workspace-specific Salesforce client IDs, optional encrypted client secrets, My Domain hosts, and org IDs are read from the PostgreSQL `salesforce_auth_configs` table.
+
 ## Deployment
 
 Heroku production deploys use:
@@ -276,9 +292,13 @@ The Heroku Terraform provider reads credentials from `HEROKU_API_KEY` or an auth
 heroku config:set \
   SLACK_BOT_TOKEN=... \
   SLACK_SIGNING_SECRET=... \
+  GOOGLE_OAUTH_REDIRECT_BASE_URL=https://... \
   GOOGLE_OAUTH_CLIENT_SECRET=... \
   GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET=... \
   GOOGLE_TOKEN_ENCRYPTION_KEY=... \
+  SALESFORCE_OAUTH_REDIRECT_BASE_URL=https://... \
+  SALESFORCE_OAUTH_CONTEXT_SIGNING_SECRET=... \
+  SALESFORCE_TOKEN_ENCRYPTION_KEY=... \
   -a agents-party-dev
 ```
 

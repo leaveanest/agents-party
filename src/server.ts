@@ -2,9 +2,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 
 import type { AppSettings } from "./config.js";
 import { buildHealthPayload } from "./http/health.js";
+import type { OAuthHttpGateway } from "./integrations/oauth/http.js";
 import type { SlackGateway } from "./slack/app.js";
 
 export type AppServerDependencies = {
+  oauthGateway?: OAuthHttpGateway;
   slackGateway?: SlackGateway;
 };
 
@@ -19,16 +21,16 @@ export function createAppServer(
   dependencies: AppServerDependencies = {},
 ): Server {
   return createServer((request, response) => {
-    handleRequest(request, response, settings, dependencies);
+    void handleRequest(request, response, settings, dependencies);
   });
 }
 
-function handleRequest(
+async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   settings: AppSettings,
   dependencies: AppServerDependencies,
-): void {
+): Promise<void> {
   const method = request.method ?? "GET";
   const url = parseRequestUrl(request.url);
   if (url === undefined) {
@@ -41,6 +43,18 @@ function handleRequest(
 
   if (method === "GET" && url.pathname === "/healthz") {
     sendJson(response, 200, buildHealthPayload(settings));
+    return;
+  }
+
+  if (isOAuthRoute(url.pathname, settings)) {
+    if (dependencies.oauthGateway === undefined) {
+      sendJson(response, 503, {
+        error: "oauth_not_configured",
+        message: "OAuth routes are not configured for this process.",
+      });
+      return;
+    }
+    await dependencies.oauthGateway.handle(request, response, url);
     return;
   }
 
@@ -60,6 +74,15 @@ function handleRequest(
     error: "not_found",
     message: "Route not found.",
   });
+}
+
+function isOAuthRoute(pathname: string, settings: AppSettings): boolean {
+  return (
+    pathname === settings.googleOAuthStartPath ||
+    pathname === settings.googleOAuthCallbackPath ||
+    pathname === settings.salesforceOAuthStartPath ||
+    pathname === settings.salesforceOAuthCallbackPath
+  );
 }
 
 function isSlackRoute(pathname: string, settings: AppSettings): boolean {

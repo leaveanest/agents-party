@@ -12,6 +12,15 @@ const settings: AppSettings = {
   appName: "agents-party",
   appPort: 0,
   databaseUrl: undefined,
+  googleOAuthCallbackPath: "/oauth/google/callback",
+  googleOAuthCallbackUrl: "/oauth/google/callback",
+  googleOAuthClientId: undefined,
+  googleOAuthClientSecret: undefined,
+  googleOAuthContextSigningSecret: undefined,
+  googleOAuthEnabled: false,
+  googleOAuthRedirectBaseUrl: undefined,
+  googleOAuthStartPath: "/oauth/google/start",
+  googleTokenEncryptionKey: undefined,
   slackBotToken: undefined,
   slackClientId: undefined,
   slackClientSecret: undefined,
@@ -25,6 +34,13 @@ const settings: AppSettings = {
   slackSigningSecret: undefined,
   slackStateSecret: undefined,
   slackUserScopes: [],
+  salesforceOAuthCallbackPath: "/oauth/salesforce/callback",
+  salesforceOAuthCallbackUrl: "/oauth/salesforce/callback",
+  salesforceOAuthContextSigningSecret: undefined,
+  salesforceOAuthEnabled: false,
+  salesforceOAuthRedirectBaseUrl: undefined,
+  salesforceOAuthStartPath: "/oauth/salesforce/start",
+  salesforceTokenEncryptionKey: undefined,
 };
 
 let closeServer: (() => Promise<void>) | undefined;
@@ -172,6 +188,69 @@ describe("createAppServer", () => {
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       error: "slack_not_configured",
+    });
+  });
+
+  it("delegates OAuth routes to the configured OAuth gateway", async () => {
+    let delegatedPath: string | undefined;
+    const server = createAppServer(settings, {
+      oauthGateway: {
+        async close() {},
+        canHandle(pathname) {
+          return pathname === "/oauth/google/start";
+        },
+        async handle(_request, response, url) {
+          delegatedPath = url.pathname;
+          response.writeHead(302, { location: "https://accounts.google.com/" });
+          response.end();
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/oauth/google/start`, {
+      redirect: "manual",
+    });
+
+    expect(response.status).toBe(302);
+    expect(delegatedPath).toBe("/oauth/google/start");
+  });
+
+  it("returns 503 for OAuth routes when OAuth is not configured", async () => {
+    const server = createAppServer(settings);
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/oauth/google/start`);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "oauth_not_configured",
     });
   });
 });
