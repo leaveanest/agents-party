@@ -244,8 +244,17 @@ export function createImageGenerationRuntime(
   gateway?: MediaGenerationGateway,
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
-    const model = providerRouter.registry.get(modelId);
-    providerRouter.registry.assertCapabilities(model, ["image_generation"]);
+    let model: ModelInfo | undefined;
+    try {
+      model = providerRouter.registry.get(modelId);
+      providerRouter.registry.assertCapabilities(model, ["image_generation"]);
+    } catch (error) {
+      throw new AgentSpecialistRuntimeError(
+        "image_generation",
+        model === undefined ? undefined : modelTrace(model),
+        error,
+      );
+    }
     return withRuntimeContext("image_generation", model, async () => {
       if (gateway === undefined) {
         const structured = imageGenerationResultSchema.parse({
@@ -295,8 +304,17 @@ export function createVideoGenerationRuntime(
   gateway?: MediaGenerationGateway,
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
-    const model = providerRouter.registry.get(modelId);
-    providerRouter.registry.assertCapabilities(model, ["video_generation"]);
+    let model: ModelInfo | undefined;
+    try {
+      model = providerRouter.registry.get(modelId);
+      providerRouter.registry.assertCapabilities(model, ["video_generation"]);
+    } catch (error) {
+      throw new AgentSpecialistRuntimeError(
+        "video_generation",
+        model === undefined ? undefined : modelTrace(model),
+        error,
+      );
+    }
     return withRuntimeContext("video_generation", model, async () => {
       const aspectRatio = /\b(vertical|portrait|reels|shorts|9:16)\b/iu.test(invocation.text)
         ? "9:16"
