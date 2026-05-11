@@ -759,19 +759,14 @@ export class PostgresWorkItemRepository {
       this.attentionIndex.findByKeyPrefix(key),
       this.calendarLinks.findByKeyPrefix(key),
     ]);
-    return {
+    return hydrateWorkItemAggregate({
       attentionIndexes: attention,
       calendarLinks,
+      events,
       item,
       participants,
-      recentEvents: events,
-      viewerRelation:
-        viewerUserId === undefined
-          ? undefined
-          : participants.find(
-              (participant) => stringField(participant, "user_id") === viewerUserId,
-            ),
-    };
+      viewerUserId,
+    });
   }
 
   async listWorkItems(teamId: string): Promise<JsonObject[]> {
@@ -1631,7 +1626,11 @@ function matchesWorkItemQuery(
   if (query.includeCompleted !== true && COMPLETED_STATUSES.has(status)) {
     return false;
   }
-  if (query.statusIn !== undefined && !query.statusIn.includes(status)) {
+  if (
+    query.statusIn !== undefined &&
+    query.statusIn.length > 0 &&
+    !query.statusIn.includes(status)
+  ) {
     return false;
   }
   if (
