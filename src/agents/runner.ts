@@ -199,7 +199,7 @@ function buildSpecialistHistory(input: {
         {
           content: [
             {
-              input: {},
+              input: result.input,
               toolCallId: result.toolCallId,
               toolName: result.toolName,
               type: "tool-call" as const,

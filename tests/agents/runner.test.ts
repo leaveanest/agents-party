@@ -139,10 +139,29 @@ describe("AgentRunner", () => {
 
     expect(result.message).toBe("final");
     expect(result.toolResults).toEqual([
-      { output: { echoed: "ok" }, toolCallId: "call-1", toolName: "echo" },
+      {
+        input: { text: "ok" },
+        output: { echoed: "ok" },
+        toolCallId: "call-1",
+        toolName: "echo",
+      },
     ]);
     expect(router.requests).toHaveLength(2);
     expect(router.requests[1]?.history.messages.map((message) => message.role)).toContain("tool");
+    expect(router.requests[1]?.history.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          content: [
+            expect.objectContaining({
+              input: { text: "ok" },
+              toolCallId: "call-1",
+              type: "tool-call",
+            }),
+          ],
+          role: "assistant",
+        }),
+      ]),
+    );
   });
 
   it("rejects invalid tool output", async () => {
