@@ -65,7 +65,7 @@ export type LlmRequest = {
   maxOutputTokens?: number;
   metadata?: Record<string, JsonValue>;
   model: ModelInfo;
-  providerOptions?: Record<string, unknown>;
+  providerOptions?: Record<string, Record<string, JsonValue>>;
   requiredCapabilities?: readonly LlmCapability[];
   responseFormat?: LlmResponseFormat;
   temperature?: number;

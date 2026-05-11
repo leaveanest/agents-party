@@ -41,3 +41,18 @@ Callers can also pass `requiredCapabilities` for provider-specific features such
 To add a new model, add a `ModelInfo` registry entry with explicit capabilities and aliases if needed. To add a new provider implementation, add one `LlmAdapter` for that provider and register it with `ProviderRouter`.
 
 This keeps provider expansion local to `src/providers/`: Slack handlers and agent orchestration should not need provider-specific branches.
+
+## AI SDK Common Lane
+
+`AiSdkLlmAdapter` is the common invocation lane for providers that fit AI SDK's language-model abstraction:
+
+- OpenAI
+- Azure OpenAI
+- Anthropic
+- Google Gemini
+- Groq
+- OpenAI-compatible providers for xAI, PLaMo, NVIDIA NIM, and LiteLLM
+
+The adapter converts repository `ConversationHistory` to AI SDK `ModelMessage[]` only at invocation time, maps AI SDK generation and streaming results back to `LlmResult` and `LlmStreamEvent`, and wraps provider failures as `LlmProviderError`.
+
+AWS Bedrock and Dify are intentionally left for native adapter lanes because their production integrations need provider-specific configuration and behavior outside this common path.
