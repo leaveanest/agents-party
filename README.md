@@ -1,9 +1,21 @@
 # agents-party
 
-`agents-party` is a Python Slack application built with FastAPI, Slack Bolt, `pydantic-ai`, and PostgreSQL.
-It exposes a Slack-facing `agent_router` that can answer directly or delegate to specialist runtimes for work management, web research, maps, translation, image generation, video generation, and Google OAuth-backed integrations.
+`agents-party` is a Slack-native agent routing application being migrated from Python to TypeScript.
+The target runtime is TypeScript/Node.js with Slack Bolt for JavaScript/TypeScript, AI SDK behind repository-owned provider adapters, PostgreSQL, and Terraform.
 
-## Current Capabilities
+The current Python implementation remains in the repository only as legacy code during the cutover. The target application runtime does not keep Python as a fallback path.
+
+## TypeScript Runtime Status
+
+The TypeScript runtime currently exposes:
+
+- `GET /healthz`
+
+Slack events, OAuth routes, agent routing, persistence, and provider adapters are planned migration work and are not yet available in the TypeScript runtime.
+
+## Legacy Python Capabilities
+
+The legacy Python application still contains:
 
 - FastAPI entrypoint with:
   - `GET /healthz`
@@ -62,6 +74,34 @@ Repository-local Codex skills for development live under [`.agents/skills/`](.ag
 
 ## Local Setup
 
+Install TypeScript dependencies:
+
+```bash
+vp install
+```
+
+Run the TypeScript app locally:
+
+```bash
+vp run dev
+```
+
+The initial TypeScript runtime exposes:
+
+- `GET /healthz`
+
+Validate the TypeScript workspace:
+
+```bash
+vp check
+vp test
+vp pack
+```
+
+### Legacy Python Setup
+
+Use this only while working on legacy Python code before it is removed.
+
 Install dependencies:
 
 ```bash
@@ -83,9 +123,9 @@ uv run agents-party
 ## Local Container
 
 This repository includes a root `Dockerfile` for local container checks only.
-Heroku production deploys use Heroku buildpacks, the root `Procfile`, and the release phase instead of Docker image deployment.
+Heroku production deploys use Heroku buildpacks and the root `Procfile` instead of Docker image deployment.
 Both local containers and Heroku production install `ffmpeg`, which is required for transcribing Slack video attachments by extracting an audio track before sending it to Google Cloud Speech-to-Text.
-Heroku installs it with the Heroku Active Storage Preview buildpack before the Python buildpack runs.
+Heroku installs it with the Heroku Active Storage Preview buildpack before the Node buildpack runs.
 
 Build locally if needed:
 
@@ -95,7 +135,8 @@ docker build -t agents-party .
 
 ## Configuration
 
-The application reads environment variables from `.env` when present.
+The TypeScript runtime reads configuration from process environment variables.
+Legacy Python code still reads environment variables from `.env` when present.
 
 ### Core runtime
 
@@ -149,7 +190,7 @@ DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/agents_party
 ### Heroku database
 
 Production on Heroku uses the `DATABASE_URL` config var created by the Heroku Postgres add-on.
-The release phase runs Alembic migrations with the same value:
+Legacy Python deployments used Alembic migrations with the same value. TypeScript-managed migrations are planned for the persistence cutover.
 
 ```bash
 DATABASE_URL=postgres://...
@@ -176,11 +217,10 @@ GOOGLE_TOKEN_ENCRYPTION_KEY=...
 Heroku production deploys use:
 
 - Heroku Active Storage Preview buildpack for the `ffmpeg` runtime binary
-- Heroku Python buildpack, configured by Terraform after the `ffmpeg` buildpack
+- Heroku Node.js buildpack, configured by Terraform after the `ffmpeg` buildpack
 - root `Procfile`
-  - `release: alembic upgrade head`
-  - `web: uvicorn agents_party.main:app --host 0.0.0.0 --port $PORT`
-- `.python-version` for Heroku uv builds
+  - `web: node dist/main.mjs`
+- `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` for the TypeScript runtime
 - Heroku Postgres add-on for `DATABASE_URL`
 - Heroku Managed Inference and Agents add-on for `INFERENCE_KEY` and `INFERENCE_URL`
 
@@ -212,7 +252,7 @@ heroku config:set \
   -a agents-party-dev
 ```
 
-3. Deploy from Git to Heroku so the Python buildpack reads `uv.lock`, `.python-version`, and `Procfile`:
+3. Deploy from Git to Heroku so the Node buildpack reads the TypeScript package metadata and `Procfile`:
 
 ```bash
 heroku git:remote -a agents-party-dev
@@ -229,7 +269,35 @@ Rollback rule:
 
 ## Development
 
-Lint changed files:
+Format, lint, and type-check TypeScript files:
+
+```bash
+vp check
+```
+
+Run the explicit TypeScript compiler check:
+
+```bash
+vp run typecheck
+```
+
+Run TypeScript tests:
+
+```bash
+vp test
+```
+
+Build/package the TypeScript app:
+
+```bash
+vp pack
+```
+
+### Legacy Python Development
+
+Use these only while working on Python code before it is removed.
+
+Lint changed Python files:
 
 ```bash
 uv run ruff check <path>
@@ -262,6 +330,15 @@ uv run alembic revision --autogenerate -m "describe change"
 ## Repository Layout
 
 ```text
+src/
+  agents/
+  domain/
+  http/
+  infrastructure/
+    postgres/
+  providers/
+  repositories/
+  slack/
 src/agents_party/
   agents/
   domain/
@@ -274,6 +351,8 @@ tests/
 docs/
 terraform/
 ```
+
+The top-level `src/*` directories are the TypeScript target structure. `src/agents_party/` is the legacy Python implementation awaiting removal during the TypeScript cutover.
 
 Architecture references:
 
