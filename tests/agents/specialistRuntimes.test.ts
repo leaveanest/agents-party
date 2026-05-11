@@ -287,6 +287,31 @@ describe("specialist runtimes", () => {
       }),
     ).rejects.toBeInstanceOf(AgentRunnerExecutionError);
   });
+
+  it("AgentRunner wraps native structured-result failures with attempted model context", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({
+        content: JSON.stringify({ action: "invalid", answer: "bad" }),
+      }),
+      specialistRuntimes: {
+        web_research: createWebResearchRuntime(),
+      },
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "research this",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "google:gemini-2.5-flash", provider: "google" },
+      specialist: "web_research",
+    });
+  });
 });
 
 class FakeProviderRouter {
