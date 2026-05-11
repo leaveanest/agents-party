@@ -42,13 +42,46 @@ describe("Postgres app repositories", () => {
       expect.stringContaining('insert into "work_item_attention_index"'),
     ]);
   });
+
+  it("reads OAuth connections, auth configs, and work-item aggregates", async () => {
+    const pool = new RecordingPool([
+      { payload: { subject: "google-subject" } },
+      { payload: { org: "salesforce-org" } },
+      { payload: { title: "Follow up" } },
+      { payload: { user: "U1" } },
+      { payload: { event: "created" } },
+      { payload: { attention: true } },
+      { payload: { calendar: "primary" } },
+    ]);
+    const oauth = new PostgresOAuthRepository(pool as never);
+    const workItems = new PostgresWorkItemRepository(pool as never);
+
+    await expect(oauth.findGoogleConnection("T1", "U1", "google-subject")).resolves.toEqual({
+      subject: "google-subject",
+    });
+    await expect(oauth.findSalesforceAuthConfig("T1", "org-1")).resolves.toEqual({
+      org: "salesforce-org",
+    });
+    await expect(workItems.getWorkItemAggregate("T1", "W1")).resolves.toEqual({
+      attention: [{ attention: true }],
+      calendarLinks: [{ calendar: "primary" }],
+      events: [{ event: "created" }],
+      item: { title: "Follow up" },
+      participants: [{ user: "U1" }],
+    });
+  });
 });
 
 class RecordingPool {
   readonly queries: Array<{ text: string; values?: unknown[] }> = [];
 
+  constructor(private readonly rows: Array<{ payload: unknown }> = []) {}
+
   async query(text: string, values?: unknown[]) {
     this.queries.push({ text: text.trim().replace(/\s+/gu, " "), values });
+    if (text.includes("select")) {
+      return { rows: this.rows.splice(0, text.includes("where") ? 1 : this.rows.length) };
+    }
     return { rows: [] };
   }
 }

@@ -91,6 +91,10 @@ export class PostgresJsonDocumentRepository<
     return result.rows[0]?.payload;
   }
 
+  async findByKeyPrefix(where: PostgresColumnValues): Promise<TPayload[]> {
+    return this.list(where);
+  }
+
   async delete(key: TKey): Promise<void> {
     await this.pool.query(
       `delete from ${quoteIdentifier(this.table.tableName)}
@@ -109,7 +113,7 @@ export class PostgresJsonDocumentRepository<
     return result.rows[0]?.payload;
   }
 
-  async list(where: Partial<TKey> = {}): Promise<TPayload[]> {
+  async list(where: PostgresColumnValues = {}): Promise<TPayload[]> {
     const entries = Object.entries(where);
     const clauses = entries.map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`);
     const result = await this.pool.query<{ payload: TPayload }>(
