@@ -113,6 +113,14 @@ vp test
 vp pack
 ```
 
+Run TypeScript-managed PostgreSQL migrations:
+
+```bash
+vp run migrate
+```
+
+See [`docs/postgres-typescript-migrations.md`](docs/postgres-typescript-migrations.md) for migration policy and rollout notes.
+
 ### Legacy Python Setup
 
 Use this only while working on legacy Python code before it is removed.

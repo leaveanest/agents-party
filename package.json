@@ -8,6 +8,7 @@
     "build": "vp pack",
     "check": "vp check",
     "dev": "tsx src/main.ts",
+    "migrate": "tsx src/infrastructure/postgres/runMigrations.ts",
     "start": "node dist/main.mjs",
     "test": "vp test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
