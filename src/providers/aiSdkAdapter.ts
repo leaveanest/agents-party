@@ -78,6 +78,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
 
   async generate(request: LlmRequest): Promise<LlmResult> {
     try {
+      assertSupportedResponseFormat(request);
       const result = await generateText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
@@ -107,9 +108,8 @@ export class AiSdkLlmAdapter implements LlmAdapter {
   }
 
   private async *streamResponse(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
-    const errors: unknown[] = [];
-
     try {
+      assertSupportedResponseFormat(request);
       const result = streamText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
@@ -117,61 +117,85 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           aiSdkMessageConversionCapabilitiesForModel(request.model),
         ),
         model: this.resolveModel(request.model),
-        onError({ error }) {
-          errors.push(error);
-        },
         providerOptions: request.providerOptions,
         temperature: request.temperature,
         tools: toAiSdkTools(request.tools),
       });
 
-      for await (const text of result.textStream) {
-        yield {
-          text,
-          type: "text-delta",
-        };
+      let text = "";
+      let finishReason: FinishReason | undefined;
+      let usage: LanguageModelUsage | undefined;
+      let hasError = false;
+      const toolCalls: LlmToolCall[] = [];
+
+      for await (const part of result.fullStream) {
+        switch (part.type) {
+          case "text-delta":
+            text += part.text;
+            yield {
+              text: part.text,
+              type: "text-delta",
+            };
+            break;
+          case "tool-call": {
+            const toolCall = mapToolCall(part);
+            toolCalls.push(toolCall);
+            yield {
+              toolCall,
+              type: "tool-call",
+            };
+            break;
+          }
+          case "finish":
+            finishReason = part.finishReason;
+            usage = part.totalUsage;
+            break;
+          case "error":
+            hasError = true;
+            yield {
+              error: normalizeProviderError(request.model, part.error),
+              type: "error",
+            };
+            break;
+        }
       }
 
-      const [text, finishReason, usage, toolCalls] = await Promise.all([
-        result.text,
-        result.finishReason,
-        result.usage,
-        result.toolCalls,
-      ]);
-
-      for (const toolCall of toolCalls) {
-        yield {
-          toolCall: mapToolCall(toolCall),
-          type: "tool-call",
-        };
+      if (hasError) {
+        return;
       }
 
-      yield {
-        type: "usage",
-        usage: mapUsage(usage),
-      };
+      const mappedUsage = usage === undefined ? undefined : mapUsage(usage);
+      if (mappedUsage !== undefined) {
+        yield {
+          type: "usage",
+          usage: mappedUsage,
+        };
+      }
       yield {
         result: {
           content: text,
-          finishReason: mapFinishReason(finishReason),
-          toolCalls: toolCalls.map(mapToolCall),
-          usage: mapUsage(usage),
+          finishReason: finishReason === undefined ? "unknown" : mapFinishReason(finishReason),
+          toolCalls,
+          usage: mappedUsage,
         },
         type: "done",
       };
-
-      for (const error of errors) {
-        yield {
-          error: normalizeProviderError(request.model, error),
-          type: "error",
-        };
-      }
     } catch (error) {
       yield {
         error: normalizeProviderError(request.model, error),
         type: "error",
       };
     }
+  }
+}
+
+function assertSupportedResponseFormat(request: LlmRequest): void {
+  if (request.responseFormat !== undefined && request.responseFormat.type !== "text") {
+    throw new LlmProviderError(
+      request.model.provider,
+      request.model.id,
+      "AI SDK common adapter currently supports text response format only.",
+    );
   }
 }
 

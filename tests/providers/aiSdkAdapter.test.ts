@@ -131,6 +131,70 @@ describe("AiSdkLlmAdapter", () => {
     ]);
   });
 
+  it("emits streaming errors without a successful done event", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doStream: {
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "stream-start", warnings: [] },
+            { id: "text-1", type: "text-start" },
+            { delta: "Partial", id: "text-1", type: "text-delta" },
+            { error: new Error("stream failed"), type: "error" },
+            { id: "text-1", type: "text-end" },
+            {
+              finishReason: { raw: "stop", unified: "stop" },
+              type: "finish",
+              usage: usage(1, 2),
+            },
+          ],
+        }),
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    const events = [];
+    for await (const event of adapter.stream({ history, model })) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toEqual({ text: "Partial", type: "text-delta" });
+    expect(events[1]).toMatchObject({
+      error: {
+        message: "stream failed",
+        name: "LlmProviderError",
+      },
+      type: "error",
+    });
+  });
+
+  it("rejects structured response formats until the adapter enforces them", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "{}", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(1, 1),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    await expect(
+      adapter.generate({
+        history,
+        model,
+        responseFormat: {
+          type: "json",
+        },
+      }),
+    ).rejects.toThrow("supports text response format only");
+    expect(languageModel.doGenerateCalls).toHaveLength(0);
+  });
+
   it("normalizes provider errors", async () => {
     const languageModel = new MockLanguageModelV3({
       async doGenerate() {
