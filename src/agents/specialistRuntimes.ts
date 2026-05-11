@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { GoogleGenAI } from "@google/genai";
 
 import type { AppSettings } from "../config.js";
 import type { ConversationHistory, JsonValue } from "../domain/messageHistory.js";
 import type { LlmRequest, ModelInfo } from "../providers/contracts.js";
+import { GoogleGenAiMediaGateway } from "../providers/googleGenAiMediaGateway.js";
+import type { MediaGenerationGateway } from "../providers/mediaGenerationGateway.js";
 import type { ProviderRouter } from "../providers/providerRouter.js";
 import type { AgentSpecialist, SlackAgentInvocation } from "./schemas.js";
 
@@ -35,30 +36,6 @@ export type GoogleMapsGateway = {
     radiusMeters?: number;
   }): Promise<GoogleMapsPlace[]>;
   searchPlaces(query: string): Promise<GoogleMapsPlace[]>;
-};
-
-export type GeneratedImageAsset = {
-  dataBase64?: string;
-  mimeType?: string;
-  uri?: string;
-};
-
-export type GeneratedVideoAsset = {
-  dataBase64?: string;
-  mimeType?: string;
-  operationName?: string;
-  status: "generated" | "in_progress";
-  uri?: string;
-};
-
-export type MediaGenerationGateway = {
-  generateImage(input: { model: ModelInfo; prompt: string }): Promise<GeneratedImageAsset>;
-  generateVideo(input: {
-    aspectRatio: "16:9" | "9:16";
-    durationSeconds: number;
-    model: ModelInfo;
-    prompt: string;
-  }): Promise<GeneratedVideoAsset>;
 };
 
 export const webResearchResultSchema = z
@@ -356,56 +333,6 @@ export function createVideoGenerationRuntime(
       structuredResult: structured,
     };
   };
-}
-
-export class GoogleGenAiMediaGateway implements MediaGenerationGateway {
-  private readonly client: GoogleGenAI;
-
-  constructor(apiKey: string) {
-    this.client = new GoogleGenAI({ apiKey });
-  }
-
-  async generateImage(input: { model: ModelInfo; prompt: string }): Promise<GeneratedImageAsset> {
-    const response = await this.client.models.generateImages({
-      config: { numberOfImages: 1 },
-      model: input.model.providerModelId,
-      prompt: input.prompt,
-    });
-    const image = response.generatedImages?.[0]?.image;
-    if (image?.imageBytes === undefined && image?.gcsUri === undefined) {
-      throw new Error("Google image generation did not return an image.");
-    }
-    return {
-      dataBase64: image.imageBytes,
-      mimeType: image.mimeType,
-      uri: image.gcsUri,
-    };
-  }
-
-  async generateVideo(input: {
-    aspectRatio: "16:9" | "9:16";
-    durationSeconds: number;
-    model: ModelInfo;
-    prompt: string;
-  }): Promise<GeneratedVideoAsset> {
-    const operation = await this.client.models.generateVideos({
-      config: {
-        aspectRatio: input.aspectRatio,
-        durationSeconds: input.durationSeconds,
-        numberOfVideos: 1,
-      },
-      model: input.model.providerModelId,
-      prompt: input.prompt,
-    });
-    const video = operation.response?.generatedVideos?.[0]?.video;
-    return {
-      dataBase64: video?.videoBytes,
-      mimeType: video?.mimeType,
-      operationName: operation.name,
-      status: operation.done === true ? "generated" : "in_progress",
-      uri: video?.uri,
-    };
-  }
 }
 
 export class FetchGoogleMapsGateway implements GoogleMapsGateway {

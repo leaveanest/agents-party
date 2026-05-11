@@ -1,10 +1,12 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs, StringIndexed } from "@slack/bolt";
 
-import type { AgentRunner } from "../agents/runner.js";
+import type { AgentRunner, AgentRunnerResult } from "../agents/runner.js";
+import type { JsonValue } from "../domain/messageHistory.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
 
 type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & AllMiddlewareArgs;
+type SlackClient = SlackEventArgs<"app_mention">["client"];
 
 export type SlackAgentRoutingRepository = {
   activateThreadAgent(input: {
@@ -90,6 +92,7 @@ async function handleMention(
   }
 
   const threadTs = readString(event, "thread_ts") ?? event.ts;
+  let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
     const result = await runner.run({
@@ -101,6 +104,7 @@ async function handleMention(
       userId: event.user,
       viewerContextChannelIds: [event.channel],
     });
+    runnerResult = result;
     text = result.message;
     if (options.routingRepository !== undefined) {
       try {
@@ -129,11 +133,7 @@ async function handleMention(
     text = "I couldn't complete that request. Please try again in a moment.";
   }
 
-  await client.chat.postMessage({
-    channel: event.channel,
-    text,
-    thread_ts: threadTs,
-  });
+  await postAgentResult({ channel: event.channel, client, result: runnerResult, text, threadTs });
 }
 
 async function handleMessage(
@@ -171,6 +171,7 @@ async function handleMessage(
     return;
   }
 
+  let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
     const specialist = stringField(thread, "agent_id");
@@ -185,6 +186,7 @@ async function handleMessage(
       userId: event.user,
       viewerContextChannelIds: [event.channel],
     });
+    runnerResult = result;
     text = result.message;
     try {
       await options.routingRepository.activateThreadAgent({
@@ -211,11 +213,7 @@ async function handleMessage(
     text = "I couldn't complete that request. Please try again in a moment.";
   }
 
-  await client.chat.postMessage({
-    channel: event.channel,
-    text,
-    thread_ts: threadTs,
-  });
+  await postAgentResult({ channel: event.channel, client, result: runnerResult, text, threadTs });
 }
 
 async function handleReactionAdded(
@@ -339,6 +337,79 @@ async function readThreadTextMessages(
   }
 }
 
+async function postAgentResult(input: {
+  channel: string;
+  client: SlackClient;
+  result: AgentRunnerResult | undefined;
+  text: string;
+  threadTs: string;
+}): Promise<void> {
+  const media = readGeneratedMedia(input.result?.structuredResult);
+  if (media?.dataBase64 !== undefined) {
+    await input.client.filesUploadV2({
+      channel_id: input.channel,
+      file: Buffer.from(media.dataBase64, "base64"),
+      filename: mediaFilename(media),
+      initial_comment: input.text,
+      thread_ts: input.threadTs,
+    });
+    return;
+  }
+
+  const suffix = media?.uri ?? media?.operationName;
+  await input.client.chat.postMessage({
+    channel: input.channel,
+    text: suffix === undefined ? input.text : `${input.text}\n${suffix}`,
+    thread_ts: input.threadTs,
+  });
+}
+
+function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const media = value.media;
+  if (!isRecord(media)) {
+    return undefined;
+  }
+  if (media.kind !== "image" && media.kind !== "video") {
+    return undefined;
+  }
+  return {
+    dataBase64: readOptionalString(media.dataBase64),
+    kind: media.kind,
+    mimeType: readOptionalString(media.mimeType),
+    operationName: readOptionalString(media.operationName),
+    uri: readOptionalString(media.uri),
+  };
+}
+
+type GeneratedSlackMedia = {
+  dataBase64?: string;
+  kind: "image" | "video";
+  mimeType?: string;
+  operationName?: string;
+  uri?: string;
+};
+
+function mediaFilename(media: GeneratedSlackMedia): string {
+  const extension = mediaExtension(media);
+  return `generated-${media.kind}.${extension}`;
+}
+
+function mediaExtension(media: GeneratedSlackMedia): string {
+  if (media.mimeType === "image/jpeg") {
+    return "jpg";
+  }
+  if (media.mimeType === "image/webp") {
+    return "webp";
+  }
+  if (media.mimeType === "video/mp4") {
+    return "mp4";
+  }
+  return media.kind === "image" ? "png" : "mp4";
+}
+
 async function fetchSingleMessage(
   client: SlackEventArgs<"reaction_added">["client"],
   channelId: string,
@@ -436,6 +507,10 @@ function escapeRegExp(value: string): string {
 function readString(value: StringIndexed, field: string): string | undefined {
   const fieldValue = value[field];
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function hasStringField<TField extends string>(
