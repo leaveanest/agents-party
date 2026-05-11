@@ -342,6 +342,36 @@ describe("specialist runtimes", () => {
       specialist: "image_generation",
     });
   });
+
+  it("AgentRunner wraps missing native media model failures with attempted model id", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({ content: "generic should not run" }),
+      specialistRuntimes: {
+        image_generation: createImageGenerationRuntime("missing:image-model", {
+          async generateImage() {
+            throw new Error("Unexpected generation call.");
+          },
+          async generateVideo() {
+            throw new Error("Unexpected video generation call.");
+          },
+        }),
+      },
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "draw an image",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "missing:image-model" },
+      specialist: "image_generation",
+    });
+  });
 });
 
 class FakeProviderRouter {

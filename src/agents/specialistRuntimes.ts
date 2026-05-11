@@ -16,7 +16,7 @@ export type AgentSpecialistRuntimeInput = {
 
 export type AgentSpecialistRuntimeResult = {
   message: string;
-  model?: Pick<ModelInfo, "id" | "provider">;
+  model?: AgentSpecialistRuntimeModelTrace;
   raw?: unknown;
   structuredResult: JsonValue;
 };
@@ -25,10 +25,15 @@ export type AgentSpecialistRuntime = (
   input: AgentSpecialistRuntimeInput,
 ) => Promise<AgentSpecialistRuntimeResult>;
 
+export type AgentSpecialistRuntimeModelTrace = {
+  id: string;
+  provider?: ModelInfo["provider"];
+};
+
 export class AgentSpecialistRuntimeError extends Error {
   constructor(
     readonly specialist: AgentSpecialist,
-    readonly model: Pick<ModelInfo, "id" | "provider"> | undefined,
+    readonly model: AgentSpecialistRuntimeModelTrace | undefined,
     cause: unknown,
   ) {
     super(`Native specialist runtime failed for ${specialist}.`, { cause });
@@ -251,7 +256,7 @@ export function createImageGenerationRuntime(
     } catch (error) {
       throw new AgentSpecialistRuntimeError(
         "image_generation",
-        model === undefined ? undefined : modelTrace(model),
+        model === undefined ? { id: modelId } : modelTrace(model),
         error,
       );
     }
@@ -311,7 +316,7 @@ export function createVideoGenerationRuntime(
     } catch (error) {
       throw new AgentSpecialistRuntimeError(
         "video_generation",
-        model === undefined ? undefined : modelTrace(model),
+        model === undefined ? { id: modelId } : modelTrace(model),
         error,
       );
     }
@@ -391,7 +396,7 @@ async function withRuntimeContext(
   }
 }
 
-function modelTrace(model: ModelInfo): Pick<ModelInfo, "id" | "provider"> {
+function modelTrace(model: ModelInfo): AgentSpecialistRuntimeModelTrace {
   return {
     id: model.id,
     provider: model.provider,

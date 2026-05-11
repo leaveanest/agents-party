@@ -24,16 +24,21 @@ import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 export type AgentRunnerResult = {
   decision: AgentRouterDecision;
   message: string;
-  model?: Pick<ModelInfo, "id" | "provider">;
+  model?: AgentRunnerModelTrace;
   raw?: unknown;
   structuredResult?: JsonValue;
   toolResults: AgentToolResult[];
 };
 
+export type AgentRunnerModelTrace = {
+  id: string;
+  provider?: ModelInfo["provider"];
+};
+
 export class AgentRunnerExecutionError extends Error {
   constructor(
     readonly specialist: AgentSpecialist,
-    readonly model: Pick<ModelInfo, "id" | "provider"> | undefined,
+    readonly model: AgentRunnerModelTrace | undefined,
     cause: unknown,
   ) {
     super(`TypeScript AgentRunner failed for ${specialist}: ${errorMessage(cause)}`, { cause });
@@ -329,16 +334,14 @@ function normalizeRunnerResult(
   };
 }
 
-function modelTrace(model: ModelInfo): Pick<ModelInfo, "id" | "provider"> {
+function modelTrace(model: ModelInfo): AgentRunnerModelTrace {
   return {
     id: model.id,
     provider: model.provider,
   };
 }
 
-function modelTraceFromRuntimeError(
-  error: unknown,
-): Pick<ModelInfo, "id" | "provider"> | undefined {
+function modelTraceFromRuntimeError(error: unknown): AgentRunnerModelTrace | undefined {
   return error instanceof AgentSpecialistRuntimeError ? error.model : undefined;
 }
 
