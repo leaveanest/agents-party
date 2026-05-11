@@ -1,14 +1,19 @@
-output "cloud_run_service_url" {
-  description = "Public Cloud Run service URL."
-  value       = module.cloud_run_service.service_url
+output "heroku_app_name" {
+  description = "Heroku app name."
+  value       = heroku_app.app.name
 }
 
-output "migration_job_name" {
-  description = "Cloud Run job name used for Alembic migrations."
-  value       = module.cloud_run_service.migration_job_name
+output "heroku_app_url" {
+  description = "Heroku app URL."
+  value       = heroku_app.app.web_url
 }
 
-output "cloud_sql_instance_connection_name" {
-  description = "Cloud SQL instance connection name."
-  value       = module.cloud_sql.instance_connection_name
+output "heroku_postgres_addon_name" {
+  description = "Heroku Postgres add-on name."
+  value       = heroku_addon.postgres.name
+}
+
+output "heroku_inference_addon_name" {
+  description = "Heroku Managed Inference and Agents add-on name."
+  value       = heroku_addon.inference.name
 }

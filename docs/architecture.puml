@@ -13,9 +13,10 @@ cloud "Slack" as slack
 cloud "Google Identity" as google_identity
 cloud "Google Maps Platform" as google_maps_platform
 cloud "Cloud Translation API" as cloud_translation
+cloud "Vertex AI / Google GenAI" as vertex_ai
 
-package "Google Cloud Project" {
-  rectangle "Cloud Run Service" as cloud_run {
+package "Heroku" {
+  rectangle "Heroku App\nPython buildpack + Procfile" as heroku_app {
     package "agents-party Application" {
       component "FastAPI App" as fastapi_app
       component "Slack Bolt Gateway\nPOST /slack/events" as slack_gateway
@@ -33,10 +34,10 @@ package "Google Cloud Project" {
     }
   }
 
-  rectangle "Secret Manager" as secret_manager
-  rectangle "Vertex AI" as vertex_ai
+  rectangle "Release Phase\nalembic upgrade head" as release_phase
+  rectangle "Managed Inference and Agents Add-on\nINFERENCE_KEY / INFERENCE_URL" as heroku_inference
 
-  database "Cloud SQL for PostgreSQL" as postgres {
+  database "Heroku Postgres Add-on\nDATABASE_URL" as postgres {
     folder "agents" as pg_agents
     folder "workspace_app_settings" as pg_workspace_settings
     folder "channel_app_settings" as pg_channel_settings
@@ -49,12 +50,11 @@ package "Google Cloud Project" {
 }
 
 slack_user --> slack : use app
-slack --> cloud_run : HTTPS events and interactions
-cloud_run --> fastapi_app
+slack --> heroku_app : HTTPS events and interactions
+heroku_app --> fastapi_app
 fastapi_app --> slack_gateway : /slack/events
 fastapi_app --> google_oauth_router : /oauth/google/*
-
-secret_manager --> cloud_run : runtime secrets and config
+release_phase --> postgres : apply Alembic migrations
 
 slack_gateway --> slack_handlers
 slack_handlers --> agent_routing : mentions and active-thread replies
@@ -68,6 +68,7 @@ agent_routing --> slack : fetch thread history / post replies / upload files
 
 agent_routing --> agent_router : Slack invocation with full context
 agent_router --> vertex_ai : decide direct reply or delegation
+agent_router --> heroku_inference : optional Heroku-hosted model calls
 
 agent_router --> work_manager
 agent_router --> web_research
@@ -104,15 +105,22 @@ Stored data:
 - short-lived Google OAuth state documents
 end note
 
-note top of cloud_run
-Cloud Run hosts one FastAPI service for Slack events,
-health checks, and Google OAuth browser callbacks.
-Schema migrations run separately via a Cloud Run Job.
+note top of heroku_app
+Heroku hosts one FastAPI service for Slack events,
+health checks, and OAuth browser callbacks.
+The Procfile web process binds Uvicorn to Heroku's PORT.
 end note
 
 note right of postgres
-Production relational storage runs on Cloud SQL for PostgreSQL
-and is deployed through terraform/environments/dev/.
+Production relational storage runs on Heroku Postgres.
+Heroku app, add-ons, buildpack, and non-secret config are
+deployed through terraform/environments/dev/.
+end note
+
+note bottom of heroku_app
+Secret config vars are injected outside Terraform with
+heroku config:set or CI secrets to avoid storing secret values
+in Terraform state.
 end note
 
 @enduml

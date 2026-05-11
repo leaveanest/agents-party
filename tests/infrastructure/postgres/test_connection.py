@@ -76,6 +76,33 @@ def test_build_database_engine_prefers_database_url_over_cloud_sql() -> None:
     assert engine.url.drivername == "sqlite+pysqlite"
 
 
+def test_build_database_engine_normalizes_heroku_postgres_url() -> None:
+    """Verify Heroku Postgres URLs are accepted by SQLAlchemy.
+
+    Returns:
+        None.
+    """
+    engine = connection.build_database_engine(
+        database_url="postgres://user:password@example.com:5432/agents_party",
+    )
+
+    assert engine.url.drivername == "postgresql+psycopg"
+    assert str(engine.url).startswith("postgresql+psycopg://")
+
+
+def test_build_database_engine_adds_psycopg_driver_to_postgresql_url() -> None:
+    """Verify direct PostgreSQL URLs use the installed psycopg driver.
+
+    Returns:
+        None.
+    """
+    engine = connection.build_database_engine(
+        database_url="postgresql://user:password@example.com:5432/agents_party",
+    )
+
+    assert engine.url.drivername == "postgresql+psycopg"
+
+
 def test_build_database_engine_requires_complete_configuration() -> None:
     """Verify engine construction rejects incomplete database settings.
 

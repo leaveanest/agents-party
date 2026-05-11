@@ -33,6 +33,24 @@ def _resolve_cloud_sql_ip_type(ip_type: str) -> IPTypes:
     raise ValueError("CLOUD_SQL_IP_TYPE must be one of PUBLIC, PRIVATE, or PSC.")
 
 
+def normalize_database_url(database_url: str) -> str:
+    """Return a SQLAlchemy-compatible database URL.
+
+    Args:
+        database_url: Raw database URL loaded from configuration. Heroku
+            Postgres may provide a `postgres://` URL, and manually supplied URLs
+            may omit the psycopg driver.
+
+    Returns:
+        Database URL normalized for SQLAlchemy engine creation.
+    """
+    if database_url.startswith("postgres://"):
+        return "postgresql+psycopg://" + database_url.removeprefix("postgres://")
+    if database_url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + database_url.removeprefix("postgresql://")
+    return database_url
+
+
 @lru_cache(maxsize=1)
 def build_cloud_sql_connector() -> Connector:
     """Build and cache the shared Cloud SQL connector.
@@ -69,7 +87,11 @@ def build_database_engine(
             connector settings are provided.
     """
     if database_url:
-        return create_engine(database_url, future=True, pool_pre_ping=True)
+        return create_engine(
+            normalize_database_url(database_url),
+            future=True,
+            pool_pre_ping=True,
+        )
 
     if (
         not cloud_sql_instance_connection_name
@@ -133,4 +155,5 @@ __all__ = [
     "build_cloud_sql_connector",
     "build_database_engine",
     "build_database_engine_from_settings",
+    "normalize_database_url",
 ]
