@@ -2,6 +2,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 
 import type { AppSettings } from "./config.js";
 import { buildHealthPayload } from "./http/health.js";
+import type { SlackGateway } from "./slack/app.js";
+
+export type AppServerDependencies = {
+  slackGateway?: SlackGateway;
+};
 
 /**
  * Create the HTTP server for the TypeScript application runtime.
@@ -9,9 +14,12 @@ import { buildHealthPayload } from "./http/health.js";
  * @param settings - Runtime settings used by request handlers.
  * @returns Node HTTP server exposing the initial app endpoints.
  */
-export function createAppServer(settings: AppSettings): Server {
+export function createAppServer(
+  settings: AppSettings,
+  dependencies: AppServerDependencies = {},
+): Server {
   return createServer((request, response) => {
-    handleRequest(request, response, settings);
+    handleRequest(request, response, settings, dependencies);
   });
 }
 
@@ -19,6 +27,7 @@ function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   settings: AppSettings,
+  dependencies: AppServerDependencies,
 ): void {
   const method = request.method ?? "GET";
   const url = parseRequestUrl(request.url);
@@ -35,10 +44,30 @@ function handleRequest(
     return;
   }
 
+  if (isSlackRoute(url.pathname, settings)) {
+    if (dependencies.slackGateway === undefined) {
+      sendJson(response, 503, {
+        error: "slack_not_configured",
+        message: "Slack ingress is not configured for this process.",
+      });
+      return;
+    }
+    dependencies.slackGateway.handle(request, response);
+    return;
+  }
+
   sendJson(response, 404, {
     error: "not_found",
     message: "Route not found.",
   });
+}
+
+function isSlackRoute(pathname: string, settings: AppSettings): boolean {
+  return (
+    pathname === settings.slackEventsPath ||
+    pathname === settings.slackInstallPath ||
+    pathname === settings.slackOAuthRedirectPath
+  );
 }
 
 function parseRequestUrl(rawUrl: string | undefined): URL | undefined {

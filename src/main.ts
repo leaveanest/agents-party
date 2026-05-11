@@ -1,8 +1,12 @@
 import { loadSettings } from "./config.js";
 import { createAppServer } from "./server.js";
+import { createSlackGateway } from "./slack/app.js";
 
 const settings = loadSettings();
-const server = createAppServer(settings);
+const slackGateway = settings.slackEnabled ? createSlackGateway(settings) : undefined;
+const server = createAppServer(settings, {
+  slackGateway,
+});
 
 server.listen(settings.appPort, settings.appHost, () => {
   console.log(
@@ -12,10 +16,13 @@ server.listen(settings.appPort, settings.appHost, () => {
 
 function shutdown(signal: NodeJS.Signals): void {
   console.log(`Received ${signal}; shutting down.`);
-  server.close((error) => {
+  server.close(async (error) => {
     if (error) {
       console.error(error);
       process.exitCode = 1;
+    }
+    if (slackGateway !== undefined) {
+      await slackGateway.close();
     }
     process.exit();
   });
