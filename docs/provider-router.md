@@ -1,0 +1,43 @@
+# Provider Router
+
+`src/providers/` owns the TypeScript LLM provider boundary. Slack handlers and agent runtimes choose a configured model, but they do not infer providers from model names or call provider SDKs directly.
+
+## Contracts
+
+- `LlmProvider` enumerates the target providers: OpenAI, Azure OpenAI, Anthropic, Google, Bedrock, Groq, NVIDIA, PLaMo, xAI, Dify, and LiteLLM.
+- `ModelInfo` is the registry record for a model. It stores provider, provider-native model id, optional legacy aliases, and explicit capabilities.
+- `LlmCapability` represents behavior the application must check before invocation: text, streaming, image input, file input, audio input, tool calling, structured output, web search, image generation, thinking, and embeddings.
+- `LlmRequest`, `LlmResult`, `LlmStreamEvent`, and `LlmAdapter` are repository-owned contracts. They intentionally do not expose Slack SDK or AI SDK message history types.
+
+The domain history remains `ConversationHistory`. AI SDK `ModelMessage[]` conversion happens only at provider invocation boundaries.
+
+## Model Resolution
+
+`ProviderRouter.resolveModel` resolves configured model ids with this precedence:
+
+1. thread model
+2. channel model
+3. workspace model
+
+If no model is configured, resolution fails. The router does not default to OpenAI, Gemini, or any other provider.
+
+Legacy Slack Timeline-style model ids can be registered as aliases, for example `azure.gpt-4o` or `groq.llama-3.1-70b-versatile`, but aliases resolve to explicit registry records. Unknown model names fail until a registry entry is added.
+
+## Capability Gate
+
+`ProviderRouter.generate` and `ProviderRouter.stream` derive required capabilities from the request before adapter invocation:
+
+- image parts require `image_input`
+- file parts require `file_input`
+- audio parts require `audio_input`
+- tools require `tool_calling`
+- JSON response format requires `structured_output`
+- streaming calls require `streaming`
+
+Callers can also pass `requiredCapabilities` for provider-specific features such as web search, image generation, thinking, or embeddings. Missing capabilities are rejected before provider adapters run.
+
+## Adding A Provider Or Model
+
+To add a new model, add a `ModelInfo` registry entry with explicit capabilities and aliases if needed. To add a new provider implementation, add one `LlmAdapter` for that provider and register it with `ProviderRouter`.
+
+This keeps provider expansion local to `src/providers/`: Slack handlers and agent orchestration should not need provider-specific branches.

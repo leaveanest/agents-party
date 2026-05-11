@@ -10,6 +10,7 @@ import type {
   ToolResultOutput,
   UserMessagePart,
 } from "../domain/messageHistory.js";
+import type { ModelInfo } from "./contracts.js";
 
 export type AttachmentConversionMode = "native" | "text" | "reject";
 
@@ -30,6 +31,16 @@ export const nativeMultimodalCapabilities: AiSdkMessageConversionCapabilities = 
   files: "native",
   images: "native",
 };
+
+export function aiSdkMessageConversionCapabilitiesForModel(
+  model: ModelInfo,
+): AiSdkMessageConversionCapabilities {
+  return {
+    audio: model.capabilities.includes("audio_input") ? "native" : "text",
+    files: model.capabilities.includes("file_input") ? "native" : "text",
+    images: model.capabilities.includes("image_input") ? "native" : "text",
+  };
+}
 
 export class UnsupportedAttachmentError extends Error {
   constructor(
