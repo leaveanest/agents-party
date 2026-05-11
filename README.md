@@ -17,6 +17,9 @@ The TypeScript runtime currently exposes:
 The TypeScript Slack ingress initializes Bolt for JavaScript/TypeScript, validates Slack signatures through Bolt, acknowledges Events API deliveries, and suppresses duplicate event deliveries by Slack `event_id`.
 See [`docs/slack-typescript-ingress.md`](docs/slack-typescript-ingress.md) for the current ingress boundary.
 
+The TypeScript domain history model represents text, image, file/PDF, audio, assistant, and tool-result events without storing AI SDK `ModelMessage[]`.
+See [`docs/message-history-model.md`](docs/message-history-model.md) for the conversion boundary.
+
 Agent routing, specialist execution, full App Home settings, Google/Salesforce OAuth routes, and provider adapters are planned migration work and are not yet available in the TypeScript runtime.
 
 ## Legacy Python Capabilities
