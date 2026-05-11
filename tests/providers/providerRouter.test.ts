@@ -130,6 +130,36 @@ describe("ProviderRouter", () => {
       }),
     ).rejects.toThrow(MissingProviderAdapterError);
   });
+
+  it("skips generate-only adapters when routing streaming requests", async () => {
+    const generateOnlyAdapter: LlmAdapter = {
+      async generate() {
+        return { content: "generate-only" };
+      },
+      provider: "openai",
+    };
+    const streamCapableAdapter: LlmAdapter = {
+      async generate() {
+        return { content: "stream-capable" };
+      },
+      provider: "openai",
+      async *stream() {
+        yield {
+          result: { content: "streamed" },
+          type: "done",
+        };
+      },
+    };
+    const router = new ProviderRouter([generateOnlyAdapter, streamCapableAdapter], registry());
+    const model = router.resolveModel({ workspaceModelId: "example:multimodal" }).model;
+
+    const events = [];
+    for await (const event of router.stream({ history: emptyHistory, model })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([{ result: { content: "streamed" }, type: "done" }]);
+  });
 });
 
 function registry(): ModelRegistry {

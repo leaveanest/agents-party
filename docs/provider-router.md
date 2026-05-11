@@ -56,3 +56,17 @@ This keeps provider expansion local to `src/providers/`: Slack handlers and agen
 The adapter converts repository `ConversationHistory` to AI SDK `ModelMessage[]` only at invocation time, maps AI SDK generation and streaming results back to `LlmResult` and `LlmStreamEvent`, and wraps provider failures as `LlmProviderError`.
 
 AWS Bedrock and Dify are intentionally left for native adapter lanes because their production integrations need provider-specific configuration and behavior outside this common path.
+
+## Native Provider Escape Hatches
+
+`createNativeProviderAdapters()` registers explicit native-provider stubs under the same `LlmAdapter` interface. These adapters are selected by required capability, not model-name checks, and currently return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added.
+
+Native stubs currently cover:
+
+- OpenAI Responses/native tools for `web_search` and `image_generation`
+- Anthropic thinking and web search
+- Gemini grounding and file APIs
+- AWS Bedrock Claude
+- Dify endpoint invocation
+
+This makes unsupported combinations fail before Slack or agent runtimes need provider-specific branches. The error message names the provider, model, requested capability, and the missing native path.

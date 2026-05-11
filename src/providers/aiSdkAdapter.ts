@@ -28,6 +28,7 @@ import {
 } from "./aiSdkMessageConverter.js";
 import type {
   LlmAdapter,
+  LlmCapability,
   LlmProvider,
   LlmRequest,
   LlmResult,
@@ -101,6 +102,16 @@ export class AiSdkLlmAdapter implements LlmAdapter {
     } catch (error) {
       throw normalizeProviderError(request.model, error);
     }
+  }
+
+  supports(_request: LlmRequest, requiredCapabilities: readonly LlmCapability[]): boolean {
+    if (
+      _request.model.provider === "google" &&
+      requiredCapabilities.some((capability) => googleNativeOnlyCapabilities.has(capability))
+    ) {
+      return false;
+    }
+    return !requiredCapabilities.some((capability) => nativeOnlyCapabilities.has(capability));
   }
 
   stream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
@@ -188,6 +199,15 @@ export class AiSdkLlmAdapter implements LlmAdapter {
     }
   }
 }
+
+const nativeOnlyCapabilities = new Set<LlmCapability>([
+  "embeddings",
+  "image_generation",
+  "thinking",
+  "web_search",
+]);
+
+const googleNativeOnlyCapabilities = new Set<LlmCapability>(["file_input"]);
 
 function assertSupportedResponseFormat(request: LlmRequest): void {
   if (request.responseFormat !== undefined && request.responseFormat.type !== "text") {

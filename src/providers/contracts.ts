@@ -117,5 +117,6 @@ export type LlmStreamEvent =
 export type LlmAdapter = {
   generate(request: LlmRequest): Promise<LlmResult>;
   provider: LlmProvider;
+  supports?(request: LlmRequest, requiredCapabilities: readonly LlmCapability[]): boolean;
   stream?(request: LlmRequest): AsyncIterable<LlmStreamEvent>;
 };
