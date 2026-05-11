@@ -95,6 +95,19 @@ export class PostgresJsonDocumentRepository<
     return this.list(where);
   }
 
+  async deleteWhere(where: PostgresColumnValues): Promise<void> {
+    const entries = Object.entries(where);
+    if (entries.length === 0) {
+      throw new Error("deleteWhere requires at least one predicate.");
+    }
+    const clauses = entries.map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`);
+    await this.pool.query(
+      `delete from ${quoteIdentifier(this.table.tableName)}
+       where ${clauses.join(" and ")}`,
+      entries.map(([, value]) => value),
+    );
+  }
+
   async delete(key: TKey): Promise<void> {
     await this.pool.query(
       `delete from ${quoteIdentifier(this.table.tableName)}

@@ -225,7 +225,8 @@ Legacy Python deployments used Alembic migrations with the same value. TypeScrip
 DATABASE_URL=postgres://...
 ```
 
-For local development and one-off verification, use a direct PostgreSQL URL with the SQLAlchemy driver prefix:
+Legacy Python-only SQLAlchemy commands used a driver-prefixed URL. Do not use this value with
+the TypeScript `vp run migrate` command or `pg` repositories:
 
 ```bash
 DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/agents_party

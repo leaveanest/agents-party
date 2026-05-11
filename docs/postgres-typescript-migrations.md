@@ -9,6 +9,7 @@ vp run migrate
 ```
 
 `DATABASE_URL` must point at the target PostgreSQL database. Applied migrations are recorded in `schema_migrations`.
+The runner takes a transaction-scoped PostgreSQL advisory lock before reading or applying migrations, so concurrent deploy hooks serialize instead of racing on the `schema_migrations` primary key.
 
 If a database already contains Alembic metadata, the TypeScript migration runner refuses to baseline it by default. After validating that the existing schema is at the expected Alembic head, set:
 
@@ -36,3 +37,5 @@ Before Python removal:
 4. Take a production backup before running migrations in production.
 
 Rollback is database-backup based for destructive cutover work. These TypeScript migrations are additive/idempotent and do not drop legacy tables.
+
+Set `TEST_DATABASE_URL` to run the gated PostgreSQL integration test that applies the TypeScript migrations in an isolated schema and round-trips a JSON-backed repository through `pg`.
