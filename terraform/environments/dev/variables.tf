@@ -16,11 +16,11 @@ variable "heroku_stack" {
 }
 
 variable "heroku_buildpacks" {
-  description = "Classic buildpacks used by the Heroku app. The Active Storage Preview buildpack provides ffmpeg before Python dependencies are installed."
+  description = "Classic buildpacks used by the Heroku app. The Active Storage Preview buildpack provides ffmpeg before Node dependencies are installed."
   type        = list(string)
   default = [
     "https://github.com/heroku/heroku-buildpack-activestorage-preview",
-    "heroku/python",
+    "heroku/nodejs",
   ]
 }
 
