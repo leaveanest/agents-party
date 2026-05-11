@@ -28,7 +28,7 @@ describe("createAgentSlackHandlers", () => {
       },
       event: {
         channel: "C1",
-        text: "<@B1> hello",
+        text: "<@B1> assign this to <@U123>",
         ts: "1712345678.000100",
         user: "U1",
       },
@@ -38,7 +38,7 @@ describe("createAgentSlackHandlers", () => {
     expect(posts).toEqual([
       expect.objectContaining({
         channel: "C1",
-        text: expect.stringContaining('"text":"hello"'),
+        text: expect.stringContaining('"text":"assign this to <@U123>"'),
         thread_ts: "1712345678.000100",
       }),
     ]);

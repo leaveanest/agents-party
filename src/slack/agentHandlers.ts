@@ -66,7 +66,7 @@ async function handleMention(
     channelId: event.channel,
     messageTs: event.ts,
     teamId,
-    text: stripBotMention(readString(event, "text") ?? ""),
+    text: stripFirstBotMention(readString(event, "text") ?? ""),
     threadTs: readString(event, "thread_ts") ?? event.ts,
     userId: event.user,
     viewerContextChannelIds: [event.channel],
@@ -86,8 +86,8 @@ function readTeamId(body: unknown, event: StringIndexed): string | undefined {
   return readString(event, "team");
 }
 
-function stripBotMention(text: string): string {
-  return text.replace(/<@[A-Z0-9]+>\s*/gu, "").trim();
+function stripFirstBotMention(text: string): string {
+  return text.replace(/^\s*<@[A-Z0-9]+>\s*/u, "").trim();
 }
 
 function readString(value: StringIndexed, field: string): string | undefined {
