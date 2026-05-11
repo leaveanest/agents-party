@@ -5,6 +5,7 @@ export type AppSettings = {
   appName: string;
   appPort: number;
   databaseUrl: string | undefined;
+  imageGenerationModelId: string;
   googleOAuthCallbackPath: string;
   googleOAuthCallbackUrl: string;
   googleOAuthClientId: string | undefined;
@@ -15,6 +16,7 @@ export type AppSettings = {
   googleOAuthStartPath: string;
   googleTokenEncryptionKey: string | undefined;
   googleMapsApiKey: string | undefined;
+  videoGenerationModelId: string;
   slackBotToken: string | undefined;
   slackClientId: string | undefined;
   slackClientSecret: string | undefined;
@@ -39,6 +41,8 @@ export type AppSettings = {
 
 const DEFAULT_PORT = 8000;
 const DEFAULT_AGENT_MODEL_ID = "google:gemini-2.5-flash";
+const DEFAULT_IMAGE_GENERATION_MODEL_ID = "google:gemini-2.5-flash-image";
+const DEFAULT_VIDEO_GENERATION_MODEL_ID = "google:veo-3.1-fast-generate-001";
 const DEFAULT_SLACK_SCOPES = [
   "app_mentions:read",
   "channels:history",
@@ -122,6 +126,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     appName: env.APP_NAME ?? "agents-party",
     appPort: parsePort(env.PORT ?? env.APP_PORT, DEFAULT_PORT),
     databaseUrl,
+    imageGenerationModelId:
+      readText(env.IMAGE_GENERATION_MODEL) ?? DEFAULT_IMAGE_GENERATION_MODEL_ID,
     googleOAuthCallbackPath,
     googleOAuthCallbackUrl: buildCallbackUrl(googleOAuthRedirectBaseUrl, googleOAuthCallbackPath),
     googleOAuthClientId,
@@ -132,6 +138,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     googleOAuthStartPath,
     googleTokenEncryptionKey,
     googleMapsApiKey,
+    videoGenerationModelId:
+      readText(env.VIDEO_GENERATION_MODEL) ?? DEFAULT_VIDEO_GENERATION_MODEL_ID,
     slackBotToken,
     slackClientId,
     slackClientSecret,

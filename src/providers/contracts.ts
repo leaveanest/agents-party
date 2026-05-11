@@ -29,6 +29,7 @@ export const LlmCapabilityId = {
   Text: "text",
   Thinking: "thinking",
   ToolCalling: "tool_calling",
+  VideoGeneration: "video_generation",
   WebSearch: "web_search",
 } as const;
 
@@ -78,10 +79,16 @@ export type LlmUsage = {
   totalTokens?: number;
 };
 
+export type LlmSource = {
+  title?: string;
+  url: string;
+};
+
 export type LlmResult = {
   content: string;
   finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error" | "unknown";
   raw?: unknown;
+  sources?: readonly LlmSource[];
   toolCalls?: readonly LlmToolCall[];
   usage?: LlmUsage;
 };

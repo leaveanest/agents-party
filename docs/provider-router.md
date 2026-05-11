@@ -6,7 +6,7 @@
 
 - `LlmProvider` enumerates the target providers: OpenAI, Azure OpenAI, Anthropic, Google, Bedrock, Groq, NVIDIA, PLaMo, xAI, Dify, and LiteLLM.
 - `ModelInfo` is the registry record for a model. It stores provider, provider-native model id, optional legacy aliases, and explicit capabilities.
-- `LlmCapability` represents behavior the application must check before invocation: text, streaming, image input, file input, audio input, tool calling, structured output, web search, image generation, thinking, and embeddings.
+- `LlmCapability` represents behavior the application must check before invocation: text, streaming, image input, file input, audio input, tool calling, structured output, web search, image generation, video generation, thinking, and embeddings.
 - `LlmRequest`, `LlmResult`, `LlmStreamEvent`, and `LlmAdapter` are repository-owned contracts. They intentionally do not expose Slack SDK or AI SDK message history types.
 
 The domain history remains `ConversationHistory`. AI SDK `ModelMessage[]` conversion happens only at provider invocation boundaries.

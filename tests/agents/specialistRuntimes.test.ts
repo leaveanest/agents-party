@@ -11,10 +11,22 @@ import type { LlmRequest, LlmResult, ModelInfo } from "../../src/providers/contr
 import { ModelRegistry } from "../../src/providers/modelRegistry.js";
 
 const model: ModelInfo = {
-  capabilities: ["text", "web_search", "image_generation"],
+  capabilities: ["text", "web_search"],
   id: "google:gemini-2.5-flash",
   provider: "google",
   providerModelId: "gemini-2.5-flash",
+};
+const imageModel: ModelInfo = {
+  capabilities: ["image_generation"],
+  id: "google:gemini-2.5-flash-image",
+  provider: "google",
+  providerModelId: "gemini-2.5-flash-image",
+};
+const videoModel: ModelInfo = {
+  capabilities: ["video_generation"],
+  id: "google:veo-3.1-fast-generate-001",
+  provider: "google",
+  providerModelId: "veo-3.1-fast-generate-001",
 };
 
 describe("specialist runtimes", () => {
@@ -44,6 +56,12 @@ describe("specialist runtimes", () => {
 
   it("returns typed Google Maps results from the maps gateway", async () => {
     const runtime = createGoogleMapsRuntime({
+      async computeRoute() {
+        throw new Error("Unexpected route call.");
+      },
+      async searchNearby() {
+        throw new Error("Unexpected nearby call.");
+      },
       async searchPlaces() {
         return [
           {
@@ -69,13 +87,44 @@ describe("specialist runtimes", () => {
     });
   });
 
+  it("returns typed route results from the maps gateway for route requests", async () => {
+    const runtime = createGoogleMapsRuntime({
+      async computeRoute(input) {
+        return {
+          destination: input.destination,
+          durationSeconds: 900,
+          googleMapsUri: "https://www.google.com/maps/dir/?api=1",
+          origin: input.origin,
+          travelMode: input.travelMode ?? "driving",
+        };
+      },
+      async searchNearby() {
+        throw new Error("Unexpected nearby call.");
+      },
+      async searchPlaces() {
+        throw new Error("Unexpected place call.");
+      },
+    });
+
+    const result = await runtime({
+      invocation: invocation("route from Tokyo Station to Osaka Station"),
+      model,
+      providerRouter: new FakeProviderRouter({ content: "" }),
+    });
+
+    expect(result.structuredResult).toMatchObject({
+      action: "answered",
+      route: { destination: "Osaka Station", origin: "Tokyo Station" },
+    });
+  });
+
   it("returns typed media handoffs for image and video generation", async () => {
-    const image = await createImageGenerationRuntime()({
+    const image = await createImageGenerationRuntime(imageModel.id)({
       invocation: invocation("draw a product sketch"),
       model,
       providerRouter: new FakeProviderRouter({ content: "" }),
     });
-    const video = await createVideoGenerationRuntime()({
+    const video = await createVideoGenerationRuntime(videoModel.id)({
       invocation: invocation("make a vertical video"),
       model,
       providerRouter: new FakeProviderRouter({ content: "" }),
@@ -97,6 +146,12 @@ describe("specialist runtimes", () => {
       providerRouter: new FakeProviderRouter({ content: "generic should not run" }),
       specialistRuntimes: {
         google_maps: createGoogleMapsRuntime({
+          async computeRoute() {
+            throw new Error("Unexpected route call.");
+          },
+          async searchNearby() {
+            throw new Error("Unexpected nearby call.");
+          },
           async searchPlaces() {
             return [{ name: "Osaka Station" }];
           },
@@ -119,7 +174,7 @@ describe("specialist runtimes", () => {
 });
 
 class FakeProviderRouter {
-  readonly registry = new ModelRegistry([model]);
+  readonly registry = new ModelRegistry([model, imageModel, videoModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly result: LlmResult) {}

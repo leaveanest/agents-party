@@ -23,7 +23,7 @@ Native specialist runtimes cover:
 
 - web research through `ProviderRouter` with required `web_search`
 - Google Maps Places lookup through `GOOGLE_MAPS_API_KEY`
-- typed image-generation media handoff
-- typed video-generation media handoff
+- typed image-generation media handoff with explicit `image_generation` model capability
+- typed video-generation media handoff with explicit `video_generation` model capability
 
 These runtimes return Zod-validated structured results and keep provider-specific behavior outside Slack handlers.

@@ -9,7 +9,7 @@ import type { AgentSpecialist, SlackAgentInvocation } from "./schemas.js";
 export type AgentSpecialistRuntimeInput = {
   invocation: SlackAgentInvocation;
   model: ModelInfo;
-  providerRouter: Pick<ProviderRouter, "generate">;
+  providerRouter: Pick<ProviderRouter, "generate" | "registry">;
 };
 
 export type AgentSpecialistRuntimeResult = {
@@ -23,6 +23,16 @@ export type AgentSpecialistRuntime = (
 ) => Promise<AgentSpecialistRuntimeResult>;
 
 export type GoogleMapsGateway = {
+  computeRoute(input: {
+    destination: string;
+    origin: string;
+    travelMode?: string;
+  }): Promise<GoogleMapsRoute>;
+  searchNearby(input: {
+    anchor: string;
+    query: string;
+    radiusMeters?: number;
+  }): Promise<GoogleMapsPlace[]>;
   searchPlaces(query: string): Promise<GoogleMapsPlace[]>;
 };
 
@@ -61,6 +71,18 @@ export const googleMapsResultSchema = z
     answer: z.string().default(""),
     followUpQuestion: z.string().optional(),
     places: z.array(googleMapsPlaceSchema).default([]),
+    route: z
+      .object({
+        destination: z.string().min(1),
+        distanceMeters: z.number().optional(),
+        durationSeconds: z.number().optional(),
+        googleMapsUri: z.string().url().optional(),
+        origin: z.string().min(1),
+        summary: z.string().optional(),
+        travelMode: z.string().default("driving"),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -99,6 +121,7 @@ export const videoGenerationResultSchema = z
   .strict();
 
 export type GoogleMapsPlace = z.infer<typeof googleMapsPlaceSchema>;
+export type GoogleMapsRoute = NonNullable<z.infer<typeof googleMapsResultSchema>["route"]>;
 
 export function createDefaultSpecialistRuntimes(
   settings: AppSettings,
@@ -109,8 +132,8 @@ export function createDefaultSpecialistRuntimes(
       : new FetchGoogleMapsGateway(settings.googleMapsApiKey);
   return {
     google_maps: createGoogleMapsRuntime(googleMapsGateway),
-    image_generation: createImageGenerationRuntime(),
-    video_generation: createVideoGenerationRuntime(),
+    image_generation: createImageGenerationRuntime(settings.imageGenerationModelId),
+    video_generation: createVideoGenerationRuntime(settings.videoGenerationModelId),
     web_research: createWebResearchRuntime(),
   };
 }
@@ -130,7 +153,10 @@ export function createWebResearchRuntime(): AgentSpecialistRuntime {
       },
       requiredCapabilities: ["web_search"],
     });
-    const parsed = webResearchResultSchema.parse(parseJsonOrAnswer(result.content));
+    const parsed = webResearchResultSchema.parse({
+      ...asRecord(parseJsonOrAnswer(result.content)),
+      sources: normalizeSources(parseJsonOrAnswer(result.content), result.sources),
+    });
     return {
       message: renderWebResearch(parsed),
       raw: result.raw,
@@ -153,7 +179,25 @@ export function createGoogleMapsRuntime(
         structuredResult: structured,
       };
     }
-    const places = await gateway.searchPlaces(invocation.text);
+    const routeRequest = parseRouteRequest(invocation.text);
+    if (routeRequest !== undefined) {
+      const route = await gateway.computeRoute(routeRequest);
+      const structured = googleMapsResultSchema.parse({
+        action: "answered",
+        answer: "Google Maps route:",
+        route,
+      });
+      return {
+        message: renderGoogleMaps(structured),
+        structuredResult: structured,
+      };
+    }
+
+    const nearbyRequest = parseNearbyRequest(invocation.text);
+    const places =
+      nearbyRequest === undefined
+        ? await gateway.searchPlaces(invocation.text)
+        : await gateway.searchNearby(nearbyRequest);
     const structured = googleMapsResultSchema.parse({
       action: "answered",
       answer:
@@ -167,8 +211,10 @@ export function createGoogleMapsRuntime(
   };
 }
 
-export function createImageGenerationRuntime(): AgentSpecialistRuntime {
-  return async ({ invocation, model }) => {
+export function createImageGenerationRuntime(modelId: string): AgentSpecialistRuntime {
+  return async ({ invocation, providerRouter }) => {
+    const model = providerRouter.registry.get(modelId);
+    providerRouter.registry.assertCapabilities(model, ["image_generation"]);
     const structured = imageGenerationResultSchema.parse({
       media: {
         kind: "image",
@@ -186,8 +232,10 @@ export function createImageGenerationRuntime(): AgentSpecialistRuntime {
   };
 }
 
-export function createVideoGenerationRuntime(): AgentSpecialistRuntime {
-  return async ({ invocation, model }) => {
+export function createVideoGenerationRuntime(modelId: string): AgentSpecialistRuntime {
+  return async ({ invocation, providerRouter }) => {
+    const model = providerRouter.registry.get(modelId);
+    providerRouter.registry.assertCapabilities(model, ["video_generation"]);
     const structured = videoGenerationResultSchema.parse({
       media: {
         aspectRatio: /\b(vertical|portrait|reels|shorts|9:16)\b/iu.test(invocation.text)
@@ -235,6 +283,55 @@ export class FetchGoogleMapsGateway implements GoogleMapsGateway {
       return parsed === undefined ? [] : [parsed];
     });
   }
+
+  async searchNearby(input: {
+    anchor: string;
+    query: string;
+    radiusMeters?: number;
+  }): Promise<GoogleMapsPlace[]> {
+    return this.searchPlaces(`${input.query} near ${input.anchor}`);
+  }
+
+  async computeRoute(input: {
+    destination: string;
+    origin: string;
+    travelMode?: string;
+  }): Promise<GoogleMapsRoute> {
+    const response = await this.fetchFn(
+      "https://routes.googleapis.com/directions/v2:computeRoutes",
+      {
+        body: JSON.stringify({
+          destination: { address: input.destination },
+          origin: { address: input.origin },
+          travelMode: (input.travelMode ?? "driving").toUpperCase(),
+        }),
+        headers: {
+          "content-type": "application/json",
+          "x-goog-api-key": this.apiKey,
+          "x-goog-fieldmask": "routes.distanceMeters,routes.duration,routes.description",
+        },
+        method: "POST",
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Google Maps route failed with HTTP ${response.status}.`);
+    }
+    const payload = (await response.json()) as { routes?: unknown[] };
+    const route = payload.routes?.[0];
+    if (route === null || typeof route !== "object") {
+      throw new Error("Google Maps route response did not contain a route.");
+    }
+    const record = route as Record<string, unknown>;
+    return {
+      destination: input.destination,
+      distanceMeters: typeof record.distanceMeters === "number" ? record.distanceMeters : undefined,
+      durationSeconds: parseDurationSeconds(record.duration),
+      googleMapsUri: `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(input.origin)}&destination=${encodeURIComponent(input.destination)}&travelmode=${encodeURIComponent(input.travelMode ?? "driving")}`,
+      origin: input.origin,
+      summary: typeof record.description === "string" ? record.description : undefined,
+      travelMode: input.travelMode ?? "driving",
+    };
+  }
 }
 
 function specialistHistory(prompt: string, invocation: SlackAgentInvocation): ConversationHistory {
@@ -281,6 +378,26 @@ function parseJsonOrAnswer(content: string): unknown {
   }
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function normalizeSources(
+  parsedContent: unknown,
+  resultSources: readonly { title?: string; url: string }[] | undefined,
+) {
+  if (resultSources !== undefined && resultSources.length > 0) {
+    return resultSources.map((source) => ({
+      title: source.title ?? source.url,
+      url: source.url,
+    }));
+  }
+  const sources = asRecord(parsedContent).sources;
+  return Array.isArray(sources) ? sources : [];
+}
+
 function renderWebResearch(result: z.infer<typeof webResearchResultSchema>): string {
   if (result.action === "clarification_needed") {
     return result.followUpQuestion ?? "What exactly should I verify on the web?";
@@ -302,7 +419,10 @@ function renderGoogleMaps(result: z.infer<typeof googleMapsResultSchema>): strin
     return result.followUpQuestion ?? "Which place or route should I look up?";
   }
   if (result.places.length === 0) {
-    return result.answer;
+    if (result.route === undefined) {
+      return result.answer;
+    }
+    return `${result.answer}\n- ${result.route.origin} -> ${result.route.destination}${result.route.durationSeconds === undefined ? "" : ` (${Math.round(result.route.durationSeconds / 60)} min)`}${result.route.googleMapsUri === undefined ? "" : `\n- ${result.route.googleMapsUri}`}`;
   }
   return `${result.answer}\n${result.places
     .map((place) => {
@@ -310,6 +430,41 @@ function renderGoogleMaps(result: z.infer<typeof googleMapsResultSchema>): strin
       return `- ${details.join(" | ")}`;
     })
     .join("\n")}`;
+}
+
+function parseRouteRequest(
+  text: string,
+): { destination: string; origin: string; travelMode?: string } | undefined {
+  const match = /\b(?:route|directions?)\s+from\s+(.+?)\s+to\s+(.+)$/iu.exec(text.trim());
+  if (match?.[1] === undefined || match[2] === undefined) {
+    return undefined;
+  }
+  return {
+    destination: match[2].trim(),
+    origin: match[1].trim(),
+    travelMode: /\b(walk|walking)\b/iu.test(text) ? "walking" : "driving",
+  };
+}
+
+function parseNearbyRequest(
+  text: string,
+): { anchor: string; query: string; radiusMeters?: number } | undefined {
+  const match = /\b(?:nearby|near)\s+(.+?)\s+(?:around|near)\s+(.+)$/iu.exec(text.trim());
+  if (match?.[1] === undefined || match[2] === undefined) {
+    return undefined;
+  }
+  return {
+    anchor: match[2].trim(),
+    query: match[1].trim(),
+  };
+}
+
+function parseDurationSeconds(value: unknown): number | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const match = /^(\d+)s$/u.exec(value);
+  return match?.[1] === undefined ? undefined : Number(match[1]);
 }
 
 function parseGooglePlace(value: unknown): GoogleMapsPlace | undefined {

@@ -266,6 +266,15 @@ GOOGLE_MAPS_API_KEY=...
 
 When present, the TypeScript Google Maps specialist uses the Places Text Search API through a narrow gateway under `src/agents/specialistRuntimes.ts`.
 
+### Media Specialist Models
+
+```bash
+IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
+VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
+```
+
+The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities before returning typed media handoff results.
+
 ## Deployment
 
 Heroku production deploys use:

@@ -99,6 +99,12 @@ export class GoogleWebSearchNativeAdapter implements LlmAdapter {
       content: result.text,
       finishReason: mapFinishReason(result.finishReason),
       raw: result,
+      sources: result.sources
+        .filter((source) => source.sourceType === "url")
+        .map((source) => ({
+          title: source.title,
+          url: source.url,
+        })),
       toolCalls: result.toolCalls.map(mapToolCall),
       usage:
         result.usage === undefined
