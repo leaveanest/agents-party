@@ -6,7 +6,7 @@
 
 - `LlmProvider` enumerates the target providers: OpenAI, Azure OpenAI, Anthropic, Google, Bedrock, Groq, NVIDIA, PLaMo, xAI, Dify, and LiteLLM.
 - `ModelInfo` is the registry record for a model. It stores provider, provider-native model id, optional legacy aliases, and explicit capabilities.
-- `LlmCapability` represents behavior the application must check before invocation: text, streaming, image input, file input, audio input, tool calling, structured output, web search, image generation, thinking, and embeddings.
+- `LlmCapability` represents behavior the application must check before invocation: text, streaming, image input, file input, audio input, tool calling, structured output, web search, image generation, video generation, thinking, and embeddings.
 - `LlmRequest`, `LlmResult`, `LlmStreamEvent`, and `LlmAdapter` are repository-owned contracts. They intentionally do not expose Slack SDK or AI SDK message history types.
 
 The domain history remains `ConversationHistory`. AI SDK `ModelMessage[]` conversion happens only at provider invocation boundaries.
@@ -59,13 +59,17 @@ AWS Bedrock and Dify are intentionally left for native adapter lanes because the
 
 ## Native Provider Escape Hatches
 
-`createNativeProviderAdapters()` registers explicit native-provider stubs under the same `LlmAdapter` interface. These adapters are selected by required capability, not model-name checks, and currently return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added.
+`createNativeProviderAdapters()` registers explicit native-provider paths under the same `LlmAdapter` interface. These adapters are selected by required capability, not model-name checks.
+
+The first concrete native path is Gemini web search through AI SDK's Google native search tool. It is used when a request requires `web_search`, so web research does not fall back to the common text-only lane.
+
+Unsupported native paths still return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added.
 
 Native stubs currently cover:
 
 - OpenAI Responses/native tools for `web_search` and `image_generation`
 - Anthropic thinking and web search
-- Gemini grounding and file APIs
+- Gemini file APIs
 - AWS Bedrock Claude
 - Dify endpoint invocation
 

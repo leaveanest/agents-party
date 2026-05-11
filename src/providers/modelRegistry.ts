@@ -188,6 +188,22 @@ export const defaultModelRegistryEntries: readonly ModelInfo[] = [
     providerModelId: "gemini-2.5-flash",
   },
   {
+    aliases: ["gemini-2.5-flash-image"],
+    capabilities: ["image_generation"],
+    displayName: "Gemini 2.5 Flash Image",
+    id: "google:gemini-2.5-flash-image",
+    provider: "google",
+    providerModelId: "gemini-2.5-flash-image",
+  },
+  {
+    aliases: ["veo-3.1-fast-generate-001"],
+    capabilities: ["video_generation"],
+    displayName: "Veo 3.1 Fast",
+    id: "google:veo-3.1-fast-generate-001",
+    provider: "google",
+    providerModelId: "veo-3.1-fast-generate-001",
+  },
+  {
     aliases: ["anthropic.claude-3-5-sonnet-20240620"],
     capabilities: ["text", "streaming", "image_input", "tool_calling", "thinking"],
     displayName: "Bedrock Claude 3.5 Sonnet",

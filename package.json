@@ -20,6 +20,7 @@
     "@ai-sdk/groq": "^3.0.39",
     "@ai-sdk/openai": "^3.0.63",
     "@ai-sdk/openai-compatible": "^2.0.47",
+    "@google/genai": "^2.0.1",
     "@slack/bolt": "^4.7.2",
     "@slack/oauth": "^3.0.5",
     "ai": "^6.0.177",

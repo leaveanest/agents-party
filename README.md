@@ -27,7 +27,7 @@ See [`docs/message-history-model.md`](docs/message-history-model.md) for the con
 The TypeScript provider boundary defines `ProviderRouter`, model registry, provider contracts, capability checks, and an AI SDK common adapter lane for OpenAI, Azure OpenAI, Anthropic, Google, Groq, xAI, PLaMo, NVIDIA, and LiteLLM.
 See [`docs/provider-router.md`](docs/provider-router.md) for the routing and capability boundary.
 
-Agent routing through `app_mention`, active thread follow-up auto-routing, flag-reaction translation commands, specialist placeholder execution, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, and encrypted token persistence are available in the TypeScript runtime. Full App Home settings and native provider adapters for Bedrock/Dify/provider-specific features remain planned migration work.
+Agent routing through `app_mention`, active thread follow-up auto-routing, flag-reaction translation commands, native specialist runtimes, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, and encrypted token persistence are available in the TypeScript runtime. Full App Home settings and native provider adapters for Bedrock/Dify/provider-specific features remain planned migration work.
 
 ## Legacy Python Capabilities
 
@@ -257,6 +257,24 @@ SALESFORCE_TOKEN_ENCRYPTION_KEY=...
 ```
 
 The registered Salesforce redirect URI is `${SALESFORCE_OAUTH_REDIRECT_BASE_URL}/oauth/salesforce/callback` unless `SALESFORCE_OAUTH_CALLBACK_PATH` is overridden. Workspace-specific Salesforce client IDs, optional encrypted client secrets, My Domain hosts, and org IDs are read from the PostgreSQL `salesforce_auth_configs` table.
+
+### Google Maps
+
+```bash
+GOOGLE_MAPS_API_KEY=...
+```
+
+When present, the TypeScript Google Maps specialist uses the Places Text Search API through a narrow gateway under `src/agents/specialistRuntimes.ts`.
+
+### Media Specialist Models
+
+```bash
+IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
+VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
+GOOGLE_GENERATIVE_AI_API_KEY=...
+```
+
+The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call the Google Gen AI SDK when `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` is configured.
 
 ## Deployment
 
