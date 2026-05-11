@@ -84,4 +84,49 @@ describe("createAgentSlackHandlers", () => {
       }),
     ]);
   });
+
+  it("posts a fallback thread reply when AgentRunner fails", async () => {
+    const runner = {
+      async run() {
+        throw new Error("provider failed");
+      },
+    };
+    const posts: unknown[] = [];
+    const errors: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> hello",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: {
+        error: (...args: unknown[]) => {
+          errors.push(args);
+        },
+        warn() {},
+      },
+    } as never);
+
+    expect(errors).toHaveLength(1);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't complete that request. Please try again in a moment.",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
 });
