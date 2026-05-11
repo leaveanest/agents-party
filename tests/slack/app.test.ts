@@ -39,6 +39,7 @@ const baseSettings: AppSettings = {
   salesforceOAuthCallbackPath: "/oauth/salesforce/callback",
   salesforceOAuthCallbackUrl: "/oauth/salesforce/callback",
   salesforceOAuthContextSigningSecret: undefined,
+  salesforceOAuthDisconnectPath: "/oauth/salesforce/disconnect",
   salesforceOAuthEnabled: false,
   salesforceOAuthRedirectBaseUrl: undefined,
   salesforceOAuthStartPath: "/oauth/salesforce/start",

@@ -41,6 +41,7 @@ const settings: AppSettings = {
   salesforceOAuthCallbackPath: "/oauth/salesforce/callback",
   salesforceOAuthCallbackUrl: "/oauth/salesforce/callback",
   salesforceOAuthContextSigningSecret: undefined,
+  salesforceOAuthDisconnectPath: "/oauth/salesforce/disconnect",
   salesforceOAuthEnabled: false,
   salesforceOAuthRedirectBaseUrl: undefined,
   salesforceOAuthStartPath: "/oauth/salesforce/start",
@@ -231,6 +232,47 @@ describe("createAppServer", () => {
 
     expect(response.status).toBe(302);
     expect(delegatedPath).toBe("/oauth/google/start");
+  });
+
+  it("delegates the Salesforce disconnect OAuth route to the configured OAuth gateway", async () => {
+    let delegatedMethod: string | undefined;
+    let delegatedPath: string | undefined;
+    const server = createAppServer(settings, {
+      oauthGateway: {
+        async close() {},
+        canHandle(pathname) {
+          return pathname === "/oauth/salesforce/disconnect";
+        },
+        async handle(request, response, url) {
+          delegatedMethod = request.method;
+          delegatedPath = url.pathname;
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify({ status: "ok" }));
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/oauth/salesforce/disconnect`, {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(delegatedMethod).toBe("POST");
+    expect(delegatedPath).toBe("/oauth/salesforce/disconnect");
   });
 
   it("returns 503 for OAuth routes when OAuth is not configured", async () => {

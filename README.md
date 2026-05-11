@@ -15,6 +15,7 @@ The TypeScript runtime currently exposes:
 - `GET /oauth/google/callback` when Google OAuth settings are present
 - `GET /oauth/salesforce/start` when Salesforce OAuth settings are present
 - `GET /oauth/salesforce/callback` when Salesforce OAuth settings are present
+- `POST /oauth/salesforce/disconnect` when Salesforce OAuth settings are present
 
 The TypeScript Slack ingress initializes Bolt for JavaScript/TypeScript, validates Slack signatures through Bolt, acknowledges Events API deliveries, and suppresses duplicate event deliveries by Slack `event_id`.
 See [`docs/slack-typescript-ingress.md`](docs/slack-typescript-ingress.md) for the current ingress boundary.
@@ -25,7 +26,7 @@ See [`docs/message-history-model.md`](docs/message-history-model.md) for the con
 The TypeScript provider boundary defines `ProviderRouter`, model registry, provider contracts, capability checks, and an AI SDK common adapter lane for OpenAI, Azure OpenAI, Anthropic, Google, Groq, xAI, PLaMo, NVIDIA, and LiteLLM.
 See [`docs/provider-router.md`](docs/provider-router.md) for the routing and capability boundary.
 
-Agent routing through `app_mention`, active thread follow-up auto-routing, flag-reaction translation commands, native specialist runtimes, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, and encrypted token persistence are available in the TypeScript runtime. Full App Home settings and native provider adapters for Bedrock/Dify/provider-specific features remain planned work.
+Agent routing through `app_mention`, active thread follow-up auto-routing, flag-reaction translation commands, native specialist runtimes, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, encrypted token persistence, Salesforce token refresh, and Salesforce revoke-backed disconnect are available in the TypeScript runtime. Full App Home settings and native provider adapters for Bedrock/Dify/provider-specific features remain planned work.
 
 The Python application runtime has been removed. Retained `.agents/skills/*/scripts/*.py` files are Codex development helper scripts only and are not used by the app, tests, deploy, or package workflow.
 
@@ -196,6 +197,7 @@ The registered Google redirect URI is `${GOOGLE_OAUTH_REDIRECT_BASE_URL}/oauth/g
 ```bash
 SALESFORCE_OAUTH_REDIRECT_BASE_URL=https://...
 SALESFORCE_OAUTH_CONTEXT_SIGNING_SECRET=...
+SALESFORCE_OAUTH_DISCONNECT_PATH=/oauth/salesforce/disconnect
 SALESFORCE_TOKEN_ENCRYPTION_KEY=...
 ```
 

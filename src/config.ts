@@ -34,6 +34,7 @@ export type AppSettings = {
   salesforceOAuthCallbackPath: string;
   salesforceOAuthCallbackUrl: string;
   salesforceOAuthContextSigningSecret: string | undefined;
+  salesforceOAuthDisconnectPath: string;
   salesforceOAuthEnabled: boolean;
   salesforceOAuthRedirectBaseUrl: string | undefined;
   salesforceOAuthStartPath: string;
@@ -114,6 +115,10 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     env.SALESFORCE_OAUTH_CALLBACK_PATH,
     "/oauth/salesforce/callback",
   );
+  const salesforceOAuthDisconnectPath = readRoutePath(
+    env.SALESFORCE_OAUTH_DISCONNECT_PATH,
+    "/oauth/salesforce/disconnect",
+  );
   const salesforceTokenEncryptionKey = readText(env.SALESFORCE_TOKEN_ENCRYPTION_KEY);
   const salesforceOAuthEnabled =
     databaseUrl !== undefined &&
@@ -162,6 +167,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
       salesforceOAuthCallbackPath,
     ),
     salesforceOAuthContextSigningSecret,
+    salesforceOAuthDisconnectPath,
     salesforceOAuthEnabled,
     salesforceOAuthRedirectBaseUrl,
     salesforceOAuthStartPath,
