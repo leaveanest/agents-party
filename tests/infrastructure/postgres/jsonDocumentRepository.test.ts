@@ -44,14 +44,30 @@ describe("PostgresJsonDocumentRepository", () => {
         ),
     ).toThrow("Unsafe SQL identifier");
   });
+
+  it("consumes payload-backed records atomically with delete returning", async () => {
+    const pool = new RecordingPool([{ payload: { state: "stored" } }]);
+    const repository = new PostgresJsonDocumentRepository<
+      { state_id: string; team_id: string },
+      { state: string }
+    >(postgresDocumentTables.googleOAuthState, { pool: pool as never });
+
+    const payload = await repository.consume({ state_id: "S1", team_id: "T1" });
+
+    expect(payload).toEqual({ state: "stored" });
+    expect(pool.queries[0]?.text).toContain('delete from "google_oauth_states"');
+    expect(pool.queries[0]?.text).toContain('returning "payload" as payload');
+  });
 });
 
 class RecordingPool {
   readonly queries: Array<{ text: string; values?: unknown[] }> = [];
 
+  constructor(private readonly rows: unknown[] = []) {}
+
   async query(text: string, values?: unknown[]) {
     this.queries.push({ text: normalizeSql(text), values });
-    return { rows: [] };
+    return { rows: this.rows };
   }
 }
 

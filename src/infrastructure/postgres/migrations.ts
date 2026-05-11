@@ -12,6 +12,23 @@ export type AppliedMigration = {
   name: string;
 };
 
+export type PostgresMigrationRunnerOptions = {
+  allowAlembicBaseline?: boolean;
+  databaseUrl?: string;
+  pool?: Pool;
+};
+
+export class AlembicBaselineRequiredError extends Error {
+  constructor(readonly alembicVersion: string | undefined) {
+    super(
+      alembicVersion === undefined
+        ? "Existing Alembic metadata was detected. Set POSTGRES_ALLOW_ALEMBIC_BASELINE=true only after validating schema parity."
+        : `Existing Alembic revision '${alembicVersion}' was detected. Set POSTGRES_ALLOW_ALEMBIC_BASELINE=true only after validating schema parity.`,
+    );
+    this.name = "AlembicBaselineRequiredError";
+  }
+}
+
 type Queryable = {
   query<TResult extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -23,7 +40,7 @@ export class PostgresMigrationRunner {
   private readonly pool: Pool;
   private readonly ownsPool: boolean;
 
-  constructor(options: { databaseUrl?: string; pool?: Pool }) {
+  constructor(private readonly options: PostgresMigrationRunnerOptions) {
     if (options.pool === undefined && options.databaseUrl === undefined) {
       throw new Error("databaseUrl or pool is required for PostgreSQL migrations.");
     }
@@ -60,6 +77,7 @@ export class PostgresMigrationRunner {
     try {
       await client.query("begin");
       await ensureMigrationTable(client);
+      await baselineAlembicIfNeeded(client, migrations, this.options.allowAlembicBaseline ?? false);
       const applied = await appliedMigrationIds(client);
       const newlyApplied: AppliedMigration[] = [];
 
@@ -104,4 +122,49 @@ async function ensureMigrationTable(queryable: Queryable): Promise<void> {
 async function appliedMigrationIds(client: PoolClient): Promise<Set<string>> {
   const result = await client.query<{ id: string }>("select id from schema_migrations");
   return new Set(result.rows.map((row) => row.id));
+}
+
+async function baselineAlembicIfNeeded(
+  client: PoolClient,
+  migrations: readonly PostgresMigration[],
+  allowBaseline: boolean,
+): Promise<void> {
+  if ((await appliedMigrationIds(client)).size > 0) {
+    return;
+  }
+
+  const alembicVersion = await readAlembicVersion(client);
+  if (alembicVersion === undefined) {
+    return;
+  }
+  if (!allowBaseline) {
+    throw new AlembicBaselineRequiredError(alembicVersion);
+  }
+
+  for (const migration of migrations) {
+    await client.query(
+      `insert into schema_migrations (id, name, applied_at)
+       values ($1, $2, now())
+       on conflict (id) do nothing`,
+      [migration.id, migration.name],
+    );
+  }
+}
+
+async function readAlembicVersion(client: PoolClient): Promise<string | undefined> {
+  const exists = await client.query<{ exists: boolean }>(
+    `select exists (
+       select 1
+       from information_schema.tables
+       where table_schema = current_schema()
+         and table_name = 'alembic_version'
+     )`,
+  );
+  if (exists.rows[0]?.exists !== true) {
+    return undefined;
+  }
+  const result = await client.query<{ version_num: string }>(
+    "select version_num from alembic_version limit 1",
+  );
+  return result.rows[0]?.version_num;
 }
