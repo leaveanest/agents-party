@@ -2,22 +2,10 @@ import { defineConfig } from "vite-plus";
 
 export default defineConfig({
   fmt: {
-    ignorePatterns: [
-      ".serena/**",
-      "alembic/**",
-      "pyproject.toml",
-      "src/agents_party/**",
-      "terraform/**/.terraform/**",
-      "uv.lock",
-    ],
+    ignorePatterns: [".serena/**", "terraform/**/.terraform/**"],
   },
   lint: {
-    ignorePatterns: [
-      ".serena/**",
-      "alembic/**",
-      "src/agents_party/**",
-      "terraform/**/.terraform/**",
-    ],
+    ignorePatterns: [".serena/**", "terraform/**/.terraform/**"],
   },
   pack: {
     clean: true,

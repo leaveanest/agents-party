@@ -70,7 +70,7 @@ describe("AgentRunner", () => {
     });
   });
 
-  it("validates structured work-manager results without pydantic-ai", async () => {
+  it("validates structured work-manager results without an external agent framework", async () => {
     const runner = new AgentRunner({
       defaultModelId: model.id,
       providerRouter: new FakeProviderRouter({

@@ -16,10 +16,9 @@ variable "heroku_stack" {
 }
 
 variable "heroku_buildpacks" {
-  description = "Classic buildpacks used by the Heroku app. The Active Storage Preview buildpack provides ffmpeg before Node dependencies are installed."
+  description = "Classic buildpacks used by the Heroku app."
   type        = list(string)
   default = [
-    "https://github.com/heroku/heroku-buildpack-activestorage-preview",
     "heroku/nodejs",
   ]
 }
@@ -54,22 +53,10 @@ variable "web_dyno_size" {
   default     = "basic"
 }
 
-variable "default_timezone" {
-  description = "Application default timezone."
+variable "agent_model" {
+  description = "Default model for TypeScript agent routing and specialist execution."
   type        = string
-  default     = "UTC"
-}
-
-variable "agent_selector_model" {
-  description = "Default model for selector routing."
-  type        = string
-  default     = "google-gla:gemini-3-flash-preview"
-}
-
-variable "work_manager_model" {
-  description = "Default model for work manager execution."
-  type        = string
-  default     = "google-gla:gemini-3-flash-preview"
+  default     = "google:gemini-2.5-flash"
 }
 
 variable "additional_config_vars" {

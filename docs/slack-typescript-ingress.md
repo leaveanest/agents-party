@@ -1,6 +1,6 @@
 # TypeScript Slack Ingress
 
-OSA-8 moves the target Slack ingress to Bolt for JavaScript/TypeScript. The Python Slack gateway is legacy during migration and is not part of the target app runtime.
+The Slack ingress is implemented with Bolt for JavaScript/TypeScript. There is no Python Slack gateway in the application runtime.
 
 ## Endpoints
 
@@ -44,9 +44,9 @@ The in-memory deduplicator is process-local. This is enough to avoid repeated lo
 
 ## Event Coverage
 
-- `app_home_opened`: registered in TypeScript and publishes a minimal TypeScript migration home view.
+- `app_home_opened`: registered in TypeScript and publishes a minimal home view.
 - `app_mention`: registered in TypeScript and routed through the TypeScript `AgentRunner`.
 - `message`: registered and acknowledged in TypeScript; active thread follow-ups route through AgentRunner when PostgreSQL thread policy allows auto-reply.
 - `reaction_added`: registered and acknowledged in TypeScript; country flag reactions route the target message through the AgentRunner translation specialist.
 
-These gaps are explicit migration boundaries, not Python fallbacks.
+These gaps are explicit product/runtime boundaries, not fallback paths.

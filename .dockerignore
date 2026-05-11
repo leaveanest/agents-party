@@ -2,10 +2,7 @@
 .gitignore
 .agents
 .codex
-.pytest_cache
-.ruff_cache
 .serena
-.venv
 node_modules
 __pycache__
 *.py[cod]
@@ -14,7 +11,6 @@ __pycache__
 .DS_Store
 build
 dist
-*.egg-info
 docs
 skills
 terraform

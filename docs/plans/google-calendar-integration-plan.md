@@ -179,15 +179,15 @@ write 系は初期共通 interface に含めない。
 モジュール配置案:
 
 ```text
-src/agents_party/
+src/
   repositories/
-    google_calendar_connection_repository.py
-    google_calendar_gateway.py
+    googleCalendarConnectionRepository.ts
+    googleCalendarGateway.ts
   infrastructure/
     postgres/
-      google_calendar_connection_repository.py
+      googleCalendarConnectionRepository.ts
     google_calendar/
-      google_calendar_gateway.py
+      googleCalendarGateway.ts
 ```
 
 ## 保存配置案

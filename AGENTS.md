@@ -1,10 +1,7 @@
 # AGENTS.md
 
 This repository is `agents-party`, a Slack-native agent routing application.
-It is being migrated from the current Python implementation to a TypeScript/Node.js application.
-The target stack is Slack Bolt for JavaScript/TypeScript, AI SDK behind repository-owned provider adapters, PostgreSQL for persistence, and Terraform for infrastructure.
-
-The Python implementation is legacy during this migration and is scheduled for removal. Do not add new production Python app paths unless the user explicitly changes that direction.
+The application runtime is TypeScript/Node.js with Slack Bolt for JavaScript/TypeScript, AI SDK behind repository-owned provider adapters, PostgreSQL for persistence, and Terraform for infrastructure.
 
 ## Core Rules
 
@@ -16,7 +13,7 @@ The Python implementation is legacy during this migration and is scheduled for r
 - Do not store AI SDK `ModelMessage[]` as the domain message history format. Store repository domain models and convert to AI SDK messages only at provider invocation boundaries.
 - Support multiple LLM providers. Do not assume Gemini is the only target provider.
 - Do not hardcode OpenAI model ids as defaults in agent configuration.
-- Preserve existing Python only when the current issue does not own its deletion. Treat it as legacy code awaiting cutover, not as a fallback architecture.
+- Do not add Python application runtime paths unless the user explicitly changes the project direction.
 - Keep changes small and local. Avoid speculative repo-wide rewrites.
 
 ## Required Commands
@@ -33,20 +30,7 @@ The Python implementation is legacy during this migration and is scheduled for r
 If `vp` is missing from the shell, stop and report it instead of switching package managers.
 Do not use `npm`, `pnpm`, `yarn`, or `bun` directly for normal project workflows unless the user explicitly asks for a fallback.
 
-### Legacy Python Commands
-
-Use these only when touching legacy Python code before it is removed:
-
-- Sync legacy Python environment with `uv sync`
-- Lint changed Python files with `uv run ruff check <path>`
-- Format changed Python files with `uv run ruff format <path>`
-- Type-check changed Python files with `uv run ty check <path>`
-
-Do not use `pip`, `poetry`, or ad-hoc virtualenv workflows.
-
 ## Repository Structure
-
-Target TypeScript structure:
 
 - `src/slack/`: Slack-specific entry points, events, feature handlers, and Slack SDK usage
 - `src/agents/`: agent orchestration, tool composition, request preparation, and specialist runners
@@ -58,11 +42,7 @@ Target TypeScript structure:
 - `terraform/`: infrastructure code, separated from application code
 - `docs/`: design notes, migration plans, and operational documentation
 
-Legacy Python structure while migration is in progress:
-
-- `src/agents_party/`: current Python implementation awaiting TypeScript replacement
-- `alembic/`: current Python/Alembic migration history awaiting TypeScript migration cutover
-- `pyproject.toml` and `uv.lock`: legacy Python dependency workflow until Python removal
+Retained `.agents/skills/*/scripts/*.py` files are Codex development helper scripts, not application runtime or deployment artifacts.
 
 ## Architecture Boundaries
 
@@ -74,7 +54,7 @@ Legacy Python structure while migration is in progress:
 - Put agent orchestration and skill composition in `src/agents/`.
 - Use a layered modular monolith unless the user explicitly asks for another application shape.
 - Keep UI/application/domain/infrastructure boundaries explicit when a change crosses them.
-- New relational schema changes should be planned for the TypeScript migration stack, not new Alembic work, unless the user explicitly asks for a legacy Python change.
+- New relational schema changes belong in the TypeScript migration stack.
 
 ## Full-Stack Implementation Expectations
 
@@ -100,7 +80,6 @@ Legacy Python structure while migration is in progress:
 ## Validation Expectations
 
 - After editing TypeScript files, run `vp check`, `vp run typecheck` when available, `vp test`, and the relevant `vp build` or `vp pack` command when practical.
-- After editing legacy Python files, run the legacy Python checks listed above.
 - Run project-wide validation when changes affect shared configuration, import structure, package workflow, provider contracts, or multiple packages.
 - Prefer targeted validation first because it keeps feedback tight.
 - Include negative-path tests when changing auth, validation, permissions, persistence, provider routing, Slack retries, or platform boundaries.

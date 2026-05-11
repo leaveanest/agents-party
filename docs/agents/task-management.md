@@ -457,7 +457,7 @@ source of truth は `WorkItemDocument`、`ParticipantRelationDocument`、`WorkEv
 
 ### 抽象 interface
 
-`src/agents_party/repositories/` には `WorkItemRepository` を置く。
+`src/repositories/` には `WorkItemRepository` を置く。
 
 - `create_work_item(item: WorkItemDocument, participants: list[ParticipantRelationDocument], initial_events: list[WorkEventDocument]) -> WorkItemAggregate`
 - `get_work_item(work_item_id: str, team_id: str, viewer_user_id: str, viewer_context_channel_ids: list[str]) -> WorkItemAggregate | None`
@@ -731,23 +731,23 @@ tenant scope と現在の Slack 文脈は `request_context` から取り、tool 
 agent 関連コードは repo の現行規約に合わせて配置する。
 
 ```text
-src/agents_party/
+src/
   agents/
     definitions/
-      work_manager.py
+      workManager.ts
     skills/
-      work_manager_tools.py
+      workManagerTools.ts
   domain/
-    work_management.py
+    workManagement.ts
   repositories/
-    work_item_repository.py
+    workItemRepository.ts
   infrastructure/postgres/
-    work_item_repository.py
+    workItemRepository.ts
   slack/
-    features/work_management.py
+    features/workManagement.ts
 ```
 
-`src/agents_party/agents/skills/` は Python の tool / support code を置く場所であり、
+`src/agents/skills/` は TypeScript runtime の tool / support code を置く場所であり、
 repo root の `skills/` は catalog に登録された built-in agent skill を置く場所である。
 この設計書で挙げる候補は、現時点で built-in skill として追加済みであることを意味しない。
 

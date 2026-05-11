@@ -1,10 +1,8 @@
 locals {
   app_config_vars = merge(
     {
-      AGENT_SELECTOR_MODEL = var.agent_selector_model
-      APP_ENV              = "heroku"
-      DEFAULT_TIMEZONE     = var.default_timezone
-      WORK_MANAGER_MODEL   = var.work_manager_model
+      AGENT_MODEL = var.agent_model
+      APP_ENV     = "heroku"
     },
     var.additional_config_vars,
   )

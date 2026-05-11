@@ -2,7 +2,7 @@
   "name": "agents-party",
   "version": "0.1.0",
   "private": true,
-  "description": "Slack-native agent routing application migrating to a TypeScript runtime.",
+  "description": "Slack-native agent routing application built on a TypeScript runtime.",
   "type": "module",
   "scripts": {
     "build": "vp pack",

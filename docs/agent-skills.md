@@ -1,7 +1,7 @@
 # エージェントスキル一覧
 
 このドキュメントは、`agents-party` に同梱されているビルトインスキルの一覧です。
-スキル名の正本は `src/agents_party/agents/skills/catalog.py`、実体は `skills/*/SKILL.md` です。
+スキル文書の実体は `skills/*/SKILL.md` です。アプリケーション runtime への組み込みは TypeScript 側の `src/agents/` または `src/providers/` で実装します。
 
 ## 現在ロード対象のスキル
 
@@ -69,5 +69,5 @@
 ## 実装上の補足
 
 - `skills/` 配下の `SKILL.md` が実体です。
-- `src/agents_party/agents/skills/catalog.py` の `EXPECTED_BUILTIN_SKILL_NAMES` と一致しているスキルがロード対象です。
-- 現在の実装では、特に `google_maps` ランタイムが宿泊や滞在相談で `lodging-search-advisor` などのスキルを併用します。
+- Python runtime は削除済みです。新しい skill 連携を追加する場合は TypeScript runtime に明示的な読み込み・実行経路を追加します。
+- `skills/` の文書は runtime から自動的に読み込まれるとは限りません。対象 specialist に組み込むまで参照資産として扱います。

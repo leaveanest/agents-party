@@ -17,5 +17,5 @@ Use this checklist before treating a Codex skill as a standard repository workfl
 ## Validation
 
 - Run `scripts/validate_codex_skill.py <skill-folder-or-name>`.
-- Run repository checks on any changed Python modules that support the skill.
+- Run repository checks on any changed TypeScript modules that support the skill.
 - Make sure no unrelated files were introduced into the skill folder.

@@ -122,8 +122,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     salesforceTokenEncryptionKey !== undefined;
 
   return {
-    agentModelId:
-      readText(env.AGENT_MODEL) ?? readText(env.WORK_MANAGER_MODEL) ?? DEFAULT_AGENT_MODEL_ID,
+    agentModelId: readText(env.AGENT_MODEL) ?? DEFAULT_AGENT_MODEL_ID,
     appEnv: env.APP_ENV ?? "local",
     appHost: env.APP_HOST ?? "0.0.0.0",
     appName: env.APP_NAME ?? "agents-party",
