@@ -5,6 +5,15 @@ export type AppSettings = {
   appName: string;
   appPort: number;
   databaseUrl: string | undefined;
+  googleOAuthCallbackPath: string;
+  googleOAuthCallbackUrl: string;
+  googleOAuthClientId: string | undefined;
+  googleOAuthClientSecret: string | undefined;
+  googleOAuthContextSigningSecret: string | undefined;
+  googleOAuthEnabled: boolean;
+  googleOAuthRedirectBaseUrl: string | undefined;
+  googleOAuthStartPath: string;
+  googleTokenEncryptionKey: string | undefined;
   slackBotToken: string | undefined;
   slackClientId: string | undefined;
   slackClientSecret: string | undefined;
@@ -18,6 +27,13 @@ export type AppSettings = {
   slackSigningSecret: string | undefined;
   slackStateSecret: string | undefined;
   slackUserScopes: string[];
+  salesforceOAuthCallbackPath: string;
+  salesforceOAuthCallbackUrl: string;
+  salesforceOAuthContextSigningSecret: string | undefined;
+  salesforceOAuthEnabled: boolean;
+  salesforceOAuthRedirectBaseUrl: string | undefined;
+  salesforceOAuthStartPath: string;
+  salesforceTokenEncryptionKey: string | undefined;
 };
 
 const DEFAULT_PORT = 8000;
@@ -43,6 +59,14 @@ const DEFAULT_SLACK_SCOPES = [
  */
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings {
   const databaseUrl = readText(env.DATABASE_URL);
+  const googleOAuthClientId = readText(env.GOOGLE_OAUTH_CLIENT_ID);
+  const googleOAuthClientSecret = readText(env.GOOGLE_OAUTH_CLIENT_SECRET);
+  const googleOAuthContextSigningSecret = readText(env.GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET);
+  const googleOAuthRedirectBaseUrl = readAbsoluteBaseUrl(
+    env.GOOGLE_OAUTH_REDIRECT_BASE_URL,
+    "GOOGLE_OAUTH_REDIRECT_BASE_URL",
+  );
+  const googleTokenEncryptionKey = readText(env.GOOGLE_TOKEN_ENCRYPTION_KEY);
   const slackBotToken = readText(env.SLACK_BOT_TOKEN);
   const slackClientId = readText(env.SLACK_CLIENT_ID);
   const slackClientSecret = readText(env.SLACK_CLIENT_SECRET);
@@ -56,6 +80,37 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
   const slackEnabled =
     slackSigningSecret !== undefined &&
     (slackBotToken !== undefined || slackInstallationStoreEnabled);
+  const googleOAuthStartPath = readRoutePath(env.GOOGLE_OAUTH_START_PATH, "/oauth/google/start");
+  const googleOAuthCallbackPath = readRoutePath(
+    env.GOOGLE_OAUTH_CALLBACK_PATH,
+    "/oauth/google/callback",
+  );
+  const googleOAuthEnabled =
+    databaseUrl !== undefined &&
+    googleOAuthClientId !== undefined &&
+    googleOAuthClientSecret !== undefined &&
+    googleOAuthContextSigningSecret !== undefined &&
+    googleOAuthRedirectBaseUrl !== undefined &&
+    googleTokenEncryptionKey !== undefined;
+  const salesforceOAuthContextSigningSecret = readText(env.SALESFORCE_OAUTH_CONTEXT_SIGNING_SECRET);
+  const salesforceOAuthRedirectBaseUrl = readAbsoluteBaseUrl(
+    env.SALESFORCE_OAUTH_REDIRECT_BASE_URL,
+    "SALESFORCE_OAUTH_REDIRECT_BASE_URL",
+  );
+  const salesforceOAuthStartPath = readRoutePath(
+    env.SALESFORCE_OAUTH_START_PATH,
+    "/oauth/salesforce/start",
+  );
+  const salesforceOAuthCallbackPath = readRoutePath(
+    env.SALESFORCE_OAUTH_CALLBACK_PATH,
+    "/oauth/salesforce/callback",
+  );
+  const salesforceTokenEncryptionKey = readText(env.SALESFORCE_TOKEN_ENCRYPTION_KEY);
+  const salesforceOAuthEnabled =
+    databaseUrl !== undefined &&
+    salesforceOAuthContextSigningSecret !== undefined &&
+    salesforceOAuthRedirectBaseUrl !== undefined &&
+    salesforceTokenEncryptionKey !== undefined;
 
   return {
     agentModelId:
@@ -65,6 +120,15 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     appName: env.APP_NAME ?? "agents-party",
     appPort: parsePort(env.PORT ?? env.APP_PORT, DEFAULT_PORT),
     databaseUrl,
+    googleOAuthCallbackPath,
+    googleOAuthCallbackUrl: buildCallbackUrl(googleOAuthRedirectBaseUrl, googleOAuthCallbackPath),
+    googleOAuthClientId,
+    googleOAuthClientSecret,
+    googleOAuthContextSigningSecret,
+    googleOAuthEnabled,
+    googleOAuthRedirectBaseUrl,
+    googleOAuthStartPath,
+    googleTokenEncryptionKey,
     slackBotToken,
     slackClientId,
     slackClientSecret,
@@ -78,6 +142,16 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     slackSigningSecret,
     slackStateSecret,
     slackUserScopes: parseList(env.SLACK_USER_SCOPES, []),
+    salesforceOAuthCallbackPath,
+    salesforceOAuthCallbackUrl: buildCallbackUrl(
+      salesforceOAuthRedirectBaseUrl,
+      salesforceOAuthCallbackPath,
+    ),
+    salesforceOAuthContextSigningSecret,
+    salesforceOAuthEnabled,
+    salesforceOAuthRedirectBaseUrl,
+    salesforceOAuthStartPath,
+    salesforceTokenEncryptionKey,
   };
 }
 
@@ -109,11 +183,34 @@ function readText(value: string | undefined): string | undefined {
 }
 
 function readPath(value: string | undefined, fallback: string): string {
+  return readRoutePath(value, fallback, "Slack route paths");
+}
+
+function readRoutePath(value: string | undefined, fallback: string, label = "Route paths"): string {
   const path = readText(value) ?? fallback;
   if (!path.startsWith("/")) {
-    throw new Error("Slack route paths must start with '/'.");
+    throw new Error(`${label} must start with '/'.`);
   }
   return path;
+}
+
+function readAbsoluteBaseUrl(value: string | undefined, envName: string): string | undefined {
+  const text = readText(value);
+  if (text === undefined) {
+    return undefined;
+  }
+  const parsed = new URL(text);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${envName} must be an absolute http(s) URL.`);
+  }
+  if (parsed.search !== "" || parsed.hash !== "") {
+    throw new Error(`${envName} must not include a query string or fragment.`);
+  }
+  return text.replace(/\/+$/, "");
+}
+
+function buildCallbackUrl(baseUrl: string | undefined, path: string): string {
+  return baseUrl === undefined ? path : `${baseUrl}${path}`;
 }
 
 function parseList(value: string | undefined, fallback: string[]): string[] {

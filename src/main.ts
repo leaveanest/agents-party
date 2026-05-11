@@ -1,6 +1,7 @@
 import { loadSettings } from "./config.js";
 import { createDefaultAgentRunner } from "./agents/runner.js";
 import { createAppServer } from "./server.js";
+import { createOAuthHttpGateway } from "./integrations/oauth/http.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
 
@@ -11,7 +12,9 @@ const slackGateway = settings.slackEnabled
       featureHandlers: createAgentSlackHandlers(agentRunner),
     })
   : undefined;
+const oauthGateway = createOAuthHttpGateway(settings);
 const server = createAppServer(settings, {
+  oauthGateway,
   slackGateway,
 });
 
@@ -30,6 +33,9 @@ function shutdown(signal: NodeJS.Signals): void {
     }
     if (slackGateway !== undefined) {
       await slackGateway.close();
+    }
+    if (oauthGateway !== undefined) {
+      await oauthGateway.close();
     }
     process.exit();
   });

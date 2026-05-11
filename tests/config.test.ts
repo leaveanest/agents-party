@@ -11,6 +11,15 @@ describe("loadSettings", () => {
       appName: "agents-party",
       appPort: 8000,
       databaseUrl: undefined,
+      googleOAuthCallbackPath: "/oauth/google/callback",
+      googleOAuthCallbackUrl: "/oauth/google/callback",
+      googleOAuthClientId: undefined,
+      googleOAuthClientSecret: undefined,
+      googleOAuthContextSigningSecret: undefined,
+      googleOAuthEnabled: false,
+      googleOAuthRedirectBaseUrl: undefined,
+      googleOAuthStartPath: "/oauth/google/start",
+      googleTokenEncryptionKey: undefined,
       slackBotToken: undefined,
       slackClientId: undefined,
       slackClientSecret: undefined,
@@ -34,6 +43,13 @@ describe("loadSettings", () => {
       slackSigningSecret: undefined,
       slackStateSecret: undefined,
       slackUserScopes: [],
+      salesforceOAuthCallbackPath: "/oauth/salesforce/callback",
+      salesforceOAuthCallbackUrl: "/oauth/salesforce/callback",
+      salesforceOAuthContextSigningSecret: undefined,
+      salesforceOAuthEnabled: false,
+      salesforceOAuthRedirectBaseUrl: undefined,
+      salesforceOAuthStartPath: "/oauth/salesforce/start",
+      salesforceTokenEncryptionKey: undefined,
     });
   });
 
@@ -82,6 +98,34 @@ describe("loadSettings", () => {
 
     expect(settings.slackOAuthInstallEnabled).toBe(true);
     expect(settings.slackUserScopes).toEqual(["chat:write", "users:read"]);
+  });
+
+  it("enables Google OAuth routes when all required secrets and database are configured", () => {
+    const settings = loadSettings({
+      DATABASE_URL: "postgres://localhost/app",
+      GOOGLE_OAUTH_CLIENT_ID: "client-id",
+      GOOGLE_OAUTH_CLIENT_SECRET: "client-secret",
+      GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET: "context-secret",
+      GOOGLE_OAUTH_REDIRECT_BASE_URL: "https://app.example.com/",
+      GOOGLE_TOKEN_ENCRYPTION_KEY: "token-key",
+    });
+
+    expect(settings.googleOAuthEnabled).toBe(true);
+    expect(settings.googleOAuthCallbackUrl).toBe("https://app.example.com/oauth/google/callback");
+  });
+
+  it("enables Salesforce OAuth routes when shared secrets and database are configured", () => {
+    const settings = loadSettings({
+      DATABASE_URL: "postgres://localhost/app",
+      SALESFORCE_OAUTH_CONTEXT_SIGNING_SECRET: "context-secret",
+      SALESFORCE_OAUTH_REDIRECT_BASE_URL: "https://app.example.com/base",
+      SALESFORCE_TOKEN_ENCRYPTION_KEY: "token-key",
+    });
+
+    expect(settings.salesforceOAuthEnabled).toBe(true);
+    expect(settings.salesforceOAuthCallbackUrl).toBe(
+      "https://app.example.com/base/oauth/salesforce/callback",
+    );
   });
 });
 
