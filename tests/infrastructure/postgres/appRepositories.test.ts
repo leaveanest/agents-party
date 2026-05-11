@@ -49,7 +49,10 @@ describe("Postgres app repositories", () => {
       { payload: { org: "salesforce-org" } },
       { payload: { title: "Follow up" } },
       { payload: { user: "U1" } },
-      { payload: { event: "created" } },
+      [
+        { payload: { event: "second", event_id: "E2", occurred_at: "2026-05-11T00:02:00.000Z" } },
+        { payload: { event: "first", event_id: "E1", occurred_at: "2026-05-11T00:01:00.000Z" } },
+      ],
       { payload: { attention: true } },
       { payload: { calendar: "primary" } },
     ]);
@@ -67,7 +70,10 @@ describe("Postgres app repositories", () => {
       calendarLinks: [{ calendar: "primary" }],
       item: { title: "Follow up" },
       participants: [{ user: "U1" }],
-      recentEvents: [{ event: "created" }],
+      recentEvents: [
+        { event: "first", event_id: "E1", occurred_at: "2026-05-11T00:01:00.000Z" },
+        { event: "second", event_id: "E2", occurred_at: "2026-05-11T00:02:00.000Z" },
+      ],
       viewerRelation: undefined,
     });
   });
@@ -157,12 +163,44 @@ describe("Postgres app repositories", () => {
       ]),
     );
   });
+
+  it("treats an empty status filter as no filter for work-item queries", async () => {
+    const pool = new RecordingPool([
+      { payload: { work_item_id: "W1" } },
+      {
+        payload: {
+          status: "captured",
+          team_id: "T1",
+          title: "Visible",
+          updated_at: "2026-05-11T00:00:00.000Z",
+          visibility_kind: "private",
+          work_item_id: "W1",
+        },
+      },
+      { payload: { role: "follower", user_id: "U1", work_item_id: "W1" } },
+      [],
+      [],
+      [],
+    ]);
+    const repository = new PostgresWorkItemRepository(pool as never);
+
+    await expect(
+      repository.listWorkItemAggregates({
+        statusIn: [],
+        teamId: "T1",
+        view: "inbox",
+        viewerUserId: "U1",
+      }),
+    ).resolves.toHaveLength(1);
+  });
 });
 
 class RecordingPool {
   readonly queries: Array<{ text: string; values?: unknown[] }> = [];
 
-  constructor(private readonly rows: Array<{ payload: unknown }> = []) {}
+  constructor(
+    private readonly rows: Array<{ payload: unknown } | Array<{ payload: unknown }>> = [],
+  ) {}
 
   async connect() {
     return this;
@@ -171,7 +209,8 @@ class RecordingPool {
   async query(text: string, values?: unknown[]) {
     this.queries.push({ text: text.trim().replace(/\s+/gu, " "), values });
     if (text.includes("select")) {
-      return { rows: this.rows.splice(0, text.includes("where") ? 1 : this.rows.length) };
+      const next = this.rows.splice(0, text.includes("where") ? 1 : this.rows.length);
+      return { rows: next.flat() };
     }
     return { rows: [] };
   }
