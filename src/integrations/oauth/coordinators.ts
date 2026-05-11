@@ -313,6 +313,22 @@ export class SalesforceAuthCoordinator {
     this.tokenCipher = input.tokenCipher;
   }
 
+  issueStartContext(input: {
+    redirectAfterConnect?: string | null;
+    salesforceOrgId: string;
+    slackUserId: string;
+    teamId: string;
+    ttlMs?: number;
+  }): string {
+    return this.signer.dumps({
+      expires_at: new Date(Date.now() + (input.ttlMs ?? 10 * 60 * 1000)).toISOString(),
+      redirect_after_connect: normalizeRedirectAfterConnect(input.redirectAfterConnect),
+      salesforce_org_id: input.salesforceOrgId,
+      slack_user_id: input.slackUserId,
+      team_id: input.teamId,
+    });
+  }
+
   async beginAuthorization(contextToken: string): Promise<string> {
     let context: ReturnType<typeof salesforceOAuthStartContextSchema.parse>;
     try {

@@ -1,14 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { OAuthContextSigner } from "../../../src/integrations/oauth/contextSigner.js";
 import {
   GoogleAuthCoordinator,
   SalesforceAuthCoordinator,
 } from "../../../src/integrations/oauth/coordinators.js";
-import {
-  salesforceOAuthStartContextSchema,
-  salesforceOAuthStateTokenSchema,
-} from "../../../src/integrations/oauth/domain.js";
+import { salesforceAuthConfigSchema } from "../../../src/integrations/oauth/domain.js";
 import { FernetTextCipher } from "../../../src/integrations/oauth/fernet.js";
 import type {
   GoogleOAuthGateway,
@@ -119,17 +115,11 @@ describe("SalesforceAuthCoordinator", () => {
       repository,
       tokenCipher: new FernetTextCipher(fernetKey),
     });
-    const contextSigner = new OAuthContextSigner({
-      contextSchema: salesforceOAuthStartContextSchema,
-      secret: "context-secret",
-      stateTokenSchema: salesforceOAuthStateTokenSchema,
-    });
-    const context = contextSigner.dumps({
-      expires_at: new Date(Date.now() + 600_000).toISOString(),
-      redirect_after_connect: "/done",
-      salesforce_org_id: "00DORG",
-      slack_user_id: "U123",
-      team_id: "T123",
+    const context = coordinator.issueStartContext({
+      redirectAfterConnect: "/done",
+      salesforceOrgId: "00DORG",
+      slackUserId: "U123",
+      teamId: "T123",
     });
 
     const authUrl = await coordinator.beginAuthorization(context);
@@ -144,6 +134,19 @@ describe("SalesforceAuthCoordinator", () => {
       slack_user_id: "U123",
       team_id: "T123",
     });
+  });
+
+  it("rejects non-Salesforce hosts in workspace config", () => {
+    expect(() =>
+      salesforceAuthConfigSchema.parse({
+        oauth_client_id: "salesforce-client",
+        redirect_uri: "https://app.example.com/oauth/salesforce/callback",
+        salesforce_my_domain_host: "example.com",
+        salesforce_org_id: "00DORG",
+        status: "active",
+        team_id: "T123",
+      }),
+    ).toThrow();
   });
 });
 

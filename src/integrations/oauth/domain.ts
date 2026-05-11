@@ -120,7 +120,7 @@ export const salesforceAuthConfigSchema = z.object({
   oauth_client_id: z.string().min(1),
   oauth_client_secret_encrypted: z.string().nullable().optional(),
   redirect_uri: z.string().url(),
-  salesforce_my_domain_host: z.string().min(1),
+  salesforce_my_domain_host: z.string().min(1).transform(normalizeSalesforceHost),
   salesforce_org_id: z.string().min(1),
   salesforce_org_name: z.string().nullable().optional(),
   status: z.string().default("active"),
