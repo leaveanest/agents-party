@@ -24,7 +24,6 @@ export type SlackFileInput = {
   filename?: string;
   mediaType?: string;
   transcript?: string;
-  url?: string;
 };
 
 export function normalizeSlackThreadMessage(
@@ -105,14 +104,8 @@ function buildAttachmentSource(file: SlackFileInput): AttachmentSource {
       type: "bytes",
     };
   }
-  if (file.url !== undefined && file.url.trim().length > 0) {
-    return {
-      type: "url",
-      url: file.url,
-    };
-  }
   return {
-    reason: "Slack file has no downloaded data or URL.",
+    reason: "Slack file has not been downloaded into application-controlled bytes.",
     type: "unavailable",
   };
 }

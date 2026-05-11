@@ -10,20 +10,17 @@ describe("normalizeSlackThreadMessage", () => {
         {
           id: "F-image",
           mediaType: "image/png",
-          url: "https://files.slack.com/image.png",
         },
         {
           extractedText: "PDF text",
           filename: "brief.pdf",
           id: "F-pdf",
           mediaType: "application/pdf",
-          url: "https://files.slack.com/brief.pdf",
         },
         {
           id: "F-audio",
           mediaType: "audio/mpeg",
           transcript: "Audio transcript",
-          url: "https://files.slack.com/audio.mp3",
         },
       ],
       messageTs: "1710000000.000100",
@@ -45,6 +42,9 @@ describe("normalizeSlackThreadMessage", () => {
       threadId: "T1:C1:1710000000.000000",
     });
     expect(message.content.map((part) => part.type)).toEqual(["text", "image", "file", "audio"]);
+    expect(message.content[1]).toMatchObject({
+      source: { type: "unavailable" },
+    });
   });
 
   it("keeps empty Slack messages representable", () => {
