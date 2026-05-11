@@ -76,6 +76,7 @@ export class PostgresMigrationRunner {
     const client = await this.pool.connect();
     try {
       await client.query("begin");
+      await acquireMigrationLock(client);
       await ensureMigrationTable(client);
       await baselineAlembicIfNeeded(client, migrations, this.options.allowAlembicBaseline ?? false);
       const applied = await appliedMigrationIds(client);
@@ -117,6 +118,12 @@ async function ensureMigrationTable(queryable: Queryable): Promise<void> {
       applied_at timestamp with time zone not null
     )
   `);
+}
+
+async function acquireMigrationLock(client: PoolClient): Promise<void> {
+  await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    "agents_party_schema_migrations",
+  ]);
 }
 
 async function appliedMigrationIds(client: PoolClient): Promise<Set<string>> {

@@ -22,6 +22,7 @@ describe("PostgresMigrationRunner", () => {
       expect.objectContaining({ id: "20260508_0002", name: "new_migration" }),
     ]);
     expect(client.sql).toContain("begin");
+    expect(client.sql).toContain("select pg_advisory_xact_lock(hashtextextended($1, 0))");
     expect(client.sql).toContain("select new_migration");
     expect(client.sql).toContain("commit");
     expect(client.released).toBe(true);
