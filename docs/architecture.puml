@@ -16,11 +16,12 @@ cloud "Cloud Translation API" as cloud_translation
 cloud "Vertex AI / Google GenAI" as vertex_ai
 
 package "Heroku" {
-  rectangle "Heroku App\nPython buildpack + Procfile" as heroku_app {
+  rectangle "Heroku App\nNode.js buildpack + Procfile" as heroku_app {
     package "agents-party Application" {
-      component "FastAPI App" as fastapi_app
+      component "Node HTTP Server" as node_app
       component "Slack Bolt Gateway\nPOST /slack/events" as slack_gateway
       component "Google OAuth Router\nGET /oauth/google/start\nGET /oauth/google/callback" as google_oauth_router
+      component "Salesforce OAuth Router\nGET /oauth/salesforce/start\nGET /oauth/salesforce/callback" as salesforce_oauth_router
       component "Slack Event Handlers\napp_home_opened / app_mention /\nmessage / reaction_added" as slack_handlers
       component "Agent Routing" as agent_routing
       component "Agent Router" as agent_router
@@ -31,10 +32,11 @@ package "Heroku" {
       component "Image Generation" as image_generation
       component "Video Generation" as video_generation
       component "Google OAuth Coordinator" as google_oauth
+      component "Salesforce OAuth Coordinator" as salesforce_oauth
+      component "TypeScript Migration Runner" as migration_runner
     }
   }
 
-  rectangle "Release Phase\nalembic upgrade head" as release_phase
   rectangle "Managed Inference and Agents Add-on\nINFERENCE_KEY / INFERENCE_URL" as heroku_inference
 
   database "Heroku Postgres Add-on\nDATABASE_URL" as postgres {
@@ -51,10 +53,12 @@ package "Heroku" {
 
 slack_user --> slack : use app
 slack --> heroku_app : HTTPS events and interactions
-heroku_app --> fastapi_app
-fastapi_app --> slack_gateway : /slack/events
-fastapi_app --> google_oauth_router : /oauth/google/*
-release_phase --> postgres : apply Alembic migrations
+heroku_app --> node_app
+node_app --> slack_gateway : /slack/events
+node_app --> google_oauth_router : /oauth/google/*
+node_app --> salesforce_oauth_router : /oauth/salesforce/*
+node_app --> migration_runner : vp run migrate
+migration_runner --> postgres : apply TypeScript migrations
 
 slack_gateway --> slack_handlers
 slack_handlers --> agent_routing : mentions and active-thread replies
@@ -95,6 +99,10 @@ google_oauth --> google_identity : authorization and token exchange
 google_identity --> browser : consent and redirect
 browser --> google_oauth_router : callback redirect
 
+browser --> salesforce_oauth_router : open signed OAuth start URL
+salesforce_oauth_router --> salesforce_oauth
+salesforce_oauth --> postgres : OAuth state / encrypted connection storage
+
 note bottom of postgres
 Stored data:
 - workspace and channel app settings
@@ -106,9 +114,9 @@ Stored data:
 end note
 
 note top of heroku_app
-Heroku hosts one FastAPI service for Slack events,
+Heroku hosts one Node.js service for Slack events,
 health checks, and OAuth browser callbacks.
-The Procfile web process binds Uvicorn to Heroku's PORT.
+The Procfile web process runs node dist/main.mjs and binds to Heroku's PORT.
 end note
 
 note right of postgres

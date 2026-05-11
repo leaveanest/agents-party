@@ -12,7 +12,7 @@ Status: Proposed
 - どの OAuth フローを標準にするか
 - Slack ユーザーと Salesforce ユーザーをどう対応づけるか
 - token と接続状態をどこに保存するか
-- FastAPI / Slack / repository / infrastructure の責務をどう分けるか
+- Node HTTP server / Slack / repository / infrastructure の責務をどう分けるか
 
 実装後の source of truth はコードとテストであり、
 この文書は初期スコープと設計判断を固定するための proposal として扱う。
@@ -41,9 +41,9 @@ Salesforce 連携で先に共通化したいのは、認証と接続状態の扱
 
 ## 初期前提
 
-- 現在のアプリは FastAPI を入口にし、Slack イベントを `/slack/events` で受けている
-- 将来の OAuth callback も同じ FastAPI アプリに追加する
-- Slack SDK 依存は `src/agents_party/slack/` に閉じ込める
+- 現在のアプリは Node HTTP server を入口にし、Slack イベントを `/slack/events` で受けている
+- 将来の OAuth callback も同じ Node HTTP server アプリに追加する
+- Slack SDK 依存は `src/slack/` に閉じ込める
 - Salesforce API 呼び出しは infrastructure 層に閉じ込める
 - PostgreSQL は接続情報の保存先として継続利用する
 - まだ Salesforce 連携は未実装であり、既存の互換制約はない
@@ -314,24 +314,24 @@ refresh に成功したら、少なくとも次を同時に更新する。
 モジュール配置案:
 
 ```text
-src/agents_party/
+src/
   repositories/
-    salesforce_connection_repository.py
-    salesforce_workspace_auth_config_repository.py
-    salesforce_oauth_state_repository.py
-    salesforce_gateway.py
+    salesforceConnectionRepository.ts
+    salesforceWorkspaceAuthConfigRepository.ts
+    salesforceOAuthStateRepository.ts
+    salesforceGateway.ts
   infrastructure/
     postgres/
-      salesforce_connection_repository.py
-      salesforce_workspace_auth_config_repository.py
-      salesforce_oauth_state_repository.py
+      salesforceConnectionRepository.ts
+      salesforceWorkspaceAuthConfigRepository.ts
+      salesforceOAuthStateRepository.ts
     salesforce/
-      oauth_client.py
-      salesforce_gateway.py
+      oauthClient.ts
+      salesforceGateway.ts
   slack/
     events/
     features/
-      salesforce_connection.py
+      salesforceConnection.ts
 ```
 
 ## 保存配置案
@@ -350,7 +350,7 @@ salesforce_oauth_states (state_id)
 - Slack user lookup が単純
 - org 切り替えや複数 org 対応を追加しやすい
 
-## FastAPI 追加ポイント
+## Node HTTP server 追加ポイント
 
 既存アプリは `/healthz` と `/slack/events` を持つだけなので、
 OAuth 用のルート追加は比較的素直に行える。
@@ -358,7 +358,7 @@ OAuth 用のルート追加は比較的素直に行える。
 初期案:
 
 - `create_app()` 内で Salesforce OAuth 用 router を登録する
-- Slack Bolt gateway とは分離し、HTTP callback は FastAPI の素の handler で受ける
+- Slack Bolt gateway とは分離し、HTTP callback は Node HTTP server の素の handler で受ける
 - callback では Slack SDK に依存しない
 
 この分離により、OAuth callback の検証と Slack UI 更新を別責務にできる。

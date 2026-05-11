@@ -1,1 +1,1 @@
-After editing Python files, run `uv run ruff check <changed-path>`, `uv run ruff format <changed-path>`, and `uv run ty check <changed-path>`. Run broader validation only when changes affect shared config, imports, or multiple packages.
+After editing TypeScript runtime files, run `vp check`, `vp run typecheck`, targeted or full `vp test`, and `vp pack` when practical. Run broader validation when changes affect shared config, imports, provider contracts, or multiple packages.

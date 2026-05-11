@@ -7,15 +7,15 @@ The TypeScript runtime owns the Google and Salesforce OAuth HTTP routes:
 - `GET /oauth/salesforce/start`
 - `GET /oauth/salesforce/callback`
 
-The implementation lives under `src/integrations/oauth/` and uses the existing PostgreSQL JSON document repositories for state and connection persistence. The runtime does not call Python OAuth routers, services, signers, or gateways.
+The implementation lives under `src/integrations/oauth/` and uses the existing PostgreSQL JSON document repositories for state and connection persistence. The runtime does not depend on removed Python OAuth routers, services, signers, or gateways.
 
 ## Compatibility
 
 Context tokens, OAuth state tokens, stored access tokens, stored refresh tokens, Salesforce PKCE verifiers, and encrypted Salesforce client secrets use Fernet-compatible encryption in TypeScript.
 
-- Context keys are derived as `base64url(sha256(secret))`, matching the legacy Python context signers.
+- Context keys are derived as `base64url(sha256(secret))`, matching the pre-cutover context signers.
 - Token encryption keys are read directly from `GOOGLE_TOKEN_ENCRYPTION_KEY` and `SALESFORCE_TOKEN_ENCRYPTION_KEY`, matching the existing Fernet key format.
-- JSON payloads are stable-key serialized before context encryption so Python-issued context tokens can be read during cutover.
+- JSON payloads are stable-key serialized before context encryption so pre-cutover context tokens can be read during cutover.
 
 ## Configuration
 

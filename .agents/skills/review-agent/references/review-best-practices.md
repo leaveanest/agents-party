@@ -15,9 +15,10 @@ Checked against public sources on 2026-03-25.
 
 - Design and repository boundaries.
   Start with whether the change belongs in the current layer and package. In `agents-party`, this especially means:
-  - Slack SDK usage stays in `src/agents_party/slack/`
-  - Firestore SDK usage stays in `src/agents_party/infrastructure/firestore/`
-  - Domain models stay independent from Slack and Firestore
+  - Slack SDK usage stays in `src/slack/`
+  - Provider-specific SDK usage stays in `src/providers/`
+  - PostgreSQL SDK usage stays in `src/infrastructure/postgres/`
+  - Domain models stay independent from Slack, AI SDK, and database SDK details
 - Functionality and regressions.
   Check whether the code does what the author intended, whether edge cases are handled, and whether user-visible changes were validated. Google also calls out concurrency and race-condition review as especially important because they are easy to miss in execution-only testing.
 - Complexity and over-engineering.
@@ -40,8 +41,7 @@ Checked against public sources on 2026-03-25.
 
 ## Repo-Specific Review Heuristics
 
-- Treat missing validation output as a review gap when Python files changed. This repository expects `ruff` and `ty` on changed paths, and sometimes targeted `pytest`.
-- Treat missing docstrings as findings when new or changed Python functions, methods, classes, or modules were touched.
+- Treat missing validation output as a review gap when TypeScript runtime files changed. This repository expects `vp check`, `vp run typecheck`, targeted or full `vp test`, and `vp pack` when practical.
 - Treat hardcoded model defaults that violate repository policy as findings. New default agent models should not hardcode OpenAI model ids in this repository.
 - Treat leaked secrets, plaintext tokens, or OAuth callback/state mistakes as high-severity findings.
 - Treat shared-config changes without broader validation as a risk to call out, even if not a hard failure yet.

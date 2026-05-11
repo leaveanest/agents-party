@@ -4,6 +4,4 @@ heroku_region   = "us"
 # Enable after the app has at least one release containing the Procfile web process.
 manage_web_formation = false
 
-additional_config_vars = {
-  # GOOGLE_CLOUD_PROJECT = "your-gcp-project-id"
-}
+additional_config_vars = {}

@@ -1,6 +1,6 @@
 # TypeScript Parity Validation
 
-OSA-17 defines the evidence required before removing the legacy Python implementation. The target runtime is the TypeScript Slack app; Python is not a fallback path after OSA-16.
+OSA-17 captured the evidence required before removing the Python implementation. The runtime is now the TypeScript Slack app; Python is not a fallback path.
 
 ## Automated Coverage
 
@@ -41,7 +41,7 @@ These logs are intentionally emitted at Slack handler boundaries so production s
 
 ## Manual Slack Verification
 
-Perform this checklist in a staging Slack workspace before OSA-16:
+Perform this checklist in a staging Slack workspace before major runtime or deployment changes:
 
 - `GET /healthz` returns a healthy response from the TypeScript process.
 - A fresh `app_mention` produces one threaded reply and logs the selected specialist/model/provider.
@@ -60,9 +60,9 @@ Perform this checklist in a staging Slack workspace before OSA-16:
 
 ## Rollback And Data Compatibility
 
-Python removal is a destructive application cutover. After OSA-16:
+Python removal was a destructive application cutover. After OSA-16:
 
-- Rollback is restoring the previous deployment artifact plus a database backup or compatible schema snapshot; the repository will not contain a Python fallback service.
+- Rollback is restoring an older deployment artifact plus a database backup or compatible schema snapshot; the repository does not contain a Python fallback service.
 - TypeScript migrations are additive/idempotent where possible, but production rollback after new writes must be validated against stored JSON payloads and index tables.
 - OAuth state consumption is one-time delete-returning behavior. A rollback cannot safely replay consumed OAuth callback state.
 - Generated media handoffs may include provider operation names or URIs that only the TypeScript provider path understands.

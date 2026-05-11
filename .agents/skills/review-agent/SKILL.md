@@ -16,10 +16,10 @@ Start from the actual diff, keep the review scoped and actionable, and optimize 
    - Review changed files first and pull surrounding code only when context is needed.
 2. Prioritize the highest-signal risks.
    - Look first for correctness bugs, regressions, security issues, missing validation, and data integrity problems.
-   - Check repository-boundary violations: Slack SDK must stay under `src/agents_party/slack/`, Firestore SDK under `src/agents_party/infrastructure/firestore/`, and domain models must stay independent from Slack and Firestore.
+   - Check repository-boundary violations: Slack SDK must stay under `src/slack/`, provider-specific SDK usage under `src/providers/`, PostgreSQL SDK usage under `src/infrastructure/postgres/`, and domain models must stay independent from Slack, AI SDK, and database SDK details.
    - Treat missing or weak tests as findings when the change alters behavior, contracts, or failure handling.
 3. Validate findings with focused checks.
-   - Run targeted non-mutating checks when they strengthen a claim, such as `uv run pytest <paths>`, `uv run ruff check <paths>`, or `uv run ty check <paths>`.
+   - Run targeted non-mutating checks when they strengthen a claim, such as `vp check`, `vp run typecheck`, `vp test <paths>`, or `vp pack`.
    - Prefer file-scoped validation first; widen scope only when shared config, imports, or cross-package behavior changed.
 4. Report like a reviewer, not an implementer.
    - Lead with findings ordered by severity and include file and line references.
