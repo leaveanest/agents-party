@@ -1,9 +1,16 @@
 import { loadSettings } from "./config.js";
+import { createDefaultAgentRunner } from "./agents/runner.js";
 import { createAppServer } from "./server.js";
+import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
 
 const settings = loadSettings();
-const slackGateway = settings.slackEnabled ? createSlackGateway(settings) : undefined;
+const agentRunner = createDefaultAgentRunner(settings);
+const slackGateway = settings.slackEnabled
+  ? createSlackGateway(settings, {
+      featureHandlers: createAgentSlackHandlers(agentRunner),
+    })
+  : undefined;
 const server = createAppServer(settings, {
   slackGateway,
 });

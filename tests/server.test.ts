@@ -6,6 +6,7 @@ import type { AppSettings } from "../src/config.js";
 import { createAppServer } from "../src/server.js";
 
 const settings: AppSettings = {
+  agentModelId: "google:gemini-2.5-flash",
   appEnv: "test",
   appHost: "127.0.0.1",
   appName: "agents-party",

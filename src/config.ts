@@ -1,4 +1,5 @@
 export type AppSettings = {
+  agentModelId: string;
   appEnv: string;
   appHost: string;
   appName: string;
@@ -20,6 +21,7 @@ export type AppSettings = {
 };
 
 const DEFAULT_PORT = 8000;
+const DEFAULT_AGENT_MODEL_ID = "google:gemini-2.5-flash";
 const DEFAULT_SLACK_SCOPES = [
   "app_mentions:read",
   "channels:history",
@@ -56,6 +58,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     (slackBotToken !== undefined || slackInstallationStoreEnabled);
 
   return {
+    agentModelId:
+      readText(env.AGENT_MODEL) ?? readText(env.WORK_MANAGER_MODEL) ?? DEFAULT_AGENT_MODEL_ID,
     appEnv: env.APP_ENV ?? "local",
     appHost: env.APP_HOST ?? "0.0.0.0",
     appName: env.APP_NAME ?? "agents-party",

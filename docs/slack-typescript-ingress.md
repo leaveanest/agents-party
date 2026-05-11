@@ -45,8 +45,8 @@ The in-memory deduplicator is process-local. This is enough to avoid repeated lo
 ## Event Coverage
 
 - `app_home_opened`: registered in TypeScript and publishes a minimal TypeScript migration home view.
-- `app_mention`: registered and acknowledged in TypeScript; agent execution is pending the TypeScript AgentRunner work.
-- `message`: registered and acknowledged in TypeScript; thread follow-up routing is pending the TypeScript AgentRunner work.
-- `reaction_added`: registered and acknowledged in TypeScript; translation reaction execution is pending the TypeScript AgentRunner work.
+- `app_mention`: registered in TypeScript and routed through the TypeScript `AgentRunner`.
+- `message`: registered and acknowledged in TypeScript; thread follow-up routing is pending the TypeScript thread policy cutover.
+- `reaction_added`: registered and acknowledged in TypeScript; translation reaction execution is pending the TypeScript specialist command cutover.
 
 These gaps are explicit migration boundaries, not Python fallbacks.

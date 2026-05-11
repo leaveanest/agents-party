@@ -4,6 +4,7 @@ import type { AppSettings } from "../../src/config.js";
 import { createSlackApp } from "../../src/slack/app.js";
 
 const baseSettings: AppSettings = {
+  agentModelId: "google:gemini-2.5-flash",
   appEnv: "test",
   appHost: "127.0.0.1",
   appName: "agents-party",
