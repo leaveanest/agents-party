@@ -1,6 +1,10 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs, StringIndexed } from "@slack/bolt";
 
-import type { AgentRunner, AgentRunnerResult } from "../agents/runner.js";
+import {
+  AgentRunnerExecutionError,
+  type AgentRunner,
+  type AgentRunnerResult,
+} from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
@@ -106,6 +110,14 @@ async function handleMention(
     });
     runnerResult = result;
     text = result.message;
+    logAgentRunnerSuccess(logger, {
+      channelId: event.channel,
+      eventType: "app_mention",
+      messageTs: event.ts,
+      result,
+      teamId,
+      threadTs,
+    });
     if (options.routingRepository !== undefined) {
       try {
         await options.routingRepository.activateThreadAgent({
@@ -127,13 +139,21 @@ async function handleMention(
   } catch (error) {
     logger.error("TypeScript AgentRunner failed while handling app_mention.", {
       error,
+      ...runnerFailureLogFields(error),
       teamId,
       threadTs,
     });
     text = "I couldn't complete that request. Please try again in a moment.";
   }
 
-  await postAgentResult({ channel: event.channel, client, result: runnerResult, text, threadTs });
+  await postAgentResult({
+    channel: event.channel,
+    client,
+    logger,
+    result: runnerResult,
+    text,
+    threadTs,
+  });
 }
 
 async function handleMessage(
@@ -188,6 +208,14 @@ async function handleMessage(
     });
     runnerResult = result;
     text = result.message;
+    logAgentRunnerSuccess(logger, {
+      channelId: event.channel,
+      eventType: "message_follow_up",
+      messageTs: event.ts,
+      result,
+      teamId,
+      threadTs,
+    });
     try {
       await options.routingRepository.activateThreadAgent({
         agentId: result.decision.specialist,
@@ -207,13 +235,21 @@ async function handleMessage(
   } catch (error) {
     logger.error("TypeScript AgentRunner failed while handling message follow-up.", {
       error,
+      ...runnerFailureLogFields(error),
       teamId,
       threadTs,
     });
     text = "I couldn't complete that request. Please try again in a moment.";
   }
 
-  await postAgentResult({ channel: event.channel, client, result: runnerResult, text, threadTs });
+  await postAgentResult({
+    channel: event.channel,
+    client,
+    logger,
+    result: runnerResult,
+    text,
+    threadTs,
+  });
 }
 
 async function handleReactionAdded(
@@ -277,9 +313,18 @@ async function handleReactionAdded(
       viewerContextChannelIds: [channelId],
     });
     text = result.message;
+    logAgentRunnerSuccess(logger, {
+      channelId,
+      eventType: "reaction_added",
+      messageTs,
+      result,
+      teamId,
+      threadTs,
+    });
   } catch (error) {
     logger.error("TypeScript AgentRunner failed while handling translation reaction.", {
       error,
+      ...runnerFailureLogFields(error),
       teamId,
       threadTs,
     });
@@ -340,6 +385,7 @@ async function readThreadTextMessages(
 async function postAgentResult(input: {
   channel: string;
   client: SlackClient;
+  logger: unknown;
   result: AgentRunnerResult | undefined;
   text: string;
   threadTs: string;
@@ -353,6 +399,12 @@ async function postAgentResult(input: {
       initial_comment: input.text,
       thread_ts: input.threadTs,
     });
+    logInfo(input.logger, "Delivered generated media to Slack.", {
+      channelId: input.channel,
+      delivery: "file_upload",
+      mediaKind: media.kind,
+      threadTs: input.threadTs,
+    });
     return;
   }
 
@@ -362,6 +414,58 @@ async function postAgentResult(input: {
     text: suffix === undefined ? input.text : `${input.text}\n${suffix}`,
     thread_ts: input.threadTs,
   });
+  if (suffix !== undefined) {
+    logInfo(input.logger, "Delivered generated media handoff to Slack.", {
+      channelId: input.channel,
+      delivery: media?.uri === undefined ? "operation" : "uri",
+      mediaKind: media?.kind,
+      threadTs: input.threadTs,
+    });
+  }
+}
+
+function logAgentRunnerSuccess(
+  logger: unknown,
+  input: {
+    channelId: string;
+    eventType: "app_mention" | "message_follow_up" | "reaction_added";
+    messageTs: string;
+    result: AgentRunnerResult;
+    teamId: string;
+    threadTs: string;
+  },
+): void {
+  const media = readGeneratedMedia(input.result.structuredResult);
+  logInfo(logger, "TypeScript AgentRunner completed Slack event.", {
+    channelId: input.channelId,
+    eventType: input.eventType,
+    hasStructuredResult: input.result.structuredResult !== undefined,
+    mediaKind: media?.kind,
+    messageTs: input.messageTs,
+    modelId: input.result.model?.id,
+    provider: input.result.model?.provider,
+    specialist: input.result.decision.specialist,
+    teamId: input.teamId,
+    threadTs: input.threadTs,
+    toolResultCount: input.result.toolResults.length,
+  });
+}
+
+function logInfo(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.info === "function") {
+    logger.info(message, metadata);
+  }
+}
+
+function runnerFailureLogFields(error: unknown): Record<string, unknown> {
+  if (!(error instanceof AgentRunnerExecutionError)) {
+    return {};
+  }
+  return {
+    modelId: error.model?.id,
+    provider: error.model?.provider,
+    specialist: error.specialist,
+  };
 }
 
 function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia | undefined {

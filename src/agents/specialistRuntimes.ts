@@ -16,6 +16,7 @@ export type AgentSpecialistRuntimeInput = {
 
 export type AgentSpecialistRuntimeResult = {
   message: string;
+  model?: AgentSpecialistRuntimeModelTrace;
   raw?: unknown;
   structuredResult: JsonValue;
 };
@@ -23,6 +24,22 @@ export type AgentSpecialistRuntimeResult = {
 export type AgentSpecialistRuntime = (
   input: AgentSpecialistRuntimeInput,
 ) => Promise<AgentSpecialistRuntimeResult>;
+
+export type AgentSpecialistRuntimeModelTrace = {
+  id: string;
+  provider?: ModelInfo["provider"];
+};
+
+export class AgentSpecialistRuntimeError extends Error {
+  constructor(
+    readonly specialist: AgentSpecialist,
+    readonly model: AgentSpecialistRuntimeModelTrace | undefined,
+    cause: unknown,
+  ) {
+    super(`Native specialist runtime failed for ${specialist}.`, { cause });
+    this.name = "AgentSpecialistRuntimeError";
+  }
+}
 
 export type GoogleMapsGateway = {
   computeRoute(input: {
@@ -153,28 +170,31 @@ export function createDefaultSpecialistRuntimes(
 
 export function createWebResearchRuntime(): AgentSpecialistRuntime {
   return async ({ invocation, model, providerRouter }) => {
-    const result = await providerRouter.generate({
-      history: specialistHistory(
-        "You are a web research specialist. Use native web search when available. Return concise JSON with action, answer, sources, and caveats.",
-        invocation,
-      ),
-      maxOutputTokens: 1600,
-      metadata: baseMetadata(invocation, "web_research"),
-      model,
-      providerOptions: {
-        google: { grounding: true },
-      },
-      requiredCapabilities: ["web_search"],
+    return withRuntimeContext("web_research", model, async () => {
+      const result = await providerRouter.generate({
+        history: specialistHistory(
+          "You are a web research specialist. Use native web search when available. Return concise JSON with action, answer, sources, and caveats.",
+          invocation,
+        ),
+        maxOutputTokens: 1600,
+        metadata: baseMetadata(invocation, "web_research"),
+        model,
+        providerOptions: {
+          google: { grounding: true },
+        },
+        requiredCapabilities: ["web_search"],
+      });
+      const parsed = webResearchResultSchema.parse({
+        ...asRecord(parseJsonOrAnswer(result.content)),
+        sources: normalizeSources(parseJsonOrAnswer(result.content), result.sources),
+      });
+      return {
+        message: renderWebResearch(parsed),
+        model: modelTrace(model),
+        raw: result.raw,
+        structuredResult: parsed,
+      };
     });
-    const parsed = webResearchResultSchema.parse({
-      ...asRecord(parseJsonOrAnswer(result.content)),
-      sources: normalizeSources(parseJsonOrAnswer(result.content), result.sources),
-    });
-    return {
-      message: renderWebResearch(parsed),
-      raw: result.raw,
-      structuredResult: parsed,
-    };
   };
 }
 
@@ -229,45 +249,58 @@ export function createImageGenerationRuntime(
   gateway?: MediaGenerationGateway,
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
-    const model = providerRouter.registry.get(modelId);
-    providerRouter.registry.assertCapabilities(model, ["image_generation"]);
-    if (gateway === undefined) {
+    let model: ModelInfo | undefined;
+    try {
+      model = providerRouter.registry.get(modelId);
+      providerRouter.registry.assertCapabilities(model, ["image_generation"]);
+    } catch (error) {
+      throw new AgentSpecialistRuntimeError(
+        "image_generation",
+        model === undefined ? { id: modelId } : modelTrace(model),
+        error,
+      );
+    }
+    return withRuntimeContext("image_generation", model, async () => {
+      if (gateway === undefined) {
+        const structured = imageGenerationResultSchema.parse({
+          action: "unconfigured",
+          media: {
+            kind: "image",
+            modelId: model.id,
+            prompt: invocation.text,
+            provider: model.provider,
+            status: "generated",
+          },
+          message:
+            "Image generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+        });
+        return {
+          message: structured.message,
+          model: modelTrace(model),
+          structuredResult: structured,
+        };
+      }
+      const generated = await gateway.generateImage({ model, prompt: invocation.text });
       const structured = imageGenerationResultSchema.parse({
-        action: "unconfigured",
+        action: "generated",
         media: {
+          dataBase64: generated.dataBase64,
           kind: "image",
+          mimeType: generated.mimeType,
           modelId: model.id,
           prompt: invocation.text,
           provider: model.provider,
           status: "generated",
+          uri: generated.uri,
         },
-        message:
-          "Image generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+        message: "Image generated by the native provider path.",
       });
       return {
         message: structured.message,
+        model: modelTrace(model),
         structuredResult: structured,
       };
-    }
-    const generated = await gateway.generateImage({ model, prompt: invocation.text });
-    const structured = imageGenerationResultSchema.parse({
-      action: "generated",
-      media: {
-        dataBase64: generated.dataBase64,
-        kind: "image",
-        mimeType: generated.mimeType,
-        modelId: model.id,
-        prompt: invocation.text,
-        provider: model.provider,
-        status: "generated",
-        uri: generated.uri,
-      },
-      message: "Image generated by the native provider path.",
     });
-    return {
-      message: structured.message,
-      structuredResult: structured,
-    };
   };
 }
 
@@ -276,62 +309,97 @@ export function createVideoGenerationRuntime(
   gateway?: MediaGenerationGateway,
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
-    const model = providerRouter.registry.get(modelId);
-    providerRouter.registry.assertCapabilities(model, ["video_generation"]);
-    const aspectRatio = /\b(vertical|portrait|reels|shorts|9:16)\b/iu.test(invocation.text)
-      ? "9:16"
-      : "16:9";
-    const durationSeconds = 8;
-    if (gateway === undefined) {
+    let model: ModelInfo | undefined;
+    try {
+      model = providerRouter.registry.get(modelId);
+      providerRouter.registry.assertCapabilities(model, ["video_generation"]);
+    } catch (error) {
+      throw new AgentSpecialistRuntimeError(
+        "video_generation",
+        model === undefined ? { id: modelId } : modelTrace(model),
+        error,
+      );
+    }
+    return withRuntimeContext("video_generation", model, async () => {
+      const aspectRatio = /\b(vertical|portrait|reels|shorts|9:16)\b/iu.test(invocation.text)
+        ? "9:16"
+        : "16:9";
+      const durationSeconds = 8;
+      if (gateway === undefined) {
+        const structured = videoGenerationResultSchema.parse({
+          action: "unconfigured",
+          media: {
+            aspectRatio,
+            durationSeconds,
+            kind: "video",
+            modelId: model.id,
+            prompt: invocation.text,
+            provider: model.provider,
+            status: "in_progress",
+          },
+          message:
+            "Video generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+        });
+        return {
+          message: structured.message,
+          model: modelTrace(model),
+          structuredResult: structured,
+        };
+      }
+      const generated = await gateway.generateVideo({
+        aspectRatio,
+        durationSeconds,
+        model,
+        prompt: invocation.text,
+      });
       const structured = videoGenerationResultSchema.parse({
-        action: "unconfigured",
+        action: generated.status,
         media: {
           aspectRatio,
+          dataBase64: generated.dataBase64,
           durationSeconds,
           kind: "video",
+          mimeType: generated.mimeType,
           modelId: model.id,
+          operationName: generated.operationName,
           prompt: invocation.text,
           provider: model.provider,
-          status: "in_progress",
+          status: generated.status,
+          uri: generated.uri,
         },
         message:
-          "Video generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+          generated.status === "generated"
+            ? "Video generated by the native provider path."
+            : "Video generation started by the native provider path.",
       });
       return {
         message: structured.message,
+        model: modelTrace(model),
         structuredResult: structured,
       };
+    });
+  };
+}
+
+async function withRuntimeContext(
+  specialist: AgentSpecialist,
+  model: ModelInfo,
+  run: () => Promise<AgentSpecialistRuntimeResult>,
+): Promise<AgentSpecialistRuntimeResult> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof AgentSpecialistRuntimeError) {
+      throw error;
     }
-    const generated = await gateway.generateVideo({
-      aspectRatio,
-      durationSeconds,
-      model,
-      prompt: invocation.text,
-    });
-    const structured = videoGenerationResultSchema.parse({
-      action: generated.status,
-      media: {
-        aspectRatio,
-        dataBase64: generated.dataBase64,
-        durationSeconds,
-        kind: "video",
-        mimeType: generated.mimeType,
-        modelId: model.id,
-        operationName: generated.operationName,
-        prompt: invocation.text,
-        provider: model.provider,
-        status: generated.status,
-        uri: generated.uri,
-      },
-      message:
-        generated.status === "generated"
-          ? "Video generated by the native provider path."
-          : "Video generation started by the native provider path.",
-    });
-    return {
-      message: structured.message,
-      structuredResult: structured,
-    };
+    throw new AgentSpecialistRuntimeError(specialist, modelTrace(model), error);
+  }
+}
+
+function modelTrace(model: ModelInfo): AgentSpecialistRuntimeModelTrace {
+  return {
+    id: model.id,
+    provider: model.provider,
   };
 }
 

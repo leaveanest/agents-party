@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { AgentRunner } from "../../src/agents/runner.js";
+import { AgentRunner, AgentRunnerExecutionError } from "../../src/agents/runner.js";
 import {
   createGoogleMapsRuntime,
   createImageGenerationRuntime,
@@ -148,6 +148,7 @@ describe("specialist runtimes", () => {
       action: "generated",
       media: { dataBase64: "aW1hZ2U=", kind: "image", status: "generated" },
     });
+    expect(image.model).toEqual({ id: "google:gemini-2.5-flash-image", provider: "google" });
     expect(video.structuredResult).toMatchObject({
       action: "in_progress",
       media: {
@@ -157,6 +158,7 @@ describe("specialist runtimes", () => {
         status: "in_progress",
       },
     });
+    expect(video.model).toEqual({ id: "google:veo-3.1-fast-generate-001", provider: "google" });
   });
 
   it("parses Japanese route requests into Google Maps route calls", async () => {
@@ -216,6 +218,158 @@ describe("specialist runtimes", () => {
 
     expect(result.structuredResult).toMatchObject({
       places: [expect.objectContaining({ name: "Osaka Station" })],
+    });
+    expect(result.model).toBeUndefined();
+  });
+
+  it("AgentRunner reports the actual model used by native media runtimes", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({ content: "generic should not run" }),
+      specialistRuntimes: {
+        image_generation: createImageGenerationRuntime(imageModel.id, {
+          async generateImage() {
+            return { dataBase64: "aW1hZ2U=", mimeType: "image/png" };
+          },
+          async generateVideo() {
+            throw new Error("Unexpected video generation call.");
+          },
+        }),
+      },
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "draw an image",
+      userId: "U1",
+    });
+
+    expect(result.model).toEqual({ id: "google:gemini-2.5-flash-image", provider: "google" });
+  });
+
+  it("AgentRunner wraps native media failures with attempted specialist and model context", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({ content: "generic should not run" }),
+      specialistRuntimes: {
+        image_generation: createImageGenerationRuntime(imageModel.id, {
+          async generateImage() {
+            throw new Error("provider failed");
+          },
+          async generateVideo() {
+            throw new Error("Unexpected video generation call.");
+          },
+        }),
+      },
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "draw an image",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "google:gemini-2.5-flash-image", provider: "google" },
+      specialist: "image_generation",
+    });
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "draw an image",
+        userId: "U1",
+      }),
+    ).rejects.toBeInstanceOf(AgentRunnerExecutionError);
+  });
+
+  it("AgentRunner wraps native structured-result failures with attempted model context", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({
+        content: JSON.stringify({ action: "invalid", answer: "bad" }),
+      }),
+      specialistRuntimes: {
+        web_research: createWebResearchRuntime(),
+      },
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "research this",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "google:gemini-2.5-flash", provider: "google" },
+      specialist: "web_research",
+    });
+  });
+
+  it("AgentRunner wraps native media capability failures with attempted model context", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({ content: "generic should not run" }),
+      specialistRuntimes: {
+        image_generation: createImageGenerationRuntime(model.id, {
+          async generateImage() {
+            throw new Error("Unexpected generation call.");
+          },
+          async generateVideo() {
+            throw new Error("Unexpected video generation call.");
+          },
+        }),
+      },
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "draw an image",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "google:gemini-2.5-flash", provider: "google" },
+      specialist: "image_generation",
+    });
+  });
+
+  it("AgentRunner wraps missing native media model failures with attempted model id", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({ content: "generic should not run" }),
+      specialistRuntimes: {
+        image_generation: createImageGenerationRuntime("missing:image-model", {
+          async generateImage() {
+            throw new Error("Unexpected generation call.");
+          },
+          async generateVideo() {
+            throw new Error("Unexpected video generation call.");
+          },
+        }),
+      },
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "draw an image",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "missing:image-model" },
+      specialist: "image_generation",
     });
   });
 });

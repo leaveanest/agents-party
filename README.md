@@ -29,6 +29,8 @@ See [`docs/provider-router.md`](docs/provider-router.md) for the routing and cap
 
 Agent routing through `app_mention`, active thread follow-up auto-routing, flag-reaction translation commands, native specialist runtimes, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, and encrypted token persistence are available in the TypeScript runtime. Full App Home settings and native provider adapters for Bedrock/Dify/provider-specific features remain planned migration work.
 
+Before deleting the legacy Python implementation, use the parity, observability, manual Slack, and rollback checklist in [`docs/typescript-parity-validation.md`](docs/typescript-parity-validation.md).
+
 ## Legacy Python Capabilities
 
 The legacy Python application still contains:
@@ -427,6 +429,7 @@ Architecture references:
 - [`docs/architecture.puml`](docs/architecture.puml)
 - [`docs/agent-routing-sequence.puml`](docs/agent-routing-sequence.puml)
 - [`docs/agent-skills.md`](docs/agent-skills.md)
+- [`docs/typescript-parity-validation.md`](docs/typescript-parity-validation.md)
 
 ## License
 

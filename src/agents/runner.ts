@@ -15,6 +15,7 @@ import {
   workManagerResultSchema,
 } from "./schemas.js";
 import {
+  AgentSpecialistRuntimeError,
   createDefaultSpecialistRuntimes,
   type AgentSpecialistRuntime,
 } from "./specialistRuntimes.js";
@@ -23,10 +24,27 @@ import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 export type AgentRunnerResult = {
   decision: AgentRouterDecision;
   message: string;
+  model?: AgentRunnerModelTrace;
   raw?: unknown;
   structuredResult?: JsonValue;
   toolResults: AgentToolResult[];
 };
+
+export type AgentRunnerModelTrace = {
+  id: string;
+  provider?: ModelInfo["provider"];
+};
+
+export class AgentRunnerExecutionError extends Error {
+  constructor(
+    readonly specialist: AgentSpecialist,
+    readonly model: AgentRunnerModelTrace | undefined,
+    cause: unknown,
+  ) {
+    super(`TypeScript AgentRunner failed for ${specialist}: ${errorMessage(cause)}`, { cause });
+    this.name = "AgentRunnerExecutionError";
+  }
+}
 
 export type AgentRunnerOptions = {
   defaultModelId: string;
@@ -61,77 +79,106 @@ export class AgentRunner {
     const decision = selectSpecialist(invocation);
     const nativeRuntime = this.options.specialistRuntimes?.[decision.specialist];
     if (nativeRuntime !== undefined) {
-      const model = this.options.providerRouter.registry.get(this.options.defaultModelId);
-      const result = await nativeRuntime({
-        invocation,
-        model,
-        providerRouter: this.options.providerRouter,
-      });
+      const model = this.resolveDefaultModel(decision.specialist);
+      let result;
+      try {
+        result = await nativeRuntime({
+          invocation,
+          model,
+          providerRouter: this.options.providerRouter,
+        });
+      } catch (error) {
+        throw new AgentRunnerExecutionError(
+          decision.specialist,
+          modelTraceFromRuntimeError(error),
+          error,
+        );
+      }
       return {
         decision,
         message: result.message,
+        model: result.model,
         raw: result.raw,
         structuredResult: result.structuredResult,
         toolResults: [],
       };
     }
-    const { result, toolResults } = await this.runSpecialist(invocation, decision);
+    const { model, result, toolResults } = await this.runSpecialist(invocation, decision);
 
-    return normalizeRunnerResult(decision, result, toolResults);
+    try {
+      return normalizeRunnerResult(decision, model, result, toolResults);
+    } catch (error) {
+      throw new AgentRunnerExecutionError(decision.specialist, modelTrace(model), error);
+    }
   }
 
   private async runSpecialist(
     invocation: SlackAgentInvocation,
     decision: AgentRouterDecision,
-  ): Promise<{ result: LlmResult; toolResults: AgentToolResult[] }> {
-    const model = this.options.providerRouter.registry.get(this.options.defaultModelId);
+  ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
+    const model = this.resolveDefaultModel(decision.specialist);
     const toolResults: AgentToolResult[] = [];
-    let history = buildSpecialistHistory({
-      invocation,
-      model,
-      prompt: this.promptFor(decision.specialist),
-      toolResults,
-    });
-    const requestBase: Omit<LlmRequest, "history"> = {
-      maxOutputTokens: 1200,
-      metadata: {
-        slack_channel_id: invocation.channelId,
-        slack_team_id: invocation.teamId,
-        slack_user_id: invocation.userId,
-        specialist: decision.specialist,
-      },
-      model,
-      tools:
-        decision.specialist === "work_manager"
-          ? this.options.toolRegistry?.definitions()
-          : undefined,
-    };
-    const maxToolRounds = this.options.maxToolRounds ?? 1;
-    for (let round = 0; round <= maxToolRounds; round += 1) {
-      const result = await this.options.providerRouter.generate({ ...requestBase, history });
-      if ((result.toolCalls?.length ?? 0) === 0) {
-        return { result, toolResults };
-      }
-      if (this.options.toolRegistry === undefined) {
-        throw new Error("Agent returned tool calls, but no tool registry is configured.");
-      }
-      if (round === maxToolRounds) {
-        throw new Error("Agent exceeded the configured tool-call round limit.");
-      }
-      const roundToolResults = await this.options.toolRegistry.executeAll(result.toolCalls ?? []);
-      toolResults.push(...roundToolResults);
-      history = buildSpecialistHistory({
+    try {
+      let history = buildSpecialistHistory({
         invocation,
         model,
         prompt: this.promptFor(decision.specialist),
         toolResults,
       });
+      const requestBase: Omit<LlmRequest, "history"> = {
+        maxOutputTokens: 1200,
+        metadata: {
+          slack_channel_id: invocation.channelId,
+          slack_team_id: invocation.teamId,
+          slack_user_id: invocation.userId,
+          specialist: decision.specialist,
+        },
+        model,
+        tools:
+          decision.specialist === "work_manager"
+            ? this.options.toolRegistry?.definitions()
+            : undefined,
+      };
+      const maxToolRounds = this.options.maxToolRounds ?? 1;
+      for (let round = 0; round <= maxToolRounds; round += 1) {
+        const result = await this.options.providerRouter.generate({ ...requestBase, history });
+        if ((result.toolCalls?.length ?? 0) === 0) {
+          return { model, result, toolResults };
+        }
+        if (this.options.toolRegistry === undefined) {
+          throw new Error("Agent returned tool calls, but no tool registry is configured.");
+        }
+        if (round === maxToolRounds) {
+          throw new Error("Agent exceeded the configured tool-call round limit.");
+        }
+        const roundToolResults = await this.options.toolRegistry.executeAll(result.toolCalls ?? []);
+        toolResults.push(...roundToolResults);
+        history = buildSpecialistHistory({
+          invocation,
+          model,
+          prompt: this.promptFor(decision.specialist),
+          toolResults,
+        });
+      }
+      throw new Error("Agent tool-call loop ended unexpectedly.");
+    } catch (error) {
+      if (error instanceof AgentRunnerExecutionError) {
+        throw error;
+      }
+      throw new AgentRunnerExecutionError(decision.specialist, modelTrace(model), error);
     }
-    throw new Error("Agent tool-call loop ended unexpectedly.");
   }
 
   private promptFor(specialist: AgentSpecialist): string {
     return this.options.specialistPrompts?.[specialist] ?? DEFAULT_SPECIALIST_PROMPTS[specialist];
+  }
+
+  private resolveDefaultModel(specialist: AgentSpecialist): ModelInfo {
+    try {
+      return this.options.providerRouter.registry.get(this.options.defaultModelId);
+    } catch (error) {
+      throw new AgentRunnerExecutionError(specialist, { id: this.options.defaultModelId }, error);
+    }
   }
 }
 
@@ -257,15 +304,18 @@ function buildSpecialistHistory(input: {
 
 function normalizeRunnerResult(
   decision: AgentRouterDecision,
+  model: ModelInfo,
   result: LlmResult,
   toolResults: AgentToolResult[],
 ): AgentRunnerResult {
+  const modelSummary = modelTrace(model);
   if (decision.specialist === "work_manager") {
     const parsed = parseJsonObject(result.content);
     const structured = workManagerResultSchema.parse(parsed);
     return {
       decision,
       message: structured.message,
+      model: modelSummary,
       raw: result.raw,
       structuredResult: structured,
       toolResults,
@@ -277,6 +327,7 @@ function normalizeRunnerResult(
     return {
       decision,
       message: structured.translatedText ?? structured.message ?? "Translation completed.",
+      model: modelSummary,
       raw: result.raw,
       structuredResult: structured,
       toolResults,
@@ -285,9 +336,25 @@ function normalizeRunnerResult(
   return {
     decision,
     message: specialistTextResultSchema.parse({ message: result.content }).message,
+    model: modelSummary,
     raw: result.raw,
     toolResults,
   };
+}
+
+function modelTrace(model: ModelInfo): AgentRunnerModelTrace {
+  return {
+    id: model.id,
+    provider: model.provider,
+  };
+}
+
+function modelTraceFromRuntimeError(error: unknown): AgentRunnerModelTrace | undefined {
+  return error instanceof AgentSpecialistRuntimeError ? error.model : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown error";
 }
 
 function matchesAny(text: string, patterns: readonly RegExp[]): boolean {

@@ -62,6 +62,7 @@ describe("AgentRunner", () => {
     expect(result).toMatchObject({
       decision: { specialist: "assistant" },
       message: "Hello from TypeScript AgentRunner",
+      model: { id: "google:gemini-2.5-flash", provider: "google" },
     });
     expect(router.requests[0]?.history.messages.at(-1)).toMatchObject({
       id: "1.0",
@@ -193,6 +194,48 @@ describe("AgentRunner", () => {
         userId: "U1",
       }),
     ).rejects.toThrow("Invalid output from agent tool");
+  });
+
+  it("wraps structured output validation failures with specialist and model context", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({
+        content: JSON.stringify({ action: "listed", workItems: [] }),
+      }),
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "list my tasks",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "google:gemini-2.5-flash", provider: "google" },
+      specialist: "work_manager",
+    });
+  });
+
+  it("wraps default model lookup failures with attempted model id", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: "missing:default-model",
+      providerRouter: new FakeProviderRouter({ content: "will not run" }),
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "hello",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "missing:default-model" },
+      specialist: "assistant",
+    });
   });
 });
 
