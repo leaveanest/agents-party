@@ -20,10 +20,10 @@ See [`docs/slack-typescript-ingress.md`](docs/slack-typescript-ingress.md) for t
 The TypeScript domain history model represents text, image, file/PDF, audio, assistant, and tool-result events without storing AI SDK `ModelMessage[]`.
 See [`docs/message-history-model.md`](docs/message-history-model.md) for the conversion boundary.
 
-The TypeScript provider boundary defines `ProviderRouter`, model registry, provider contracts, and capability checks for OpenAI, Azure OpenAI, Anthropic, Google, Bedrock, Groq, NVIDIA, PLaMo, xAI, Dify, and LiteLLM.
+The TypeScript provider boundary defines `ProviderRouter`, model registry, provider contracts, capability checks, and an AI SDK common adapter lane for OpenAI, Azure OpenAI, Anthropic, Google, Groq, xAI, PLaMo, NVIDIA, and LiteLLM.
 See [`docs/provider-router.md`](docs/provider-router.md) for the routing and capability boundary.
 
-Agent routing, specialist execution, full App Home settings, Google/Salesforce OAuth routes, and concrete provider invocation adapters are planned migration work and are not yet available in the TypeScript runtime.
+Agent routing, specialist execution, full App Home settings, Google/Salesforce OAuth routes, and native provider adapters for Bedrock/Dify/provider-specific features are planned migration work and are not yet available in the TypeScript runtime.
 
 ## Legacy Python Capabilities
 
