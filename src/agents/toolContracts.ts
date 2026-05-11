@@ -16,6 +16,7 @@ export type AgentToolDefinition<
 };
 
 export type AgentToolResult = {
+  input: unknown;
   output?: JsonValue;
   toolCallId: string;
   toolName: string;
@@ -84,6 +85,7 @@ export class AgentToolRegistry {
       throw new InvalidAgentToolOutputError(tool.name, parsedOutput.error.message);
     }
     return {
+      input: toolCall.input,
       output: parsedOutput.data,
       toolCallId: toolCall.toolCallId,
       toolName: tool.name,

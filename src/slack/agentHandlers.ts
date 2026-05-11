@@ -45,7 +45,7 @@ export function createAgentSlackHandlers(runner: AgentRunner): SlackEventFeature
 }
 
 async function handleMention(
-  { body, client, event, logger }: SlackEventArgs<"app_mention">,
+  { body, client, context, event, logger }: SlackEventArgs<"app_mention">,
   runner: AgentRunner,
 ): Promise<void> {
   if (
@@ -66,7 +66,7 @@ async function handleMention(
     channelId: event.channel,
     messageTs: event.ts,
     teamId,
-    text: stripFirstBotMention(readString(event, "text") ?? ""),
+    text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
     threadTs: readString(event, "thread_ts") ?? event.ts,
     userId: event.user,
     viewerContextChannelIds: [event.channel],
@@ -86,8 +86,15 @@ function readTeamId(body: unknown, event: StringIndexed): string | undefined {
   return readString(event, "team");
 }
 
-function stripFirstBotMention(text: string): string {
-  return text.replace(/^\s*<@[A-Z0-9]+>\s*/u, "").trim();
+function stripBotMention(text: string, botUserId: string | undefined): string {
+  if (botUserId === undefined) {
+    return text.trim();
+  }
+  return text.replace(new RegExp(`<@${escapeRegExp(botUserId)}>\\s*`, "u"), "").trim();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 function readString(value: StringIndexed, field: string): string | undefined {
