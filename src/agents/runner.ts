@@ -71,7 +71,7 @@ export class AgentRunner {
       return {
         decision,
         message: result.message,
-        model: modelTrace(model),
+        model: result.model ?? modelTrace(model),
         raw: result.raw,
         structuredResult: result.structuredResult,
         toolResults: [],

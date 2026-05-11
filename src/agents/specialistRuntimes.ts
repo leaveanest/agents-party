@@ -16,6 +16,7 @@ export type AgentSpecialistRuntimeInput = {
 
 export type AgentSpecialistRuntimeResult = {
   message: string;
+  model?: Pick<ModelInfo, "id" | "provider">;
   raw?: unknown;
   structuredResult: JsonValue;
 };
@@ -246,6 +247,7 @@ export function createImageGenerationRuntime(
       });
       return {
         message: structured.message,
+        model: modelTrace(model),
         structuredResult: structured,
       };
     }
@@ -266,6 +268,7 @@ export function createImageGenerationRuntime(
     });
     return {
       message: structured.message,
+      model: modelTrace(model),
       structuredResult: structured,
     };
   };
@@ -299,6 +302,7 @@ export function createVideoGenerationRuntime(
       });
       return {
         message: structured.message,
+        model: modelTrace(model),
         structuredResult: structured,
       };
     }
@@ -330,8 +334,16 @@ export function createVideoGenerationRuntime(
     });
     return {
       message: structured.message,
+      model: modelTrace(model),
       structuredResult: structured,
     };
+  };
+}
+
+function modelTrace(model: ModelInfo): Pick<ModelInfo, "id" | "provider"> {
+  return {
+    id: model.id,
+    provider: model.provider,
   };
 }
 

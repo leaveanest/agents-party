@@ -148,6 +148,7 @@ describe("specialist runtimes", () => {
       action: "generated",
       media: { dataBase64: "aW1hZ2U=", kind: "image", status: "generated" },
     });
+    expect(image.model).toEqual({ id: "google:gemini-2.5-flash-image", provider: "google" });
     expect(video.structuredResult).toMatchObject({
       action: "in_progress",
       media: {
@@ -157,6 +158,7 @@ describe("specialist runtimes", () => {
         status: "in_progress",
       },
     });
+    expect(video.model).toEqual({ id: "google:veo-3.1-fast-generate-001", provider: "google" });
   });
 
   it("parses Japanese route requests into Google Maps route calls", async () => {
@@ -217,6 +219,33 @@ describe("specialist runtimes", () => {
     expect(result.structuredResult).toMatchObject({
       places: [expect.objectContaining({ name: "Osaka Station" })],
     });
+  });
+
+  it("AgentRunner reports the actual model used by native media runtimes", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({ content: "generic should not run" }),
+      specialistRuntimes: {
+        image_generation: createImageGenerationRuntime(imageModel.id, {
+          async generateImage() {
+            return { dataBase64: "aW1hZ2U=", mimeType: "image/png" };
+          },
+          async generateVideo() {
+            throw new Error("Unexpected video generation call.");
+          },
+        }),
+      },
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "draw an image",
+      userId: "U1",
+    });
+
+    expect(result.model).toEqual({ id: "google:gemini-2.5-flash-image", provider: "google" });
   });
 });
 
