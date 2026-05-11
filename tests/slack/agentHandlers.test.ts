@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { AgentRunnerExecutionError } from "../../src/agents/runner.js";
 import type { JsonObject } from "../../src/infrastructure/postgres/jsonDocumentRepository.js";
 import { createAgentSlackHandlers } from "../../src/slack/agentHandlers.js";
 
@@ -138,7 +139,11 @@ describe("createAgentSlackHandlers", () => {
   it("posts a fallback thread reply when AgentRunner fails", async () => {
     const runner = {
       async run() {
-        throw new Error("provider failed");
+        throw new AgentRunnerExecutionError(
+          "image_generation",
+          { id: "google:gemini-2.5-flash-image", provider: "google" },
+          new Error("provider failed"),
+        );
       },
     };
     const posts: unknown[] = [];
@@ -171,6 +176,14 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(errors).toHaveLength(1);
+    expect(errors[0]).toEqual([
+      "TypeScript AgentRunner failed while handling app_mention.",
+      expect.objectContaining({
+        modelId: "google:gemini-2.5-flash-image",
+        provider: "google",
+        specialist: "image_generation",
+      }),
+    ]);
     expect(posts).toEqual([
       expect.objectContaining({
         channel: "C1",

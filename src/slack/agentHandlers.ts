@@ -1,6 +1,10 @@
 import type { AllMiddlewareArgs, SlackEventMiddlewareArgs, StringIndexed } from "@slack/bolt";
 
-import type { AgentRunner, AgentRunnerResult } from "../agents/runner.js";
+import {
+  AgentRunnerExecutionError,
+  type AgentRunner,
+  type AgentRunnerResult,
+} from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
@@ -135,6 +139,7 @@ async function handleMention(
   } catch (error) {
     logger.error("TypeScript AgentRunner failed while handling app_mention.", {
       error,
+      ...runnerFailureLogFields(error),
       teamId,
       threadTs,
     });
@@ -230,6 +235,7 @@ async function handleMessage(
   } catch (error) {
     logger.error("TypeScript AgentRunner failed while handling message follow-up.", {
       error,
+      ...runnerFailureLogFields(error),
       teamId,
       threadTs,
     });
@@ -318,6 +324,7 @@ async function handleReactionAdded(
   } catch (error) {
     logger.error("TypeScript AgentRunner failed while handling translation reaction.", {
       error,
+      ...runnerFailureLogFields(error),
       teamId,
       threadTs,
     });
@@ -448,6 +455,17 @@ function logInfo(logger: unknown, message: string, metadata: Record<string, unkn
   if (isRecord(logger) && typeof logger.info === "function") {
     logger.info(message, metadata);
   }
+}
+
+function runnerFailureLogFields(error: unknown): Record<string, unknown> {
+  if (!(error instanceof AgentRunnerExecutionError)) {
+    return {};
+  }
+  return {
+    modelId: error.model?.id,
+    provider: error.model?.provider,
+    specialist: error.specialist,
+  };
 }
 
 function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia | undefined {

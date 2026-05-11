@@ -25,6 +25,17 @@ export type AgentSpecialistRuntime = (
   input: AgentSpecialistRuntimeInput,
 ) => Promise<AgentSpecialistRuntimeResult>;
 
+export class AgentSpecialistRuntimeError extends Error {
+  constructor(
+    readonly specialist: AgentSpecialist,
+    readonly model: Pick<ModelInfo, "id" | "provider"> | undefined,
+    cause: unknown,
+  ) {
+    super(`Native specialist runtime failed for ${specialist}.`, { cause });
+    this.name = "AgentSpecialistRuntimeError";
+  }
+}
+
 export type GoogleMapsGateway = {
   computeRoute(input: {
     destination: string;
@@ -154,25 +165,31 @@ export function createDefaultSpecialistRuntimes(
 
 export function createWebResearchRuntime(): AgentSpecialistRuntime {
   return async ({ invocation, model, providerRouter }) => {
-    const result = await providerRouter.generate({
-      history: specialistHistory(
-        "You are a web research specialist. Use native web search when available. Return concise JSON with action, answer, sources, and caveats.",
-        invocation,
-      ),
-      maxOutputTokens: 1600,
-      metadata: baseMetadata(invocation, "web_research"),
-      model,
-      providerOptions: {
-        google: { grounding: true },
-      },
-      requiredCapabilities: ["web_search"],
-    });
+    let result;
+    try {
+      result = await providerRouter.generate({
+        history: specialistHistory(
+          "You are a web research specialist. Use native web search when available. Return concise JSON with action, answer, sources, and caveats.",
+          invocation,
+        ),
+        maxOutputTokens: 1600,
+        metadata: baseMetadata(invocation, "web_research"),
+        model,
+        providerOptions: {
+          google: { grounding: true },
+        },
+        requiredCapabilities: ["web_search"],
+      });
+    } catch (error) {
+      throw new AgentSpecialistRuntimeError("web_research", modelTrace(model), error);
+    }
     const parsed = webResearchResultSchema.parse({
       ...asRecord(parseJsonOrAnswer(result.content)),
       sources: normalizeSources(parseJsonOrAnswer(result.content), result.sources),
     });
     return {
       message: renderWebResearch(parsed),
+      model: modelTrace(model),
       raw: result.raw,
       structuredResult: parsed,
     };
@@ -251,7 +268,12 @@ export function createImageGenerationRuntime(
         structuredResult: structured,
       };
     }
-    const generated = await gateway.generateImage({ model, prompt: invocation.text });
+    let generated;
+    try {
+      generated = await gateway.generateImage({ model, prompt: invocation.text });
+    } catch (error) {
+      throw new AgentSpecialistRuntimeError("image_generation", modelTrace(model), error);
+    }
     const structured = imageGenerationResultSchema.parse({
       action: "generated",
       media: {
@@ -306,12 +328,17 @@ export function createVideoGenerationRuntime(
         structuredResult: structured,
       };
     }
-    const generated = await gateway.generateVideo({
-      aspectRatio,
-      durationSeconds,
-      model,
-      prompt: invocation.text,
-    });
+    let generated;
+    try {
+      generated = await gateway.generateVideo({
+        aspectRatio,
+        durationSeconds,
+        model,
+        prompt: invocation.text,
+      });
+    } catch (error) {
+      throw new AgentSpecialistRuntimeError("video_generation", modelTrace(model), error);
+    }
     const structured = videoGenerationResultSchema.parse({
       action: generated.status,
       media: {
