@@ -11,6 +11,8 @@ import {
 } from "./coordinators.js";
 import { FetchGoogleOAuthGateway, FetchSalesforceOAuthGateway } from "./gateways.js";
 
+const MAX_JSON_BODY_BYTES = 8192;
+
 export type OAuthHttpGateway = {
   canHandle(pathname: string): boolean;
   close(): Promise<void>;
@@ -40,11 +42,28 @@ export class NodeOAuthHttpGateway implements OAuthHttpGateway {
       pathname === this.settings.googleOAuthStartPath ||
       pathname === this.settings.googleOAuthCallbackPath ||
       pathname === this.settings.salesforceOAuthStartPath ||
-      pathname === this.settings.salesforceOAuthCallbackPath
+      pathname === this.settings.salesforceOAuthCallbackPath ||
+      pathname === this.settings.salesforceOAuthDisconnectPath
     );
   }
 
   async handle(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
+    if (url.pathname === this.settings.salesforceOAuthDisconnectPath) {
+      if (request.method !== "POST") {
+        sendJson(response, 405, {
+          error: "method_not_allowed",
+          message: "Salesforce disconnect only accepts POST requests.",
+        });
+        return;
+      }
+      try {
+        await this.handleSalesforceDisconnect(request, response, url);
+      } catch (error) {
+        sendOAuthError(response, error);
+      }
+      return;
+    }
+
     if (request.method !== "GET") {
       sendJson(response, 405, {
         error: "method_not_allowed",
@@ -67,6 +86,7 @@ export class NodeOAuthHttpGateway implements OAuthHttpGateway {
       }
       if (url.pathname === this.settings.salesforceOAuthCallbackPath) {
         await this.handleSalesforceCallback(response, url);
+        return;
       }
     } catch (error) {
       sendOAuthError(response, error);
@@ -141,6 +161,31 @@ export class NodeOAuthHttpGateway implements OAuthHttpGateway {
       stateId: url.searchParams.get("state"),
     });
     sendSuccessOrRedirect(response, result.redirectAfterConnect);
+  }
+
+  private async handleSalesforceDisconnect(
+    request: IncomingMessage,
+    response: ServerResponse,
+    url: URL,
+  ): Promise<void> {
+    if (this.salesforce === undefined) {
+      throw new OAuthFlowError("Salesforce OAuth is not configured.", {
+        code: "salesforce_oauth_not_configured",
+        statusCode: 503,
+      });
+    }
+    const context = await readContextToken(request, url);
+    if (context === undefined) {
+      throw new OAuthFlowError("Missing Salesforce OAuth context.", {
+        code: "missing_context",
+        statusCode: 400,
+      });
+    }
+    const connection = await this.salesforce.disconnectByContext(context);
+    sendJson(response, 200, {
+      connectionStatus: connection.connection_status,
+      status: "ok",
+    });
   }
 }
 
@@ -230,4 +275,70 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
     "content-type": "application/json; charset=utf-8",
   });
   response.end(payload);
+}
+
+async function readContextToken(request: IncomingMessage, url: URL): Promise<string | undefined> {
+  const queryContext = url.searchParams.get("context");
+  if (queryContext !== null && queryContext !== "") {
+    return queryContext;
+  }
+  const payload = await readJsonBody(request);
+  if (
+    payload !== undefined &&
+    typeof payload === "object" &&
+    payload !== null &&
+    "context" in payload &&
+    typeof payload.context === "string" &&
+    payload.context !== ""
+  ) {
+    return payload.context;
+  }
+  return undefined;
+}
+
+async function readJsonBody(request: IncomingMessage): Promise<unknown | undefined> {
+  const contentLength = readContentLength(request.headers["content-length"]);
+  if (contentLength !== undefined && contentLength > MAX_JSON_BODY_BYTES) {
+    throw new OAuthFlowError("Request body is too large.", {
+      code: "request_body_too_large",
+      statusCode: 413,
+    });
+  }
+  const chunks: Buffer[] = [];
+  let byteLength = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    byteLength += buffer.byteLength;
+    if (byteLength > MAX_JSON_BODY_BYTES) {
+      throw new OAuthFlowError("Request body is too large.", {
+        code: "request_body_too_large",
+        statusCode: 413,
+      });
+    }
+    chunks.push(buffer);
+  }
+  if (chunks.length === 0) {
+    return undefined;
+  }
+  const text = Buffer.concat(chunks).toString("utf8").trim();
+  if (text === "") {
+    return undefined;
+  }
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new OAuthFlowError("Invalid JSON request body.", {
+      code: "invalid_json",
+      statusCode: 400,
+    });
+  }
+}
+
+function readContentLength(value: string | string[] | undefined): number | undefined {
+  const rawValue = Array.isArray(value) ? value[0] : value;
+  if (rawValue === undefined || rawValue.trim() === "") {
+    return undefined;
+  }
+  const parsed = Number(rawValue);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }

@@ -195,7 +195,7 @@ callback 検証用の短命 state。
 
 ## OAuth シーケンス方針
 
-初期の HTTP 導線は次を想定する。
+TypeScript runtime の HTTP 導線は次を実装する。
 
 - `GET /oauth/salesforce/start`
 - `GET /oauth/salesforce/callback`
@@ -350,15 +350,14 @@ salesforce_oauth_states (state_id)
 - Slack user lookup が単純
 - org 切り替えや複数 org 対応を追加しやすい
 
-## Node HTTP server 追加ポイント
+## Node HTTP server 実装ポイント
 
-既存アプリは `/healthz` と `/slack/events` を持つだけなので、
-OAuth 用のルート追加は比較的素直に行える。
+TypeScript の Node HTTP server は `/healthz`、`/slack/events`、OAuth ルートを同一プロセスで公開する。
 
-初期案:
+実装方針:
 
-- `create_app()` 内で Salesforce OAuth 用 router を登録する
-- Slack Bolt gateway とは分離し、HTTP callback は Node HTTP server の素の handler で受ける
+- `src/integrations/oauth/http.ts` で Salesforce OAuth 用 gateway を登録する
+- Slack Bolt gateway とは分離し、HTTP callback と disconnect は Node HTTP server の素の handler で受ける
 - callback では Slack SDK に依存しない
 
 この分離により、OAuth callback の検証と Slack UI 更新を別責務にできる。

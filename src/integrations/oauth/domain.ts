@@ -88,6 +88,7 @@ export const googleAuthConnectionSchema = z.object({
 });
 
 export const salesforceOAuthStartContextSchema = z.object({
+  context_action: z.enum(["start", "disconnect"]).default("start"),
   expires_at: dateSchema,
   redirect_after_connect: z.string().nullable().default(null),
   salesforce_org_id: z.string().min(1),

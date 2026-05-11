@@ -6,6 +6,10 @@ import {
   type AgentRunnerResult,
 } from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
+import {
+  salesforceAuthConfigSchema,
+  salesforceConnectionSchema,
+} from "../integrations/oauth/domain.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
 
@@ -30,8 +34,24 @@ export type SlackAgentRoutingRepository = {
   isThreadAutoReplyEnabled(teamId: string, channelId: string): Promise<boolean>;
 };
 
+export type SalesforceConnectionHomeRepository = {
+  listSalesforceAuthConfigs(teamId: string): Promise<JsonObject[]>;
+  listSalesforceConnections(teamId: string, slackUserId?: string): Promise<JsonObject[]>;
+};
+
+export type SalesforceConnectionHome = {
+  buildStartUrl(input: {
+    redirectAfterConnect?: string | null;
+    salesforceOrgId: string;
+    slackUserId: string;
+    teamId: string;
+  }): string;
+  repository: SalesforceConnectionHomeRepository;
+};
+
 export type AgentSlackHandlerOptions = {
   routingRepository?: SlackAgentRoutingRepository;
+  salesforceConnectionHome?: SalesforceConnectionHome;
 };
 
 export function createAgentSlackHandlers(
@@ -39,27 +59,22 @@ export function createAgentSlackHandlers(
   options: AgentSlackHandlerOptions = {},
 ): SlackEventFeatureHandlers {
   return {
-    async handleAppHomeOpened({ client, event, logger }) {
+    async handleAppHomeOpened({ body, client, event, logger }) {
       if (!hasStringField(event, "user")) {
         logger.warn("Ignoring app_home_opened without a Slack user id.");
         return;
       }
+      const teamId = readTeamId(body, event);
+      const blocks = await buildAppHomeBlocks({
+        logger,
+        options,
+        slackUserId: event.user,
+        teamId,
+      });
       await client.views.publish({
         user_id: event.user,
         view: {
-          blocks: [
-            {
-              text: { text: "Agents Party", type: "plain_text" },
-              type: "header",
-            },
-            {
-              text: {
-                text: "Mention the app in a channel or thread to talk to the assistant.",
-                type: "mrkdwn",
-              },
-              type: "section",
-            },
-          ],
+          blocks: blocks as never,
           type: "home",
         },
       });
@@ -74,6 +89,96 @@ export function createAgentSlackHandlers(
       await handleReactionAdded(args, runner, options);
     },
   };
+}
+
+async function buildAppHomeBlocks(input: {
+  logger: SlackEventArgs<"app_home_opened">["logger"];
+  options: AgentSlackHandlerOptions;
+  slackUserId: string;
+  teamId: string | undefined;
+}): Promise<Record<string, unknown>[]> {
+  const blocks: Record<string, unknown>[] = [
+    {
+      text: { text: "Agents Party", type: "plain_text" },
+      type: "header",
+    },
+    {
+      text: {
+        text: "Mention the app in a channel or thread to talk to the assistant.",
+        type: "mrkdwn",
+      },
+      type: "section",
+    },
+  ];
+  if (input.options.salesforceConnectionHome === undefined || input.teamId === undefined) {
+    return blocks;
+  }
+
+  try {
+    const { repository } = input.options.salesforceConnectionHome;
+    const [rawConfigs, rawConnections] = await Promise.all([
+      repository.listSalesforceAuthConfigs(input.teamId),
+      repository.listSalesforceConnections(input.teamId, input.slackUserId),
+    ]);
+    const configs = rawConfigs.map((config) => salesforceAuthConfigSchema.parse(config));
+    const connections = rawConnections.map((connection) =>
+      salesforceConnectionSchema.parse(connection),
+    );
+    if (configs.length === 0) {
+      return blocks;
+    }
+    blocks.push({ type: "divider" });
+    blocks.push({
+      text: { text: "Salesforce", type: "plain_text" },
+      type: "header",
+    });
+    for (const config of configs) {
+      const connection = connections.find(
+        (item) => item.salesforce_org_id === config.salesforce_org_id,
+      );
+      const status = connection?.connection_status ?? "not_connected";
+      const actionLabel = status === "active" ? "Reconnect" : "Connect";
+      blocks.push({
+        accessory: {
+          text: { text: actionLabel, type: "plain_text" },
+          type: "button",
+          url: input.options.salesforceConnectionHome.buildStartUrl({
+            redirectAfterConnect: "/",
+            salesforceOrgId: config.salesforce_org_id,
+            slackUserId: input.slackUserId,
+            teamId: input.teamId,
+          }),
+        },
+        text: {
+          text: `*${config.salesforce_org_name ?? config.salesforce_org_id}*\n${salesforceStatusText(
+            status,
+            connection?.salesforce_username ?? connection?.salesforce_user_email ?? undefined,
+          )}`,
+          type: "mrkdwn",
+        },
+        type: "section",
+      });
+    }
+  } catch (error) {
+    input.logger.warn("Failed to load Salesforce App Home connection status.", { error });
+  }
+  return blocks;
+}
+
+function salesforceStatusText(status: string, accountLabel: string | undefined): string {
+  if (status === "active") {
+    return accountLabel === undefined ? "Connected" : `Connected as ${accountLabel}`;
+  }
+  if (status === "expired") {
+    return "Reconnect required";
+  }
+  if (status === "revoked") {
+    return "Disconnected";
+  }
+  if (status === "error") {
+    return "Connection needs attention";
+  }
+  return "Not connected";
 }
 
 async function handleMention(

@@ -11,6 +11,7 @@ actor "Slack User" as slack_user
 actor "Browser" as browser
 cloud "Slack" as slack
 cloud "Google Identity" as google_identity
+cloud "Salesforce Identity" as salesforce_identity
 cloud "Google Maps Platform" as google_maps_platform
 cloud "Cloud Translation API" as cloud_translation
 cloud "Vertex AI / Google GenAI" as vertex_ai
@@ -21,7 +22,7 @@ package "Heroku" {
       component "Node HTTP Server" as node_app
       component "Slack Bolt Gateway\nPOST /slack/events" as slack_gateway
       component "Google OAuth Router\nGET /oauth/google/start\nGET /oauth/google/callback" as google_oauth_router
-      component "Salesforce OAuth Router\nGET /oauth/salesforce/start\nGET /oauth/salesforce/callback" as salesforce_oauth_router
+      component "Salesforce OAuth Router\nGET /oauth/salesforce/start\nGET /oauth/salesforce/callback\nPOST /oauth/salesforce/disconnect" as salesforce_oauth_router
       component "Slack Event Handlers\napp_home_opened / app_mention /\nmessage / reaction_added" as slack_handlers
       component "Agent Routing" as agent_routing
       component "Agent Router" as agent_router
@@ -48,6 +49,7 @@ package "Heroku" {
     folder "work_items / participants /\nevents / attention_index" as pg_work_items
     folder "google_auth_connections" as pg_google_connections
     folder "google_oauth_states" as pg_google_oauth_states
+    folder "salesforce_auth_configs /\nsalesforce_connections /\nsalesforce_oauth_states" as pg_salesforce_oauth
   }
 }
 
@@ -102,6 +104,8 @@ browser --> google_oauth_router : callback redirect
 browser --> salesforce_oauth_router : open signed OAuth start URL
 salesforce_oauth_router --> salesforce_oauth
 salesforce_oauth --> postgres : OAuth state / encrypted connection storage
+salesforce_oauth --> pg_salesforce_oauth : config / state / encrypted tokens
+salesforce_oauth --> salesforce_identity : authorize / token / identity / revoke
 
 note bottom of postgres
 Stored data:
@@ -111,6 +115,7 @@ Stored data:
 - work items, participants, events, and attention index
 - Google OAuth connection documents
 - short-lived Google OAuth state documents
+- Salesforce OAuth config, connection, and state documents
 end note
 
 note top of heroku_app

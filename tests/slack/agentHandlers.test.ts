@@ -5,6 +5,78 @@ import type { JsonObject } from "../../src/infrastructure/postgres/jsonDocumentR
 import { createAgentSlackHandlers } from "../../src/slack/agentHandlers.js";
 
 describe("createAgentSlackHandlers", () => {
+  it("publishes Salesforce connection status and connect entry points on App Home", async () => {
+    const publishedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      salesforceConnectionHome: {
+        buildStartUrl(input) {
+          return `https://app.example.com/oauth/salesforce/start?org=${input.salesforceOrgId}`;
+        },
+        repository: {
+          async listSalesforceAuthConfigs(): Promise<JsonObject[]> {
+            return [
+              {
+                default_scopes: ["api", "refresh_token"],
+                oauth_client_id: "salesforce-client",
+                redirect_uri: "https://app.example.com/oauth/salesforce/callback",
+                salesforce_my_domain_host: "example.my.salesforce.com",
+                salesforce_org_id: "00DORG",
+                salesforce_org_name: "Salesforce Production",
+                status: "active",
+                team_id: "T1",
+              },
+            ];
+          },
+          async listSalesforceConnections(): Promise<JsonObject[]> {
+            return [
+              {
+                access_token_encrypted: "encrypted-access",
+                connection_status: "active",
+                created_at: "2026-05-01T00:00:00.000Z",
+                granted_scopes: ["api"],
+                last_refresh_error_at: null,
+                last_refresh_error_code: null,
+                last_refreshed_at: null,
+                last_successful_access_at: "2026-05-01T00:00:00.000Z",
+                refresh_token_encrypted: "encrypted-refresh",
+                salesforce_identity_url: "https://example.my.salesforce.com/id/00DORG/005USER",
+                salesforce_instance_url: "https://example.my.salesforce.com",
+                salesforce_org_id: "00DORG",
+                salesforce_user_email: "sf@example.com",
+                salesforce_user_id: "005USER",
+                salesforce_username: "sf@example.com",
+                slack_user_id: "U1",
+                team_id: "T1",
+                token_expires_at: "2026-05-01T01:00:00.000Z",
+                updated_at: "2026-05-01T00:00:00.000Z",
+              },
+            ];
+          },
+        },
+      },
+    });
+
+    await handlers.handleAppHomeOpened({
+      body: { team_id: "T1" },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            publishedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { user: "U1" },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(publishedViews[0])).toContain("Salesforce Production");
+    expect(JSON.stringify(publishedViews[0])).toContain("Connected as sf@example.com");
+    expect(JSON.stringify(publishedViews[0])).toContain(
+      "https://app.example.com/oauth/salesforce/start?org=00DORG",
+    );
+  });
+
   it("routes app mentions through the TypeScript AgentRunner and posts a thread reply", async () => {
     const runner = {
       async run(invocation: unknown) {

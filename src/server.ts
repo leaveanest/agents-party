@@ -81,7 +81,8 @@ function isOAuthRoute(pathname: string, settings: AppSettings): boolean {
     pathname === settings.googleOAuthStartPath ||
     pathname === settings.googleOAuthCallbackPath ||
     pathname === settings.salesforceOAuthStartPath ||
-    pathname === settings.salesforceOAuthCallbackPath
+    pathname === settings.salesforceOAuthCallbackPath ||
+    pathname === settings.salesforceOAuthDisconnectPath
   );
 }
 

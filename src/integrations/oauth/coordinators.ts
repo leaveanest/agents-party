@@ -77,6 +77,52 @@ export class OAuthFlowError extends Error {
   }
 }
 
+export function issueSalesforceOAuthStartContext(input: {
+  contextSigningSecret: string;
+  redirectAfterConnect?: string | null;
+  salesforceOrgId: string;
+  slackUserId: string;
+  teamId: string;
+  ttlMs?: number;
+}): string {
+  return issueSalesforceOAuthContext({ ...input, contextAction: "start" });
+}
+
+export function issueSalesforceOAuthDisconnectContext(input: {
+  contextSigningSecret: string;
+  redirectAfterConnect?: string | null;
+  salesforceOrgId: string;
+  slackUserId: string;
+  teamId: string;
+  ttlMs?: number;
+}): string {
+  return issueSalesforceOAuthContext({ ...input, contextAction: "disconnect" });
+}
+
+function issueSalesforceOAuthContext(input: {
+  contextAction: "disconnect" | "start";
+  contextSigningSecret: string;
+  redirectAfterConnect?: string | null;
+  salesforceOrgId: string;
+  slackUserId: string;
+  teamId: string;
+  ttlMs?: number;
+}): string {
+  const signer = new OAuthContextSigner({
+    contextSchema: salesforceOAuthStartContextSchema,
+    secret: input.contextSigningSecret,
+    stateTokenSchema: salesforceOAuthStateTokenSchema,
+  });
+  return signer.dumps({
+    context_action: input.contextAction,
+    expires_at: new Date(Date.now() + (input.ttlMs ?? 10 * 60 * 1000)).toISOString(),
+    redirect_after_connect: normalizeRedirectAfterConnect(input.redirectAfterConnect),
+    salesforce_org_id: input.salesforceOrgId,
+    slack_user_id: input.slackUserId,
+    team_id: input.teamId,
+  });
+}
+
 export class GoogleAuthCoordinator {
   private readonly gateway: GoogleOAuthGateway;
   private readonly redirectUri: string;
@@ -289,6 +335,7 @@ export class GoogleAuthCoordinator {
 }
 
 export class SalesforceAuthCoordinator {
+  private readonly contextSigningSecret: string;
   private readonly gateway: SalesforceOAuthGateway;
   private readonly repository: OAuthRepository;
   private readonly signer: OAuthContextSigner<
@@ -303,6 +350,7 @@ export class SalesforceAuthCoordinator {
     repository: OAuthRepository;
     tokenCipher: FernetTextCipher;
   }) {
+    this.contextSigningSecret = input.contextSigningSecret;
     this.gateway = input.gateway;
     this.repository = input.repository;
     this.signer = new OAuthContextSigner({
@@ -320,25 +368,14 @@ export class SalesforceAuthCoordinator {
     teamId: string;
     ttlMs?: number;
   }): string {
-    return this.signer.dumps({
-      expires_at: new Date(Date.now() + (input.ttlMs ?? 10 * 60 * 1000)).toISOString(),
-      redirect_after_connect: normalizeRedirectAfterConnect(input.redirectAfterConnect),
-      salesforce_org_id: input.salesforceOrgId,
-      slack_user_id: input.slackUserId,
-      team_id: input.teamId,
+    return issueSalesforceOAuthStartContext({
+      contextSigningSecret: this.contextSigningSecret,
+      ...input,
     });
   }
 
   async beginAuthorization(contextToken: string): Promise<string> {
-    let context: ReturnType<typeof salesforceOAuthStartContextSchema.parse>;
-    try {
-      context = this.signer.loads(contextToken);
-    } catch {
-      throw new OAuthFlowError("Invalid Salesforce OAuth context.", {
-        code: "invalid_context",
-        statusCode: 400,
-      });
-    }
+    const context = this.loadStartContext(contextToken);
     const redirectAfterConnect = normalizeRedirectAfterConnect(context.redirect_after_connect);
     const config = await this.requireActiveConfig(context.team_id, context.salesforce_org_id);
     const now = new Date();
@@ -471,6 +508,181 @@ export class SalesforceAuthCoordinator {
     }
   }
 
+  async refreshConnection(input: {
+    salesforceOrgId: string;
+    slackUserId: string;
+    teamId: string;
+  }): Promise<SalesforceConnection> {
+    const config = await this.requireActiveConfig(input.teamId, input.salesforceOrgId);
+    const connection = await this.requireSalesforceConnection(
+      input.teamId,
+      input.slackUserId,
+      input.salesforceOrgId,
+    );
+    if (
+      connection.refresh_token_encrypted === undefined ||
+      connection.refresh_token_encrypted === null
+    ) {
+      await this.saveSalesforceConnectionWithRefreshError(connection, {
+        code: "missing_refresh_token",
+        status: "expired",
+      });
+      throw new OAuthFlowError("Salesforce connection requires reconnect.", {
+        code: "salesforce_reconnect_required",
+        statusCode: 401,
+      });
+    }
+
+    let refreshToken: string;
+    try {
+      refreshToken = this.tokenCipher.decrypt(connection.refresh_token_encrypted);
+    } catch {
+      await this.saveSalesforceConnectionWithRefreshError(connection, {
+        code: "refresh_token_decrypt_failed",
+        status: "error",
+      });
+      throw new OAuthFlowError("Salesforce refresh token could not be decrypted.", {
+        code: "refresh_token_decrypt_failed",
+        statusCode: 500,
+      });
+    }
+
+    try {
+      const tokens = await this.gateway.refreshAccessToken({ config, refreshToken });
+      const now = new Date();
+      const refreshed: SalesforceConnection = {
+        ...connection,
+        access_token_encrypted: this.tokenCipher.encrypt(tokens.access_token),
+        connection_status: "active",
+        granted_scopes:
+          tokens.granted_scopes.length > 0 ? tokens.granted_scopes : connection.granted_scopes,
+        last_refresh_error_at: null,
+        last_refresh_error_code: null,
+        last_refreshed_at: now,
+        last_successful_access_at: now,
+        refresh_token_encrypted:
+          tokens.refresh_token === undefined
+            ? (connection.refresh_token_encrypted ?? null)
+            : this.tokenCipher.encrypt(tokens.refresh_token),
+        salesforce_instance_url: tokens.instance_url ?? connection.salesforce_instance_url,
+        token_expires_at: tokens.expires_at ?? null,
+        updated_at: now,
+      };
+      await this.repository.saveSalesforceConnection(toStoredSalesforceConnection(refreshed));
+      return refreshed;
+    } catch (error) {
+      if (error instanceof OAuthGatewayError && isRevokedRefreshTokenError(error)) {
+        await this.saveSalesforceConnectionWithRefreshError(connection, {
+          code: error.errorCode ?? "invalid_grant",
+          status: "expired",
+        });
+        throw new OAuthFlowError("Salesforce connection requires reconnect.", {
+          code: error.errorCode ?? "invalid_grant",
+          statusCode: 401,
+        });
+      }
+      throw flowErrorFromUnknown(error, null);
+    }
+  }
+
+  async disconnectByContext(contextToken: string): Promise<SalesforceConnection> {
+    const context = this.loadContext(contextToken, "disconnect");
+    return this.disconnectConnection({
+      salesforceOrgId: context.salesforce_org_id,
+      slackUserId: context.slack_user_id,
+      teamId: context.team_id,
+    });
+  }
+
+  async disconnectConnection(input: {
+    salesforceOrgId: string;
+    slackUserId: string;
+    teamId: string;
+  }): Promise<SalesforceConnection> {
+    const config = await this.requireActiveConfig(input.teamId, input.salesforceOrgId);
+    const connection = await this.requireSalesforceConnection(
+      input.teamId,
+      input.slackUserId,
+      input.salesforceOrgId,
+    );
+    let tokenToRevoke: string | undefined;
+    try {
+      const encryptedToken =
+        connection.refresh_token_encrypted === undefined ||
+        connection.refresh_token_encrypted === null
+          ? connection.access_token_encrypted
+          : connection.refresh_token_encrypted;
+      tokenToRevoke = this.tokenCipher.decrypt(encryptedToken);
+    } catch {
+      return this.saveDisconnectedConnection(connection, {
+        code: "token_decrypt_failed",
+        status: "error",
+      });
+    }
+
+    try {
+      await this.gateway.revokeToken({ config, token: tokenToRevoke });
+      return this.saveDisconnectedConnection(connection, { code: null, status: "revoked" });
+    } catch (error) {
+      const code =
+        error instanceof OAuthGatewayError ? (error.errorCode ?? "revoke_failed") : "revoke_failed";
+      await this.saveDisconnectedConnection(connection, { code, status: "error" });
+      if (error instanceof OAuthGatewayError) {
+        throw new OAuthFlowError(error.message, {
+          code,
+          statusCode: error.retriable ? 502 : 400,
+        });
+      }
+      throw new OAuthFlowError("Salesforce disconnect failed.", {
+        code,
+        statusCode: 500,
+      });
+    }
+  }
+
+  issueDisconnectContext(input: {
+    redirectAfterConnect?: string | null;
+    salesforceOrgId: string;
+    slackUserId: string;
+    teamId: string;
+    ttlMs?: number;
+  }): string {
+    return issueSalesforceOAuthDisconnectContext({
+      contextSigningSecret: this.contextSigningSecret,
+      ...input,
+    });
+  }
+
+  private loadStartContext(
+    contextToken: string,
+  ): ReturnType<typeof salesforceOAuthStartContextSchema.parse> {
+    return this.loadContext(contextToken, "start");
+  }
+
+  private loadContext(
+    contextToken: string,
+    expectedAction: "disconnect" | "start",
+  ): ReturnType<typeof salesforceOAuthStartContextSchema.parse> {
+    try {
+      const context = this.signer.loads(contextToken);
+      if (context.context_action !== expectedAction) {
+        throw new OAuthFlowError("Invalid Salesforce OAuth context action.", {
+          code: "invalid_context_action",
+          statusCode: 400,
+        });
+      }
+      return context;
+    } catch (error) {
+      if (error instanceof OAuthFlowError) {
+        throw error;
+      }
+      throw new OAuthFlowError("Invalid Salesforce OAuth context.", {
+        code: "invalid_context",
+        statusCode: 400,
+      });
+    }
+  }
+
   private async requireActiveConfig(
     teamId: string,
     salesforceOrgId: string,
@@ -538,6 +750,51 @@ export class SalesforceAuthCoordinator {
     );
     return payload === undefined ? undefined : salesforceConnectionSchema.parse(payload);
   }
+
+  private async requireSalesforceConnection(
+    teamId: string,
+    slackUserId: string,
+    salesforceOrgId: string,
+  ): Promise<SalesforceConnection> {
+    const connection = await this.findSalesforceConnection(teamId, slackUserId, salesforceOrgId);
+    if (connection === undefined) {
+      throw new OAuthFlowError("Salesforce connection was not found.", {
+        code: "missing_salesforce_connection",
+        statusCode: 404,
+      });
+    }
+    return connection;
+  }
+
+  private async saveSalesforceConnectionWithRefreshError(
+    connection: SalesforceConnection,
+    input: { code: string; status: string },
+  ): Promise<SalesforceConnection> {
+    const updated: SalesforceConnection = {
+      ...connection,
+      connection_status: input.status,
+      last_refresh_error_at: new Date(),
+      last_refresh_error_code: input.code,
+      updated_at: new Date(),
+    };
+    await this.repository.saveSalesforceConnection(toStoredSalesforceConnection(updated));
+    return updated;
+  }
+
+  private async saveDisconnectedConnection(
+    connection: SalesforceConnection,
+    input: { code: string | null; status: string },
+  ): Promise<SalesforceConnection> {
+    const updated: SalesforceConnection = {
+      ...connection,
+      connection_status: input.status,
+      last_refresh_error_at: input.code === null ? null : new Date(),
+      last_refresh_error_code: input.code,
+      updated_at: new Date(),
+    };
+    await this.repository.saveSalesforceConnection(toStoredSalesforceConnection(updated));
+    return updated;
+  }
 }
 
 function flowErrorFromUnknown(error: unknown, redirectAfterConnect: string | null): OAuthFlowError {
@@ -553,6 +810,10 @@ function flowErrorFromUnknown(error: unknown, redirectAfterConnect: string | nul
     redirectAfterConnect,
     statusCode: 500,
   });
+}
+
+function isRevokedRefreshTokenError(error: OAuthGatewayError): boolean {
+  return error.errorCode === "invalid_grant" || error.errorCode === "invalid_token";
 }
 
 function toStoredGoogleState(state: GoogleOAuthState): StoredOAuthStateDocument {

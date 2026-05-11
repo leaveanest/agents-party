@@ -41,6 +41,11 @@ export type SalesforceOAuthGateway = {
     config: SalesforceAuthConfig;
   }): Promise<SalesforceOAuthTokens>;
   lookupIdentity(input: { accessToken: string; identityUrl: string }): Promise<SalesforceIdentity>;
+  refreshAccessToken(input: {
+    config: SalesforceAuthConfig;
+    refreshToken: string;
+  }): Promise<SalesforceOAuthTokens>;
+  revokeToken(input: { config: SalesforceAuthConfig; token: string }): Promise<void>;
   close?(): Promise<void>;
 };
 
@@ -188,6 +193,24 @@ export class FetchSalesforceOAuthGateway implements SalesforceOAuthGateway {
     };
   }
 
+  async refreshAccessToken(input: {
+    config: SalesforceAuthConfig;
+    refreshToken: string;
+  }): Promise<SalesforceOAuthTokens> {
+    const payload = await this.postForm(`${oauthBaseUrl(input.config)}/token`, {
+      ...this.baseTokenData(input.config),
+      grant_type: "refresh_token",
+      refresh_token: input.refreshToken,
+    });
+    return buildSalesforceTokens(payload);
+  }
+
+  async revokeToken(input: { config: SalesforceAuthConfig; token: string }): Promise<void> {
+    await this.postFormWithoutJson(`${oauthBaseUrl(input.config)}/revoke`, {
+      token: input.token,
+    });
+  }
+
   private baseTokenData(config: SalesforceAuthConfig): Record<string, string> {
     const data: Record<string, string> = { client_id: config.oauth_client_id };
     if (
@@ -215,6 +238,22 @@ export class FetchSalesforceOAuthGateway implements SalesforceOAuthGateway {
       method: "POST",
     });
     return parseJsonResponse(response, "Salesforce OAuth request failed");
+  }
+
+  private async postFormWithoutJson(url: string, data: Record<string, string>): Promise<void> {
+    const response = await this.fetchFn(url, {
+      body: new URLSearchParams(data),
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      method: "POST",
+    });
+    if (response.ok) {
+      return;
+    }
+    const payload = await safeJson(response);
+    throw new OAuthGatewayError(errorDescription(payload) ?? "Salesforce OAuth request failed", {
+      errorCode: textValue(payload.error),
+      retriable: response.status >= 500,
+    });
   }
 }
 

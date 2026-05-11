@@ -6,6 +6,7 @@ The TypeScript runtime owns the Google and Salesforce OAuth HTTP routes:
 - `GET /oauth/google/callback`
 - `GET /oauth/salesforce/start`
 - `GET /oauth/salesforce/callback`
+- `POST /oauth/salesforce/disconnect`
 
 The implementation lives under `src/integrations/oauth/` and uses the existing PostgreSQL JSON document repositories for state and connection persistence. The runtime does not depend on removed Python OAuth routers, services, signers, or gateways.
 
@@ -36,3 +37,8 @@ Salesforce OAuth is enabled only when all of these are present:
 - `SALESFORCE_TOKEN_ENCRYPTION_KEY`
 
 Salesforce workspace OAuth client configuration remains repository-backed in PostgreSQL.
+
+Salesforce OAuth supports Authorization Code Flow with PKCE, encrypted access and refresh tokens,
+refresh-token grant renewal, and revoke-backed disconnect. Refresh failures caused by revoked or
+invalid refresh tokens mark the local connection `expired` so Salesforce-dependent features can
+ask the Slack user to reconnect.
