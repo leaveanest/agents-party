@@ -5,6 +5,7 @@ import { loadSettings, parsePort } from "../src/config.js";
 describe("loadSettings", () => {
   it("uses local defaults", () => {
     expect(loadSettings({})).toEqual({
+      agentModelId: "google:gemini-2.5-flash",
       appEnv: "local",
       appHost: "0.0.0.0",
       appName: "agents-party",
@@ -38,6 +39,12 @@ describe("loadSettings", () => {
 
   it("prefers PORT over APP_PORT for platform deployments", () => {
     expect(loadSettings({ APP_PORT: "9000", PORT: "8080" }).appPort).toBe(8080);
+  });
+
+  it("allows the TypeScript AgentRunner model to be configured explicitly", () => {
+    expect(loadSettings({ AGENT_MODEL: "anthropic:claude-3-5-sonnet-latest" }).agentModelId).toBe(
+      "anthropic:claude-3-5-sonnet-latest",
+    );
   });
 
   it("enables static-token Slack ingress with signing secret and bot token", () => {
