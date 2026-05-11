@@ -58,6 +58,47 @@ describe("PostgresMigrationRunner", () => {
     ).rejects.toThrow("Existing Alembic revision");
     expect(client.sql).toContain("rollback");
   });
+
+  it("baselines only through the detected Alembic revision and applies remaining migrations", async () => {
+    const client = new RecordingClient([], "20260330_0001");
+    const pool = {
+      connect: async () => client,
+      end: async () => undefined,
+      query: client.query.bind(client),
+    };
+    const runner = new PostgresMigrationRunner({
+      allowAlembicBaseline: true,
+      pool: pool as never,
+    });
+
+    const applied = await runner.migrate([
+      { id: "20260330_0001", name: "initial", upSql: "select initial" },
+      { id: "20260508_0002", name: "salesforce", upSql: "select salesforce" },
+    ]);
+
+    expect(applied).toEqual([expect.objectContaining({ id: "20260508_0002" })]);
+    expect(client.sql).not.toContain("select initial");
+    expect(client.sql).toContain("select salesforce");
+  });
+
+  it("rejects Alembic baseline when the legacy revision is not mirrored", async () => {
+    const client = new RecordingClient([], "20260511_unknown");
+    const pool = {
+      connect: async () => client,
+      end: async () => undefined,
+      query: client.query.bind(client),
+    };
+    const runner = new PostgresMigrationRunner({
+      allowAlembicBaseline: true,
+      pool: pool as never,
+    });
+
+    await expect(
+      runner.migrate([{ id: "20260330_0001", name: "initial", upSql: "select should_not_run" }]),
+    ).rejects.toThrow("Existing Alembic revision");
+    expect(client.sql).not.toContain("select should_not_run");
+    expect(client.sql).toContain("rollback");
+  });
 });
 
 class RecordingClient {
@@ -69,10 +110,14 @@ class RecordingClient {
     private readonly alembicVersion?: string,
   ) {}
 
-  async query(text: string) {
+  async query(text: string, values?: unknown[]) {
     this.sql.push(normalizeSql(text));
     if (text.includes("select id from schema_migrations")) {
       return { rows: this.appliedRows };
+    }
+    if (text.includes("insert into schema_migrations") && typeof values?.[0] === "string") {
+      this.appliedRows.push({ id: values[0] });
+      return { rows: [] };
     }
     if (text.includes("information_schema.tables")) {
       return { rows: [{ exists: this.alembicVersion !== undefined }] };

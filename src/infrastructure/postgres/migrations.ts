@@ -141,7 +141,12 @@ async function baselineAlembicIfNeeded(
     throw new AlembicBaselineRequiredError(alembicVersion);
   }
 
-  for (const migration of migrations) {
+  const baselineIndex = migrations.findIndex((migration) => migration.id === alembicVersion);
+  if (baselineIndex === -1) {
+    throw new AlembicBaselineRequiredError(alembicVersion);
+  }
+
+  for (const migration of migrations.slice(0, baselineIndex + 1)) {
     await client.query(
       `insert into schema_migrations (id, name, applied_at)
        values ($1, $2, now())

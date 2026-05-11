@@ -147,6 +147,14 @@ export type WorkItemCalendarLinkDocument = PayloadDocument & {
   workItemId: string;
 };
 
+export type WorkItemAggregateDocument = {
+  attention: JsonObject[];
+  calendarLinks: JsonObject[];
+  events: JsonObject[];
+  item: JsonObject;
+  participants: JsonObject[];
+};
+
 export class PostgresAgentRoutingRepository {
   private readonly agents: PostgresJsonDocumentRepository<{ agent_id: string }, JsonObject>;
   private readonly workspaceSettings: PostgresJsonDocumentRepository<
@@ -185,6 +193,10 @@ export class PostgresAgentRoutingRepository {
 
   async findAgent(agentId: string): Promise<JsonObject | undefined> {
     return this.agents.find({ agent_id: agentId });
+  }
+
+  async listAgents(): Promise<JsonObject[]> {
+    return this.agents.list();
   }
 
   async saveWorkspaceSettings(document: WorkspaceSettingsDocument): Promise<void> {
@@ -310,12 +322,46 @@ export class PostgresOAuthRepository {
     return this.googleStates.consume({ state_id: stateId, team_id: teamId });
   }
 
+  async findGoogleConnection(
+    teamId: string,
+    slackUserId: string,
+    googleAccountSubject: string,
+  ): Promise<JsonObject | undefined> {
+    return this.googleConnections.find({
+      google_account_subject: googleAccountSubject,
+      slack_user_id: slackUserId,
+      team_id: teamId,
+    });
+  }
+
+  async listGoogleConnections(teamId: string, slackUserId?: string): Promise<JsonObject[]> {
+    return this.googleConnections.list(
+      slackUserId === undefined
+        ? { team_id: teamId }
+        : { slack_user_id: slackUserId, team_id: teamId },
+    );
+  }
+
   async saveSalesforceAuthConfig(document: SalesforceAuthConfigDocument): Promise<void> {
     await this.salesforceConfigs.upsert({
       key: { salesforce_org_id: document.salesforceOrgId, team_id: document.teamId },
       payload: document.payload,
       values: snakeValues(document),
     });
+  }
+
+  async findSalesforceAuthConfig(
+    teamId: string,
+    salesforceOrgId: string,
+  ): Promise<JsonObject | undefined> {
+    return this.salesforceConfigs.find({
+      salesforce_org_id: salesforceOrgId,
+      team_id: teamId,
+    });
+  }
+
+  async listSalesforceAuthConfigs(teamId: string): Promise<JsonObject[]> {
+    return this.salesforceConfigs.list({ team_id: teamId });
   }
 
   async saveSalesforceConnection(document: SalesforceConnectionDocument): Promise<void> {
@@ -328,6 +374,26 @@ export class PostgresOAuthRepository {
       payload: document.payload,
       values: snakeValues(document),
     });
+  }
+
+  async findSalesforceConnection(
+    teamId: string,
+    slackUserId: string,
+    salesforceOrgId: string,
+  ): Promise<JsonObject | undefined> {
+    return this.salesforceConnections.find({
+      salesforce_org_id: salesforceOrgId,
+      slack_user_id: slackUserId,
+      team_id: teamId,
+    });
+  }
+
+  async listSalesforceConnections(teamId: string, slackUserId?: string): Promise<JsonObject[]> {
+    return this.salesforceConnections.list(
+      slackUserId === undefined
+        ? { team_id: teamId }
+        : { slack_user_id: slackUserId, team_id: teamId },
+    );
   }
 
   async saveSalesforceOAuthState(document: SalesforceOAuthStateDocument): Promise<void> {
@@ -397,6 +463,42 @@ export class PostgresWorkItemRepository {
 
   async findWorkItem(teamId: string, workItemId: string): Promise<JsonObject | undefined> {
     return this.items.find({ team_id: teamId, work_item_id: workItemId });
+  }
+
+  async getWorkItemAggregate(
+    teamId: string,
+    workItemId: string,
+  ): Promise<WorkItemAggregateDocument | undefined> {
+    const item = await this.findWorkItem(teamId, workItemId);
+    if (item === undefined) {
+      return undefined;
+    }
+    const key = { team_id: teamId, work_item_id: workItemId };
+    const [participants, events, attention, calendarLinks] = await Promise.all([
+      this.participants.findByKeyPrefix(key),
+      this.events.findByKeyPrefix(key),
+      this.attentionIndex.findByKeyPrefix(key),
+      this.calendarLinks.findByKeyPrefix(key),
+    ]);
+    return {
+      attention,
+      calendarLinks,
+      events,
+      item,
+      participants,
+    };
+  }
+
+  async listWorkItems(teamId: string): Promise<JsonObject[]> {
+    return this.items.list({ team_id: teamId });
+  }
+
+  async listAttentionWorkItems(teamId: string, userId: string): Promise<JsonObject[]> {
+    return this.attentionIndex.list({
+      needs_attention_now: true,
+      team_id: teamId,
+      user_id: userId,
+    });
   }
 
   async saveParticipant(document: WorkItemParticipantDocument): Promise<void> {

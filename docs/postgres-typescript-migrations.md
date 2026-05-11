@@ -16,7 +16,7 @@ If a database already contains Alembic metadata, the TypeScript migration runner
 POSTGRES_ALLOW_ALEMBIC_BASELINE=true
 ```
 
-This records the mirrored TypeScript migrations without replaying table creation SQL.
+This records mirrored TypeScript migrations through the detected Alembic revision, then applies any later TypeScript migrations normally.
 
 ## Migration Policy
 
