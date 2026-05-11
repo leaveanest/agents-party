@@ -217,6 +217,26 @@ describe("AgentRunner", () => {
       specialist: "work_manager",
     });
   });
+
+  it("wraps default model lookup failures with attempted model id", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: "missing:default-model",
+      providerRouter: new FakeProviderRouter({ content: "will not run" }),
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "hello",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "missing:default-model" },
+      specialist: "assistant",
+    });
+  });
 });
 
 class FakeProviderRouter {

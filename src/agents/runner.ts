@@ -79,7 +79,7 @@ export class AgentRunner {
     const decision = selectSpecialist(invocation);
     const nativeRuntime = this.options.specialistRuntimes?.[decision.specialist];
     if (nativeRuntime !== undefined) {
-      const model = this.options.providerRouter.registry.get(this.options.defaultModelId);
+      const model = this.resolveDefaultModel(decision.specialist);
       let result;
       try {
         result = await nativeRuntime({
@@ -116,7 +116,7 @@ export class AgentRunner {
     invocation: SlackAgentInvocation,
     decision: AgentRouterDecision,
   ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
-    const model = this.options.providerRouter.registry.get(this.options.defaultModelId);
+    const model = this.resolveDefaultModel(decision.specialist);
     const toolResults: AgentToolResult[] = [];
     try {
       let history = buildSpecialistHistory({
@@ -171,6 +171,14 @@ export class AgentRunner {
 
   private promptFor(specialist: AgentSpecialist): string {
     return this.options.specialistPrompts?.[specialist] ?? DEFAULT_SPECIALIST_PROMPTS[specialist];
+  }
+
+  private resolveDefaultModel(specialist: AgentSpecialist): ModelInfo {
+    try {
+      return this.options.providerRouter.registry.get(this.options.defaultModelId);
+    } catch (error) {
+      throw new AgentRunnerExecutionError(specialist, { id: this.options.defaultModelId }, error);
+    }
   }
 }
 
