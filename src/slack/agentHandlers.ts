@@ -237,10 +237,10 @@ async function handleReactionAdded(
   if (channelId === undefined || messageTs === undefined) {
     return;
   }
-  if (
-    options.routingRepository !== undefined &&
-    !(await options.routingRepository.isChannelEnabled(teamId, channelId))
-  ) {
+  if (options.routingRepository === undefined) {
+    return;
+  }
+  if (!(await options.routingRepository.isChannelEnabled(teamId, channelId))) {
     return;
   }
 

@@ -384,6 +384,37 @@ describe("createAgentSlackHandlers", () => {
 
     expect(runs).toBe(0);
   });
+
+  it("does not translate reactions without repository-backed channel policy", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          message: "こんにちは",
+          toolResults: [],
+        };
+      },
+    };
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        conversations: { history: async () => ({ messages: [{ text: "hello" }] }) },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-jp",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(runs).toBe(0);
+  });
 });
 
 class MemoryRoutingRepository {
