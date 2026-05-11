@@ -28,6 +28,7 @@ import {
 } from "./aiSdkMessageConverter.js";
 import type {
   LlmAdapter,
+  LlmCapability,
   LlmProvider,
   LlmRequest,
   LlmResult,
@@ -101,6 +102,10 @@ export class AiSdkLlmAdapter implements LlmAdapter {
     } catch (error) {
       throw normalizeProviderError(request.model, error);
     }
+  }
+
+  supports(_request: LlmRequest, requiredCapabilities: readonly LlmCapability[]): boolean {
+    return !requiredCapabilities.some((capability) => nativeOnlyCapabilities.has(capability));
   }
 
   stream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
@@ -188,6 +193,13 @@ export class AiSdkLlmAdapter implements LlmAdapter {
     }
   }
 }
+
+const nativeOnlyCapabilities = new Set<LlmCapability>([
+  "embeddings",
+  "image_generation",
+  "thinking",
+  "web_search",
+]);
 
 function assertSupportedResponseFormat(request: LlmRequest): void {
   if (request.responseFormat !== undefined && request.responseFormat.type !== "text") {

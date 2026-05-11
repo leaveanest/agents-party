@@ -227,6 +227,16 @@ describe("AiSdkLlmAdapter", () => {
     ]);
   });
 
+  it("declines capabilities reserved for native provider lanes", () => {
+    const adapter = new AiSdkLlmAdapter("openai", () => {
+      throw new Error("not used");
+    });
+
+    expect(adapter.supports({ history, model }, ["text"])).toBe(true);
+    expect(adapter.supports({ history, model }, ["text", "web_search"])).toBe(false);
+    expect(adapter.supports({ history, model }, ["image_generation"])).toBe(false);
+  });
+
   it("rejects providers owned by native adapter lanes", () => {
     const resolveModel = createAiSdkModelResolver();
 

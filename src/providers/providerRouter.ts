@@ -32,20 +32,34 @@ export class MissingProviderAdapterError extends Error {
   }
 }
 
+export class NoProviderAdapterForCapabilitiesError extends Error {
+  constructor(
+    readonly provider: string,
+    readonly capabilities: readonly LlmCapability[],
+  ) {
+    super(
+      `No LLM adapter registered for provider '${provider}' with capabilities: ${capabilities.join(", ")}.`,
+    );
+    this.name = "NoProviderAdapterForCapabilitiesError";
+  }
+}
+
 export class ProviderRouter {
-  private readonly adapters = new Map<string, LlmAdapter>();
+  private readonly adapters = new Map<string, LlmAdapter[]>();
 
   constructor(
     adapters: readonly LlmAdapter[] = [],
     readonly registry: ModelRegistry = createDefaultModelRegistry(),
   ) {
     for (const adapter of adapters) {
-      this.adapters.set(adapter.provider, adapter);
+      this.registerAdapter(adapter);
     }
   }
 
   registerAdapter(adapter: LlmAdapter): void {
-    this.adapters.set(adapter.provider, adapter);
+    const providerAdapters = this.adapters.get(adapter.provider) ?? [];
+    providerAdapters.push(adapter);
+    this.adapters.set(adapter.provider, providerAdapters);
   }
 
   resolveModel(
@@ -71,24 +85,33 @@ export class ProviderRouter {
     const canonicalRequest = this.canonicalRequest(request);
     const requiredCapabilities = requiredCapabilitiesForRequest(request);
     this.registry.assertCapabilities(canonicalRequest.model, requiredCapabilities);
-    return this.adapterFor(canonicalRequest).generate(canonicalRequest);
+    return this.adapterFor(canonicalRequest, requiredCapabilities).generate(canonicalRequest);
   }
 
   stream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
     const canonicalRequest = this.canonicalRequest(request);
     const requiredCapabilities = [...requiredCapabilitiesForRequest(request), "streaming"] as const;
     this.registry.assertCapabilities(canonicalRequest.model, requiredCapabilities);
-    const adapter = this.adapterFor(canonicalRequest);
+    const adapter = this.adapterFor(canonicalRequest, requiredCapabilities);
     if (adapter.stream === undefined) {
       throw new MissingProviderAdapterError(`${canonicalRequest.model.provider} streaming`);
     }
     return adapter.stream(canonicalRequest);
   }
 
-  private adapterFor(request: LlmRequest): LlmAdapter {
-    const adapter = this.adapters.get(request.model.provider);
-    if (adapter === undefined) {
+  private adapterFor(
+    request: LlmRequest,
+    requiredCapabilities: readonly LlmCapability[],
+  ): LlmAdapter {
+    const providerAdapters = this.adapters.get(request.model.provider);
+    if (providerAdapters === undefined || providerAdapters.length === 0) {
       throw new MissingProviderAdapterError(request.model.provider);
+    }
+    const adapter = providerAdapters.find(
+      (candidate) => candidate.supports?.(request, requiredCapabilities) ?? true,
+    );
+    if (adapter === undefined) {
+      throw new NoProviderAdapterForCapabilitiesError(request.model.provider, requiredCapabilities);
     }
     return adapter;
   }
