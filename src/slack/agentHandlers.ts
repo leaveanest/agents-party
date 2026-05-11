@@ -62,20 +62,32 @@ async function handleMention(
     return;
   }
 
-  const result = await runner.run({
-    channelId: event.channel,
-    messageTs: event.ts,
-    teamId,
-    text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
-    threadTs: readString(event, "thread_ts") ?? event.ts,
-    userId: event.user,
-    viewerContextChannelIds: [event.channel],
-  });
+  const threadTs = readString(event, "thread_ts") ?? event.ts;
+  let text: string;
+  try {
+    const result = await runner.run({
+      channelId: event.channel,
+      messageTs: event.ts,
+      teamId,
+      text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
+      threadTs,
+      userId: event.user,
+      viewerContextChannelIds: [event.channel],
+    });
+    text = result.message;
+  } catch (error) {
+    logger.error("TypeScript AgentRunner failed while handling app_mention.", {
+      error,
+      teamId,
+      threadTs,
+    });
+    text = "I couldn't complete that request. Please try again in a moment.";
+  }
 
   await client.chat.postMessage({
     channel: event.channel,
-    text: result.message,
-    thread_ts: readString(event, "thread_ts") ?? event.ts,
+    text,
+    thread_ts: threadTs,
   });
 }
 
