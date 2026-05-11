@@ -26,6 +26,7 @@ export type AgentRunnerResult = {
 
 export type AgentRunnerOptions = {
   defaultModelId: string;
+  maxToolRounds?: number;
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
   specialistPrompts?: Partial<Record<AgentSpecialist, string>>;
   toolRegistry?: AgentToolRegistry;
@@ -53,11 +54,7 @@ export class AgentRunner {
   async run(invocationInput: unknown): Promise<AgentRunnerResult> {
     const invocation = slackAgentInvocationSchema.parse(invocationInput);
     const decision = selectSpecialist(invocation);
-    const result = await this.runSpecialist(invocation, decision);
-    const toolResults =
-      this.options.toolRegistry === undefined
-        ? []
-        : await this.options.toolRegistry.executeAll(result.toolCalls ?? []);
+    const { result, toolResults } = await this.runSpecialist(invocation, decision);
 
     return normalizeRunnerResult(decision, result, toolResults);
   }
@@ -65,15 +62,16 @@ export class AgentRunner {
   private async runSpecialist(
     invocation: SlackAgentInvocation,
     decision: AgentRouterDecision,
-  ): Promise<LlmResult> {
+  ): Promise<{ result: LlmResult; toolResults: AgentToolResult[] }> {
     const model = this.options.providerRouter.registry.get(this.options.defaultModelId);
-    const request: LlmRequest = {
-      history: buildSpecialistHistory({
-        invocation,
-        model,
-        prompt: this.promptFor(decision.specialist),
-        toolResults: [],
-      }),
+    const toolResults: AgentToolResult[] = [];
+    let history = buildSpecialistHistory({
+      invocation,
+      model,
+      prompt: this.promptFor(decision.specialist),
+      toolResults,
+    });
+    const requestBase: Omit<LlmRequest, "history"> = {
       maxOutputTokens: 1200,
       metadata: {
         slack_channel_id: invocation.channelId,
@@ -87,7 +85,28 @@ export class AgentRunner {
           ? this.options.toolRegistry?.definitions()
           : undefined,
     };
-    return this.options.providerRouter.generate(request);
+    const maxToolRounds = this.options.maxToolRounds ?? 1;
+    for (let round = 0; round <= maxToolRounds; round += 1) {
+      const result = await this.options.providerRouter.generate({ ...requestBase, history });
+      if ((result.toolCalls?.length ?? 0) === 0) {
+        return { result, toolResults };
+      }
+      if (this.options.toolRegistry === undefined) {
+        throw new Error("Agent returned tool calls, but no tool registry is configured.");
+      }
+      if (round === maxToolRounds) {
+        throw new Error("Agent exceeded the configured tool-call round limit.");
+      }
+      const roundToolResults = await this.options.toolRegistry.executeAll(result.toolCalls ?? []);
+      toolResults.push(...roundToolResults);
+      history = buildSpecialistHistory({
+        invocation,
+        model,
+        prompt: this.promptFor(decision.specialist),
+        toolResults,
+      });
+    }
+    throw new Error("Agent tool-call loop ended unexpectedly.");
   }
 
   private promptFor(specialist: AgentSpecialist): string {
@@ -108,20 +127,22 @@ export function createDefaultAgentRunner(settings: AppSettings): AgentRunner {
 
 export function selectSpecialist(invocation: SlackAgentInvocation): AgentRouterDecision {
   const text = invocation.text.toLocaleLowerCase();
-  const specialist: AgentSpecialist =
-    /\b(todo|tasks?|work items?|remind|due|担当|タスク|リマインド)\b/u.test(text)
-      ? "work_manager"
-      : /\b(translate|translation|翻訳|訳して)\b/u.test(text)
-        ? "translation"
-        : /\b(map|route|place|nearby|地図|場所|経路)\b/u.test(text)
-          ? "google_maps"
-          : /\b(image|draw|picture|画像|絵)\b/u.test(text)
-            ? "image_generation"
-            : /\b(video|movie|動画)\b/u.test(text)
-              ? "video_generation"
-              : /\b(research|source|調べ|検索)\b/u.test(text)
-                ? "web_research"
-                : "assistant";
+  const specialist: AgentSpecialist = matchesAny(text, [
+    /\b(todo|tasks?|work items?|remind|due)\b/u,
+    /担当|タスク|リマインド/u,
+  ])
+    ? "work_manager"
+    : matchesAny(text, [/\b(translate|translation)\b/u, /翻訳|訳して/u])
+      ? "translation"
+      : matchesAny(text, [/\b(map|route|place|nearby)\b/u, /地図|場所|経路/u])
+        ? "google_maps"
+        : matchesAny(text, [/\b(image|draw|picture)\b/u, /画像|絵/u])
+          ? "image_generation"
+          : matchesAny(text, [/\b(video|movie)\b/u, /動画/u])
+            ? "video_generation"
+            : matchesAny(text, [/\b(research|source)\b/u, /調べ|検索/u])
+              ? "web_research"
+              : "assistant";
 
   return agentRouterDecisionSchema.parse({
     confidence: specialist === "assistant" ? 0.5 : 0.8,
@@ -174,6 +195,32 @@ function buildSpecialistHistory(input: {
         },
         role: "user",
       },
+      ...input.toolResults.flatMap((result, index) => [
+        {
+          content: [
+            {
+              input: {},
+              toolCallId: result.toolCallId,
+              toolName: result.toolName,
+              type: "tool-call" as const,
+            },
+          ],
+          id: `assistant-tool-call-${index}`,
+          role: "assistant" as const,
+        },
+        {
+          content: [
+            {
+              output: { type: "json" as const, value: result.output ?? null },
+              toolCallId: result.toolCallId,
+              toolName: result.toolName,
+              type: "tool-result" as const,
+            },
+          ],
+          id: `tool-result-${index}`,
+          role: "tool" as const,
+        },
+      ]),
     ],
   };
 }
@@ -211,6 +258,10 @@ function normalizeRunnerResult(
     raw: result.raw,
     toolResults,
   };
+}
+
+function matchesAny(text: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(text));
 }
 
 function parseJsonObject(content: string): JsonValue {

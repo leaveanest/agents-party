@@ -28,6 +28,18 @@ describe("AgentRunner", () => {
         viewerContextChannelIds: [],
       }).specialist,
     ).toBe("translation");
+    expect(
+      selectSpecialist({
+        channelId: "C1",
+        messageTs: "1.0",
+        referenceImages: [],
+        teamId: "T1",
+        text: "タスクを確認して",
+        threadMessages: [],
+        userId: "U1",
+        viewerContextChannelIds: [],
+      }).specialist,
+    ).toBe("work_manager");
   });
 
   it("routes primary Slack mentions through provider-backed specialist runners", async () => {
@@ -85,18 +97,62 @@ describe("AgentRunner", () => {
     });
   });
 
-  it("executes typed tool calls through the AgentToolRegistry", async () => {
+  it("runs a final provider turn after typed tool calls", async () => {
     const registry = new AgentToolRegistry([
       {
         description: "Echo a string.",
         execute: async (input) => ({ echoed: readText(input) }),
         name: "echo",
+        outputSchema: z.object({ echoed: z.string() }) as never,
         parameters: {
           additionalProperties: false,
           properties: { text: { type: "string" } },
           required: ["text"],
           type: "object",
         },
+        schema: z.object({ text: z.string() }) as never,
+      },
+    ]);
+    const router = new SequencedProviderRouter([
+      {
+        content: "",
+        finishReason: "tool_call",
+        toolCalls: [{ input: { text: "ok" }, toolCallId: "call-1", toolName: "echo" }],
+      },
+      {
+        content: JSON.stringify({ action: "no_op", message: "final" }),
+      },
+    ]);
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+      toolRegistry: registry,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "task echo",
+      userId: "U1",
+    });
+
+    expect(result.message).toBe("final");
+    expect(result.toolResults).toEqual([
+      { output: { echoed: "ok" }, toolCallId: "call-1", toolName: "echo" },
+    ]);
+    expect(router.requests).toHaveLength(2);
+    expect(router.requests[1]?.history.messages.map((message) => message.role)).toContain("tool");
+  });
+
+  it("rejects invalid tool output", async () => {
+    const registry = new AgentToolRegistry([
+      {
+        description: "Return invalid data.",
+        execute: async () => ({ echoed: 123 }),
+        name: "echo",
+        outputSchema: z.object({ echoed: z.string() }) as never,
+        parameters: { type: "object" },
         schema: z.object({ text: z.string() }) as never,
       },
     ]);
@@ -109,17 +165,15 @@ describe("AgentRunner", () => {
       toolRegistry: registry,
     });
 
-    const result = await runner.run({
-      channelId: "C1",
-      messageTs: "1.0",
-      teamId: "T1",
-      text: "task echo",
-      userId: "U1",
-    });
-
-    expect(result.toolResults).toEqual([
-      { output: { echoed: "ok" }, toolCallId: "call-1", toolName: "echo" },
-    ]);
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "task echo",
+        userId: "U1",
+      }),
+    ).rejects.toThrow("Invalid output from agent tool");
   });
 });
 
@@ -132,6 +186,22 @@ class FakeProviderRouter {
   async generate(request: LlmRequest): Promise<LlmResult> {
     this.requests.push(request);
     return this.result;
+  }
+}
+
+class SequencedProviderRouter {
+  readonly registry = new ModelRegistry([model]);
+  readonly requests: LlmRequest[] = [];
+
+  constructor(private readonly results: LlmResult[]) {}
+
+  async generate(request: LlmRequest): Promise<LlmResult> {
+    this.requests.push(request);
+    const result = this.results.shift();
+    if (result === undefined) {
+      throw new Error("No fake result configured.");
+    }
+    return result;
   }
 }
 

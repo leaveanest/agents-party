@@ -10,6 +10,7 @@ export type AgentToolDefinition<
   description: string;
   execute(input: TInput): Promise<TResult>;
   name: string;
+  outputSchema: z.ZodType<TResult>;
   parameters: JsonValue;
   schema: z.ZodType<TInput>;
 };
@@ -34,6 +35,16 @@ export class InvalidAgentToolInputError extends Error {
   ) {
     super(`Invalid input for agent tool '${toolName}': ${message}`);
     this.name = "InvalidAgentToolInputError";
+  }
+}
+
+export class InvalidAgentToolOutputError extends Error {
+  constructor(
+    readonly toolName: string,
+    message: string,
+  ) {
+    super(`Invalid output from agent tool '${toolName}': ${message}`);
+    this.name = "InvalidAgentToolOutputError";
   }
 }
 
@@ -67,8 +78,13 @@ export class AgentToolRegistry {
     if (!parsed.success) {
       throw new InvalidAgentToolInputError(tool.name, parsed.error.message);
     }
+    const output = await tool.execute(parsed.data);
+    const parsedOutput = tool.outputSchema.safeParse(output);
+    if (!parsedOutput.success) {
+      throw new InvalidAgentToolOutputError(tool.name, parsedOutput.error.message);
+    }
     return {
-      output: await tool.execute(parsed.data),
+      output: parsedOutput.data,
       toolCallId: toolCall.toolCallId,
       toolName: tool.name,
     };
