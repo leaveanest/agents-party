@@ -27,7 +27,7 @@ See [`docs/message-history-model.md`](docs/message-history-model.md) for the con
 The TypeScript provider boundary defines `ProviderRouter`, model registry, provider contracts, capability checks, and an AI SDK common adapter lane for OpenAI, Azure OpenAI, Anthropic, Google, Groq, xAI, PLaMo, NVIDIA, and LiteLLM.
 See [`docs/provider-router.md`](docs/provider-router.md) for the routing and capability boundary.
 
-Agent routing through `app_mention`, specialist placeholder execution, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, and encrypted token persistence are available in the TypeScript runtime. Thread auto-routing, reaction-triggered specialist commands, full App Home settings, and native provider adapters for Bedrock/Dify/provider-specific features remain planned migration work.
+Agent routing through `app_mention`, active thread follow-up auto-routing, flag-reaction translation commands, specialist placeholder execution, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, and encrypted token persistence are available in the TypeScript runtime. Full App Home settings and native provider adapters for Bedrock/Dify/provider-specific features remain planned migration work.
 
 ## Legacy Python Capabilities
 

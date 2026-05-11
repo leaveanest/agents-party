@@ -1,5 +1,15 @@
 import { z } from "zod";
 
+export const agentSpecialistSchema = z.enum([
+  "assistant",
+  "google_maps",
+  "image_generation",
+  "translation",
+  "video_generation",
+  "web_research",
+  "work_manager",
+]);
+
 export const slackReferenceImageSchema = z
   .object({
     data: z.instanceof(Uint8Array).optional(),
@@ -15,6 +25,7 @@ export const slackAgentInvocationSchema = z
     channelId: z.string().min(1),
     messageTs: z.string().min(1),
     referenceImages: z.array(slackReferenceImageSchema).default([]),
+    specialist: agentSpecialistSchema.optional(),
     teamId: z.string().min(1),
     text: z.string().default(""),
     threadMessages: z.array(z.string()).default([]),
@@ -23,16 +34,6 @@ export const slackAgentInvocationSchema = z
     viewerContextChannelIds: z.array(z.string().min(1)).default([]),
   })
   .strict();
-
-export const agentSpecialistSchema = z.enum([
-  "assistant",
-  "google_maps",
-  "image_generation",
-  "translation",
-  "video_generation",
-  "web_research",
-  "work_manager",
-]);
 
 export const agentRouterDecisionSchema = z
   .object({

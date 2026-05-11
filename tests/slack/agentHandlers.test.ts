@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import type { JsonObject } from "../../src/infrastructure/postgres/jsonDocumentRepository.js";
 import { createAgentSlackHandlers } from "../../src/slack/agentHandlers.js";
 
 describe("createAgentSlackHandlers", () => {
@@ -129,4 +130,318 @@ describe("createAgentSlackHandlers", () => {
       }),
     ]);
   });
+
+  it("routes active thread follow-up messages through the AgentRunner", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const posts: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleMessage({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: {
+          replies: async () => ({
+            messages: [{ text: "root text" }, { text: "follow-up" }],
+          }),
+        },
+      },
+      event: {
+        channel: "C1",
+        text: "follow-up",
+        thread_ts: "1712345678.000100",
+        ts: "1712345678.000200",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        specialist: "assistant",
+        teamId: "T1",
+        text: "follow-up",
+        threadMessages: ["root text", "follow-up"],
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        lastMessageTs: "1712345678.000200",
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "thread reply",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("does not route follow-up messages when thread auto-reply is disabled", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      thread: { agent_id: "assistant", status: "active" },
+      threadAutoReplyEnabled: false,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleMessage({
+      body: { team_id: "T1" },
+      client: { chat: { postMessage: async () => ({}) } },
+      event: {
+        channel: "C1",
+        text: "follow-up",
+        thread_ts: "1712345678.000100",
+        ts: "1712345678.000200",
+        user: "U1",
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(runs).toBe(0);
+  });
+
+  it("uses the persisted thread agent for follow-up routing", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { confidence: 1, reason: "forced_invocation", specialist: "translation" },
+          message: "translated follow-up",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      thread: {
+        agent_id: "translation",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleMessage({
+      body: { team_id: "T1" },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        conversations: { replies: async () => ({ messages: [] }) },
+      },
+      event: {
+        channel: "C1",
+        text: "also this",
+        thread_ts: "1712345678.000100",
+        ts: "1712345678.000200",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([expect.objectContaining({ specialist: "translation" })]);
+  });
+
+  it("translates flag reactions through the AgentRunner and replies in-thread", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          message: "こんにちは",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: {
+          history: async () => ({
+            messages: [
+              {
+                text: "hello",
+                thread_ts: "1712345678.000100",
+                ts: "1712345678.000100",
+              },
+            ],
+          }),
+        },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-jp",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        specialist: "translation",
+        teamId: "T1",
+        text: "Translate the following Slack message to ja:\n\nhello",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "こんにちは",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("does not translate reactions in disabled channels", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          message: "こんにちは",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: false,
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        conversations: { history: async () => ({ messages: [{ text: "hello" }] }) },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-jp",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(runs).toBe(0);
+  });
+
+  it("does not translate reactions without repository-backed channel policy", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          message: "こんにちは",
+          toolResults: [],
+        };
+      },
+    };
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        conversations: { history: async () => ({ messages: [{ text: "hello" }] }) },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-jp",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(runs).toBe(0);
+  });
 });
+
+class MemoryRoutingRepository {
+  readonly activations: unknown[] = [];
+
+  constructor(
+    private readonly options: {
+      channelEnabled: boolean;
+      thread?: JsonObject;
+      threadAutoReplyEnabled: boolean;
+    },
+  ) {}
+
+  async activateThreadAgent(input: unknown): Promise<JsonObject> {
+    this.activations.push(input);
+    return {};
+  }
+
+  async findSlackThread(): Promise<JsonObject | undefined> {
+    return this.options.thread;
+  }
+
+  async isChannelEnabled(): Promise<boolean> {
+    return this.options.channelEnabled;
+  }
+
+  async isThreadAutoReplyEnabled(): Promise<boolean> {
+    return this.options.threadAutoReplyEnabled;
+  }
+}

@@ -17,4 +17,4 @@ AGENT_MODEL=google:gemini-2.5-flash
 
 If `AGENT_MODEL` is not set, the TypeScript runtime falls back to `WORK_MANAGER_MODEL`, then `google:gemini-2.5-flash`.
 
-The first routed Slack surface is `app_mention`. Thread follow-up auto-routing and reaction commands are split to Linear issue OSA-18. Native web research, Google Maps, image generation, and video generation integrations are split to Linear issue OSA-19. Both follow-ups should build on these contracts rather than reintroducing Python agent runtime assumptions.
+The routed Slack surfaces are `app_mention`, active thread follow-up `message` events, and flag-reaction translation commands. Native web research, Google Maps, image generation, and video generation integrations are split to Linear issue OSA-19 and should build on these contracts rather than reintroducing Python agent runtime assumptions.
