@@ -193,7 +193,161 @@ describe("Postgres app repositories", () => {
       }),
     ).resolves.toHaveLength(1);
   });
+
+  it("links calendar events transactionally without changing due or attention by default", async () => {
+    const pool = new RecordingPool(emptyAggregateRows());
+    const repository = new PostgresWorkItemRepository(pool as never);
+
+    const aggregate = await repository.linkCalendarEvent({
+      actorUserId: "U1",
+      calendarLink: calendarLink({ starts_at: "2026-05-12T10:00:00.000Z" }),
+      teamId: "T1",
+      workItemId: "W1",
+    });
+
+    expect(aggregate.item).not.toHaveProperty("due_at");
+    expect(aggregate.participants[0]).not.toHaveProperty("next_attention_at");
+    expect(aggregate.calendarLinks).toEqual([
+      expect.objectContaining({
+        external_calendar_id: "primary",
+        external_event_id: "event-1",
+        provider_kind: "google_calendar",
+      }),
+    ]);
+    expect(aggregate.recentEvents.map((event) => event.type)).toContain("calendar_event_linked");
+    expect(pool.queries.map((query) => query.text)).toEqual(
+      expect.arrayContaining([
+        "begin",
+        expect.stringContaining('insert into "work_item_calendar_links"'),
+        expect.stringContaining('insert into "work_item_events"'),
+        "commit",
+      ]),
+    );
+  });
+
+  it("applies calendar start time only when explicitly requested", async () => {
+    const repository = new PostgresWorkItemRepository(
+      new RecordingPool(emptyAggregateRows()) as never,
+    );
+
+    const aggregate = await repository.linkCalendarEvent({
+      actorUserId: "U1",
+      applyStartsAtToDueAt: true,
+      applyStartsAtToNextAttentionAtForUserId: "U1",
+      calendarLink: calendarLink({ starts_at: "2026-05-12T10:00:00.000Z" }),
+      teamId: "T1",
+      workItemId: "W1",
+    });
+
+    expect(aggregate.item).toMatchObject({ due_at: "2026-05-12T10:00:00.000Z" });
+    expect(aggregate.participants[0]).toMatchObject({
+      next_attention_at: "2026-05-12T10:00:00.000Z",
+    });
+    expect(aggregate.recentEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["attention_scheduled", "calendar_event_linked", "due_at_changed"]),
+    );
+  });
+
+  it("records canceled and not-found sync statuses without deleting the work item", async () => {
+    const canceledAggregate = await new PostgresWorkItemRepository(
+      new RecordingPool(emptyAggregateRows()) as never,
+    ).linkCalendarEvent({
+      actorUserId: "U1",
+      calendarLink: calendarLink({ sync_status: "canceled" }),
+      teamId: "T1",
+      workItemId: "W1",
+    });
+    const notFoundAggregate = await new PostgresWorkItemRepository(
+      new RecordingPool(emptyAggregateRows()) as never,
+    ).linkCalendarEvent({
+      actorUserId: "U1",
+      calendarLink: calendarLink({ link_id: "calendar-link-2", sync_status: "not_found" }),
+      teamId: "T1",
+      workItemId: "W1",
+    });
+
+    expect(canceledAggregate.item).toMatchObject({ work_item_id: "W1" });
+    expect(canceledAggregate.calendarLinks[0]).toMatchObject({ sync_status: "canceled" });
+    expect(canceledAggregate.recentEvents.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["calendar_event_canceled", "calendar_event_linked"]),
+    );
+    expect(notFoundAggregate.item).toMatchObject({ work_item_id: "W1" });
+    expect(notFoundAggregate.calendarLinks[0]).toMatchObject({ sync_status: "not_found" });
+  });
+
+  it("unlinks calendar events transactionally without deleting the work item", async () => {
+    const pool = new RecordingPool(emptyAggregateRows([calendarLink()]));
+    const repository = new PostgresWorkItemRepository(pool as never);
+
+    const aggregate = await repository.unlinkCalendarEvent({
+      actorUserId: "U1",
+      linkId: "calendar-link-1",
+      teamId: "T1",
+      workItemId: "W1",
+    });
+
+    expect(aggregate.item).toMatchObject({ work_item_id: "W1" });
+    expect(aggregate.calendarLinks).toEqual([]);
+    expect(aggregate.recentEvents.map((event) => event.type)).toContain("calendar_event_unlinked");
+    expect(pool.queries.map((query) => query.text)).toEqual(
+      expect.arrayContaining([
+        "begin",
+        expect.stringContaining('delete from "work_item_calendar_links"'),
+        expect.stringContaining('insert into "work_item_events"'),
+        "commit",
+      ]),
+    );
+  });
 });
+
+function emptyAggregateRows(calendarLinks: unknown[] = []) {
+  return [
+    {
+      payload: {
+        created_by_user_id: "U1",
+        status: "captured",
+        team_id: "T1",
+        title: "Follow up",
+        updated_at: "2026-05-11T00:00:00.000Z",
+        visibility_kind: "private",
+        work_item_id: "W1",
+      },
+    },
+    [
+      {
+        payload: {
+          attention_profile: "track",
+          role: "follower",
+          user_id: "U1",
+          work_item_id: "W1",
+        },
+      },
+    ],
+    [],
+    [],
+    calendarLinks.map((payload) => ({ payload })),
+  ];
+}
+
+function calendarLink(overrides: Record<string, unknown> = {}) {
+  return {
+    created_at: "2026-05-11T00:00:00.000Z",
+    ends_at: "2026-05-12T11:00:00.000Z",
+    event_title_snapshot: "Calendar event",
+    external_calendar_id: "primary",
+    external_event_id: "event-1",
+    is_all_day: false,
+    link_id: "calendar-link-1",
+    provider_kind: "google_calendar",
+    response_status: "accepted",
+    starts_at: "2026-05-12T10:00:00.000Z",
+    sync_status: "active",
+    team_id: "T1",
+    updated_at: "2026-05-11T00:00:00.000Z",
+    work_item_id: "W1",
+    ...overrides,
+  };
+}
 
 class RecordingPool {
   readonly queries: Array<{ text: string; values?: unknown[] }> = [];

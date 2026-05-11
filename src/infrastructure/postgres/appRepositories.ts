@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 
 import type { JsonValue } from "../../domain/messageHistory.js";
+import type { CalendarProviderKind } from "../../domain/workItemCalendar.js";
 import {
   type JsonObject,
   type PostgresColumnValues,
@@ -150,7 +151,7 @@ export type WorkItemCalendarLinkDocument = PayloadDocument & {
   isAllDay: boolean;
   lastSyncedAt?: Date;
   linkId: string;
-  providerKind: string;
+  providerKind: CalendarProviderKind;
   responseStatus?: string;
   startsAt?: Date;
   syncStatus: string;
