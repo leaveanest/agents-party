@@ -10,8 +10,14 @@ The current Python implementation remains in the repository only as legacy code 
 The TypeScript runtime currently exposes:
 
 - `GET /healthz`
+- `POST /slack/events`
+- `GET /slack/install` when Slack OAuth install settings are present
+- `GET /slack/oauth_redirect` when Slack OAuth install settings are present
 
-Slack events, OAuth routes, agent routing, persistence, and provider adapters are planned migration work and are not yet available in the TypeScript runtime.
+The TypeScript Slack ingress initializes Bolt for JavaScript/TypeScript, validates Slack signatures through Bolt, acknowledges Events API deliveries, and suppresses duplicate event deliveries by Slack `event_id`.
+See [`docs/slack-typescript-ingress.md`](docs/slack-typescript-ingress.md) for the current ingress boundary.
+
+Agent routing, specialist execution, full App Home settings, Google/Salesforce OAuth routes, and provider adapters are planned migration work and are not yet available in the TypeScript runtime.
 
 ## Legacy Python Capabilities
 
@@ -86,9 +92,12 @@ Run the TypeScript app locally:
 vp run dev
 ```
 
-The initial TypeScript runtime exposes:
+The TypeScript runtime exposes:
 
 - `GET /healthz`
+- `POST /slack/events`
+- `GET /slack/install` when Slack OAuth install settings are present
+- `GET /slack/oauth_redirect` when Slack OAuth install settings are present
 
 Validate the TypeScript workspace:
 
@@ -160,8 +169,14 @@ Use a static bot token locally, or provide `SLACK_CLIENT_ID` together with datab
 ```bash
 SLACK_BOT_TOKEN=...
 SLACK_SIGNING_SECRET=...
-SLACK_APP_TOKEN=...
 SLACK_CLIENT_ID=...
+SLACK_CLIENT_SECRET=...
+SLACK_STATE_SECRET=...
+SLACK_SCOPES=app_mentions:read,channels:history,chat:write,groups:history,im:history,mpim:history,reactions:read,users:read,views:write
+SLACK_USER_SCOPES=
+SLACK_EVENTS_PATH=/slack/events
+SLACK_INSTALL_PATH=/slack/install
+SLACK_OAUTH_REDIRECT_PATH=/slack/oauth_redirect
 AGENT_SELECTOR_MODEL=google-gla:gemini-3-flash-preview
 ```
 
@@ -184,7 +199,7 @@ VIDEO_GENERATION_PROMPT_MODEL=gemini-2.5-flash
 Use a direct PostgreSQL URL for local development and one-off verification:
 
 ```bash
-DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/agents_party
+DATABASE_URL=postgresql://user:password@localhost:5432/agents_party
 ```
 
 ### Heroku database

@@ -10,6 +10,20 @@ const settings: AppSettings = {
   appHost: "127.0.0.1",
   appName: "agents-party",
   appPort: 0,
+  databaseUrl: undefined,
+  slackBotToken: undefined,
+  slackClientId: undefined,
+  slackClientSecret: undefined,
+  slackEnabled: false,
+  slackEventsPath: "/slack/events",
+  slackInstallationStoreEnabled: false,
+  slackInstallPath: "/slack/install",
+  slackOAuthInstallEnabled: false,
+  slackOAuthRedirectPath: "/slack/oauth_redirect",
+  slackScopes: [],
+  slackSigningSecret: undefined,
+  slackStateSecret: undefined,
+  slackUserScopes: [],
 };
 
 let closeServer: (() => Promise<void>) | undefined;
@@ -97,6 +111,67 @@ describe("createAppServer", () => {
 
     expect(response).toContain("HTTP/1.1 400 Bad Request");
     expect(response).toContain('"error":"bad_request"');
+  });
+
+  it("delegates Slack events to the configured Slack gateway", async () => {
+    let delegatedPath: string | undefined;
+    const server = createAppServer(settings, {
+      slackGateway: {
+        async close() {},
+        handle(request, response) {
+          delegatedPath = request.url;
+          response.writeHead(200, { "content-type": "text/plain" });
+          response.end("ok");
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/slack/events`, {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("ok");
+    expect(delegatedPath).toBe("/slack/events");
+  });
+
+  it("returns 503 for Slack routes when Slack is not configured", async () => {
+    const server = createAppServer(settings);
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/slack/install`);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "slack_not_configured",
+    });
   });
 });
 
