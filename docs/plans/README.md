@@ -10,3 +10,7 @@
 - 実装後に残す価値がある判断は ADR に昇格する
 - 実装済みコードの単なる写経や追認文書にはしない
 - 各 plan には少なくとも `Status` を明記する
+
+Current plans:
+
+- [`typescript-full-replacement-plan.md`](typescript-full-replacement-plan.md): accepted TypeScript-only replacement sequence for OSA-6.
