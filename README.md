@@ -80,10 +80,12 @@ Run the app locally:
 uv run agents-party
 ```
 
-## Cloud Run Container
+## Local Container
 
-This repository includes a root `Dockerfile` for Cloud Run deployments.
-The container installs `ffmpeg`, which is required for transcribing Slack video attachments by extracting an audio track before sending it to Google Cloud Speech-to-Text.
+This repository includes a root `Dockerfile` for local container checks only.
+Heroku production deploys use Heroku buildpacks, the root `Procfile`, and the release phase instead of Docker image deployment.
+Both local containers and Heroku production install `ffmpeg`, which is required for transcribing Slack video attachments by extracting an audio track before sending it to Google Cloud Speech-to-Text.
+Heroku installs it with the Heroku Active Storage Preview buildpack before the Python buildpack runs.
 
 Build locally if needed:
 
@@ -144,19 +146,20 @@ Use a direct PostgreSQL URL for local development and one-off verification:
 DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/agents_party
 ```
 
-### Cloud Run with Cloud SQL
+### Heroku database
 
-Production on Cloud Run uses the Cloud SQL Python Connector with IAM database authentication.
-Do not set `DATABASE_URL` in Cloud Run. Set the following instead:
+Production on Heroku uses the `DATABASE_URL` config var created by the Heroku Postgres add-on.
+The release phase runs Alembic migrations with the same value:
 
 ```bash
-CLOUD_SQL_INSTANCE_CONNECTION_NAME=project:region:instance
-CLOUD_SQL_DATABASE=agents_party
-CLOUD_SQL_IAM_DB_USER=agents-party-runtime@project-id.iam
-CLOUD_SQL_IP_TYPE=PUBLIC
+DATABASE_URL=postgres://...
 ```
 
-`DATABASE_URL` always wins when both modes are configured, which is intended for local overrides only.
+For local development and one-off verification, use a direct PostgreSQL URL with the SQLAlchemy driver prefix:
+
+```bash
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/agents_party
+```
 
 ### Google OAuth
 
@@ -170,29 +173,59 @@ GOOGLE_TOKEN_ENCRYPTION_KEY=...
 
 ## Deployment
 
-Terraform for the initial Cloud Run + Cloud SQL wiring lives under `terraform/environments/dev/`.
+Heroku production deploys use:
+
+- Heroku Active Storage Preview buildpack for the `ffmpeg` runtime binary
+- Heroku Python buildpack, configured by Terraform after the `ffmpeg` buildpack
+- root `Procfile`
+  - `release: alembic upgrade head`
+  - `web: uvicorn agents_party.main:app --host 0.0.0.0 --port $PORT`
+- `.python-version` for Heroku uv builds
+- Heroku Postgres add-on for `DATABASE_URL`
+- Heroku Managed Inference and Agents add-on for `INFERENCE_KEY` and `INFERENCE_URL`
+
+Terraform for the Heroku app, add-ons, buildpack, non-secret config vars, and optional web formation lives under `terraform/environments/dev/`.
+
+Secret values are intentionally not managed by Terraform because Terraform state can contain managed config values. Set Slack, OAuth, encryption, Salesforce, and external API secrets through `heroku config:set` or CI secret injection instead.
+The Heroku provider is configured to avoid storing unmanaged app config vars and add-on config var values in Terraform state.
 
 1. Apply infrastructure:
 
 ```bash
 cd terraform/environments/dev
+export HEROKU_API_KEY=...
 terraform init
 terraform apply -var-file=terraform.tfvars
 ```
 
-2. Run the Cloud Run migration job before shifting traffic:
+The Heroku Terraform provider reads credentials from `HEROKU_API_KEY` or an authenticated Heroku CLI/netrc session. Do not put the API key in `.tfvars`.
+
+2. Set required secrets outside Terraform:
 
 ```bash
-gcloud run jobs execute agents-party-migrate --region=asia-northeast1 --wait
+heroku config:set \
+  SLACK_BOT_TOKEN=... \
+  SLACK_SIGNING_SECRET=... \
+  GOOGLE_OAUTH_CLIENT_SECRET=... \
+  GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET=... \
+  GOOGLE_TOKEN_ENCRYPTION_KEY=... \
+  -a agents-party-dev
 ```
 
-3. Deploy or update the Cloud Run service image, then point traffic to the latest revision.
+3. Deploy from Git to Heroku so the Python buildpack reads `uv.lock`, `.python-version`, and `Procfile`:
+
+```bash
+heroku git:remote -a agents-party-dev
+git push heroku main
+```
+
+4. After the first release has created the `web` process type, set `manage_web_formation = true` in `terraform.tfvars` and re-apply Terraform if you want Terraform to own web dyno quantity and size.
 
 Rollback rule:
 
 - App rollback and database rollback are separate operations.
 - Do not pair destructive Alembic revisions with routine app deploys.
-- If an app release fails, roll back the Cloud Run revision first and evaluate schema rollback separately.
+- If an app release fails, roll back the Heroku release first and evaluate schema rollback separately.
 
 ## Development
 

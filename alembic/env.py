@@ -7,7 +7,6 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
-from sqlalchemy import pool
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -18,6 +17,7 @@ if str(SRC_DIR) not in sys.path:
 from agents_party.config import settings  # noqa: E402
 from agents_party.infrastructure.postgres.connection import (  # noqa: E402
     build_database_engine_from_settings,
+    normalize_database_url,
 )
 from agents_party.infrastructure.postgres.models import metadata  # noqa: E402
 
@@ -40,7 +40,7 @@ def _database_url() -> str:
         RuntimeError: If no database settings are configured.
     """
     if settings.database_url:
-        return settings.database_url
+        return normalize_database_url(settings.database_url)
     if settings.cloud_sql_enabled:
         return f"postgresql+pg8000:///{settings.cloud_sql_database}"
     database_url = config.get_main_option("sqlalchemy.url")

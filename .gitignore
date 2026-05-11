@@ -27,3 +27,11 @@ htmlcov/
 build/
 dist/
 *.egg-info/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!*.tfvars.example

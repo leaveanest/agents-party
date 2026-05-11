@@ -11,7 +11,7 @@ actor "Slack User" as slack_user
 participant "Slack" as slack
 participant "Slack Conversations API" as slack_api
 
-box "Google Cloud Project"
+box "Heroku"
   participant "Slack Events Endpoint\nPOST /slack/events" as slack_events_endpoint
   participant "Mention Handler" as mention_handler
   participant "Message Handler" as message_handler
@@ -20,9 +20,10 @@ box "Google Cloud Project"
   participant "Text Specialist(s)" as text_specialists
   participant "Media Specialist" as media_specialist
   database "PostgreSQL\nworkspace/channel settings\nslack_threads" as pg_threads
-  participant "Vertex AI" as vertex_ai
-  participant "Google Maps Platform" as google_maps
 end box
+
+participant "LLM Provider\nVertex AI / Heroku Inference" as llm_provider
+participant "Google Maps Platform" as google_maps
 
 slack_user -> slack : Post in channel or thread
 
@@ -57,29 +58,29 @@ agent_routing -> pg_threads : Check channel enablement and thread route
 agent_routing -> slack_api : Fetch full thread history
 slack_api --> agent_routing : Root message + thread transcript
 agent_routing -> agent_router : Build Slack invocation with full context
-agent_router -> vertex_ai : Decide direct reply or delegation
+agent_router -> llm_provider : Decide direct reply or delegation
 
 alt Direct reply
-  vertex_ai --> agent_router : Slack-ready response
+  llm_provider --> agent_router : Slack-ready response
   agent_router --> agent_routing : Final text
 else One or more text specialists
   loop zero or more text specialists
     agent_router -> text_specialists : Delegate specialist call
-    text_specialists -> vertex_ai : Specialist reasoning
+    text_specialists -> llm_provider : Specialist reasoning
     opt Maps specialist
       text_specialists -> google_maps : Places / Routes lookup
       google_maps --> text_specialists : Structured maps data
     end
-    vertex_ai --> text_specialists : Specialist result
+    llm_provider --> text_specialists : Specialist result
     text_specialists --> agent_router : Normalized outcome
   end
-  agent_router -> vertex_ai : Synthesize final answer
-  vertex_ai --> agent_router : Slack-ready response
+  agent_router -> llm_provider : Synthesize final answer
+  llm_provider --> agent_router : Slack-ready response
   agent_router --> agent_routing : Final text
 else Media specialist
   agent_router -> media_specialist : Delegate image or video request
-  media_specialist -> vertex_ai : Generate media payload
-  vertex_ai --> media_specialist : Binary image or video
+  media_specialist -> llm_provider : Generate media payload
+  llm_provider --> media_specialist : Binary image or video
   media_specialist --> agent_router : Media outcome
   agent_router --> agent_routing : Uploadable media + optional comment
 end

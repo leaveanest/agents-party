@@ -2,14 +2,16 @@ terraform {
   required_version = ">= 1.7.0"
 
   required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 6.0"
+    heroku = {
+      source  = "heroku/heroku"
+      version = "~> 5.0"
     }
   }
 }
 
-provider "google" {
-  project = var.project_id
-  region  = var.region
+provider "heroku" {
+  customizations {
+    set_app_all_config_vars_in_state = false
+    set_addon_config_vars_in_state   = false
+  }
 }

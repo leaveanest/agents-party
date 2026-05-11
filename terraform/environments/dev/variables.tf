@@ -1,53 +1,57 @@
-variable "project_id" {
-  description = "Google Cloud project id."
+variable "heroku_app_name" {
+  description = "Globally unique Heroku app name."
   type        = string
 }
 
-variable "region" {
-  description = "Primary deployment region."
+variable "heroku_region" {
+  description = "Heroku region for the app and add-ons."
   type        = string
-  default     = "asia-northeast1"
+  default     = "us"
 }
 
-variable "service_name" {
-  description = "Cloud Run service name."
+variable "heroku_stack" {
+  description = "Heroku stack used by the app."
   type        = string
-  default     = "agents-party"
+  default     = "heroku-24"
 }
 
-variable "migration_job_name" {
-  description = "Cloud Run migration job name."
-  type        = string
-  default     = "agents-party-migrate"
+variable "heroku_buildpacks" {
+  description = "Classic buildpacks used by the Heroku app. The Active Storage Preview buildpack provides ffmpeg before Python dependencies are installed."
+  type        = list(string)
+  default = [
+    "https://github.com/heroku/heroku-buildpack-activestorage-preview",
+    "heroku/python",
+  ]
 }
 
-variable "runtime_service_account_id" {
-  description = "Service account id used by Cloud Run."
+variable "heroku_postgres_plan" {
+  description = "Heroku Postgres add-on plan."
   type        = string
-  default     = "agents-party-runtime"
+  default     = "heroku-postgresql:essential-0"
 }
 
-variable "container_image" {
-  description = "Container image deployed to Cloud Run."
+variable "heroku_inference_plan" {
+  description = "Heroku Managed Inference and Agents add-on plan."
   type        = string
+  default     = "heroku-inference:standard"
 }
 
-variable "cloud_sql_instance_name" {
-  description = "Cloud SQL instance name."
-  type        = string
-  default     = "agents-party-db"
+variable "manage_web_formation" {
+  description = "Whether Terraform manages the web dyno formation. The app must already have a release with a web process."
+  type        = bool
+  default     = false
 }
 
-variable "cloud_sql_database_name" {
-  description = "Application database name."
-  type        = string
-  default     = "agents_party"
+variable "web_dyno_quantity" {
+  description = "Number of web dynos to run when web formation management is enabled."
+  type        = number
+  default     = 1
 }
 
-variable "cloud_sql_tier" {
-  description = "Cloud SQL machine tier."
+variable "web_dyno_size" {
+  description = "Dyno size for the web process when web formation management is enabled."
   type        = string
-  default     = "db-custom-1-3840"
+  default     = "basic"
 }
 
 variable "default_timezone" {
@@ -68,34 +72,8 @@ variable "work_manager_model" {
   default     = "google-gla:gemini-3-flash-preview"
 }
 
-variable "slack_bot_token_secret_id" {
-  description = "Secret Manager secret id containing SLACK_BOT_TOKEN."
-  type        = string
-}
-
-variable "slack_signing_secret_secret_id" {
-  description = "Secret Manager secret id containing SLACK_SIGNING_SECRET."
-  type        = string
-}
-
-variable "slack_app_token_secret_id" {
-  description = "Optional Secret Manager secret id containing SLACK_APP_TOKEN."
-  type        = string
-  default     = null
-  nullable    = true
-}
-
-variable "additional_plain_env" {
-  description = "Additional plaintext environment variables for Cloud Run."
+variable "additional_config_vars" {
+  description = "Additional non-secret Heroku config vars managed by Terraform."
   type        = map(string)
   default     = {}
-}
-
-variable "additional_secret_env" {
-  description = "Additional Secret Manager backed environment variables for Cloud Run."
-  type = map(object({
-    secret_id = string
-    version   = optional(string, "latest")
-  }))
-  default = {}
 }
