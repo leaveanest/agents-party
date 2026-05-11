@@ -46,6 +46,55 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("logs successful AgentRunner execution with provider and specialist context", async () => {
+    const runner = {
+      async run() {
+        return {
+          decision: { confidence: 0.5, reason: "test", specialist: "assistant" },
+          message: "handled",
+          model: { id: "google:gemini-2.5-flash", provider: "google" },
+          toolResults: [],
+        };
+      },
+    };
+    const logs: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async () => ({}),
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> hello",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: {
+        info: (...args: unknown[]) => logs.push(args),
+        warn() {},
+      },
+    } as never);
+
+    expect(logs).toEqual([
+      [
+        "TypeScript AgentRunner completed Slack event.",
+        expect.objectContaining({
+          channelId: "C1",
+          eventType: "app_mention",
+          modelId: "google:gemini-2.5-flash",
+          provider: "google",
+          specialist: "assistant",
+          teamId: "T1",
+        }),
+      ],
+    ]);
+  });
+
   it("preserves leading non-bot mentions when stripping the app mention", async () => {
     const runner = {
       async run(invocation: unknown) {

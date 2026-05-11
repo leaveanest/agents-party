@@ -23,6 +23,7 @@ import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 export type AgentRunnerResult = {
   decision: AgentRouterDecision;
   message: string;
+  model: Pick<ModelInfo, "id" | "provider">;
   raw?: unknown;
   structuredResult?: JsonValue;
   toolResults: AgentToolResult[];
@@ -70,20 +71,21 @@ export class AgentRunner {
       return {
         decision,
         message: result.message,
+        model: modelTrace(model),
         raw: result.raw,
         structuredResult: result.structuredResult,
         toolResults: [],
       };
     }
-    const { result, toolResults } = await this.runSpecialist(invocation, decision);
+    const { model, result, toolResults } = await this.runSpecialist(invocation, decision);
 
-    return normalizeRunnerResult(decision, result, toolResults);
+    return normalizeRunnerResult(decision, model, result, toolResults);
   }
 
   private async runSpecialist(
     invocation: SlackAgentInvocation,
     decision: AgentRouterDecision,
-  ): Promise<{ result: LlmResult; toolResults: AgentToolResult[] }> {
+  ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
     const model = this.options.providerRouter.registry.get(this.options.defaultModelId);
     const toolResults: AgentToolResult[] = [];
     let history = buildSpecialistHistory({
@@ -110,7 +112,7 @@ export class AgentRunner {
     for (let round = 0; round <= maxToolRounds; round += 1) {
       const result = await this.options.providerRouter.generate({ ...requestBase, history });
       if ((result.toolCalls?.length ?? 0) === 0) {
-        return { result, toolResults };
+        return { model, result, toolResults };
       }
       if (this.options.toolRegistry === undefined) {
         throw new Error("Agent returned tool calls, but no tool registry is configured.");
@@ -257,15 +259,18 @@ function buildSpecialistHistory(input: {
 
 function normalizeRunnerResult(
   decision: AgentRouterDecision,
+  model: ModelInfo,
   result: LlmResult,
   toolResults: AgentToolResult[],
 ): AgentRunnerResult {
+  const modelSummary = modelTrace(model);
   if (decision.specialist === "work_manager") {
     const parsed = parseJsonObject(result.content);
     const structured = workManagerResultSchema.parse(parsed);
     return {
       decision,
       message: structured.message,
+      model: modelSummary,
       raw: result.raw,
       structuredResult: structured,
       toolResults,
@@ -277,6 +282,7 @@ function normalizeRunnerResult(
     return {
       decision,
       message: structured.translatedText ?? structured.message ?? "Translation completed.",
+      model: modelSummary,
       raw: result.raw,
       structuredResult: structured,
       toolResults,
@@ -285,8 +291,16 @@ function normalizeRunnerResult(
   return {
     decision,
     message: specialistTextResultSchema.parse({ message: result.content }).message,
+    model: modelSummary,
     raw: result.raw,
     toolResults,
+  };
+}
+
+function modelTrace(model: ModelInfo): Pick<ModelInfo, "id" | "provider"> {
+  return {
+    id: model.id,
+    provider: model.provider,
   };
 }
 

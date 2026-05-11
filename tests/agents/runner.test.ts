@@ -62,6 +62,7 @@ describe("AgentRunner", () => {
     expect(result).toMatchObject({
       decision: { specialist: "assistant" },
       message: "Hello from TypeScript AgentRunner",
+      model: { id: "google:gemini-2.5-flash", provider: "google" },
     });
     expect(router.requests[0]?.history.messages.at(-1)).toMatchObject({
       id: "1.0",

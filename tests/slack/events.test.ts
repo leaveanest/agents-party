@@ -77,17 +77,28 @@ describe("registerSlackEventHandlers", () => {
   it("suppresses duplicate event deliveries before feature handlers run", async () => {
     const app = new StubSlackApp();
     let nextCalled = false;
+    const logs: unknown[] = [];
 
     registerSlackEventHandlers(app as never, handlers, new StubDeduplicator(false));
     await app.middlewares[0]?.({
       body: { event_id: "Ev1" },
       context: { retryNum: 1, retryReason: "http_timeout" },
-      logger: { info() {} },
+      logger: { info: (...args: unknown[]) => logs.push(args) },
       next: async () => {
         nextCalled = true;
       },
     });
 
     expect(nextCalled).toBe(false);
+    expect(logs).toEqual([
+      [
+        "Skipping duplicate Slack event delivery.",
+        {
+          eventId: "Ev1",
+          retryNum: 1,
+          retryReason: "http_timeout",
+        },
+      ],
+    ]);
   });
 });
