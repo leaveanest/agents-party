@@ -2,14 +2,22 @@ import { loadSettings } from "./config.js";
 import { createDefaultAgentRunner } from "./agents/runner.js";
 import { createAppServer } from "./server.js";
 import { createOAuthHttpGateway } from "./integrations/oauth/http.js";
+import { Pool } from "pg";
+import { PostgresAgentRoutingRepository } from "./infrastructure/postgres/appRepositories.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
 
 const settings = loadSettings();
 const agentRunner = createDefaultAgentRunner(settings);
+const agentRoutingPool =
+  settings.databaseUrl === undefined
+    ? undefined
+    : new Pool({ connectionString: settings.databaseUrl });
+const routingRepository =
+  agentRoutingPool === undefined ? undefined : new PostgresAgentRoutingRepository(agentRoutingPool);
 const slackGateway = settings.slackEnabled
   ? createSlackGateway(settings, {
-      featureHandlers: createAgentSlackHandlers(agentRunner),
+      featureHandlers: createAgentSlackHandlers(agentRunner, { routingRepository }),
     })
   : undefined;
 const oauthGateway = createOAuthHttpGateway(settings);
@@ -36,6 +44,9 @@ function shutdown(signal: NodeJS.Signals): void {
     }
     if (oauthGateway !== undefined) {
       await oauthGateway.close();
+    }
+    if (agentRoutingPool !== undefined) {
+      await agentRoutingPool.end();
     }
     process.exit();
   });

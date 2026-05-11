@@ -46,7 +46,7 @@ The in-memory deduplicator is process-local. This is enough to avoid repeated lo
 
 - `app_home_opened`: registered in TypeScript and publishes a minimal TypeScript migration home view.
 - `app_mention`: registered in TypeScript and routed through the TypeScript `AgentRunner`.
-- `message`: registered and acknowledged in TypeScript; thread follow-up routing is pending the TypeScript thread policy cutover.
-- `reaction_added`: registered and acknowledged in TypeScript; translation reaction execution is pending the TypeScript specialist command cutover.
+- `message`: registered and acknowledged in TypeScript; active thread follow-ups route through AgentRunner when PostgreSQL thread policy allows auto-reply.
+- `reaction_added`: registered and acknowledged in TypeScript; country flag reactions route the target message through the AgentRunner translation specialist.
 
 These gaps are explicit migration boundaries, not Python fallbacks.
