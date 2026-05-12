@@ -23,6 +23,7 @@ export type AgentDocument = PayloadDocument & {
 
 export type WorkspaceSettingsDocument = PayloadDocument & {
   defaultAgentId?: string;
+  defaultModelId?: string;
   teamId: string;
   threadAutoReply?: boolean;
   updatedAt: Date;
@@ -37,6 +38,7 @@ export type SlackThreadDocument = PayloadDocument & {
   channelId: string;
   createdAt: Date;
   lastMessageTs?: string;
+  modelId?: string;
   rootMessageTs: string;
   status: string;
   teamId: string;
@@ -48,7 +50,10 @@ export type AgentRouteScope = "channel" | "thread" | "workspace";
 
 export type ResolvedAgentRouteDocument = {
   agent: JsonObject;
+  agentId: string;
   channelId: string;
+  modelId?: string;
+  modelScope?: AgentRouteScope;
   scope: AgentRouteScope;
   teamId: string;
   threadTs?: string;
@@ -294,7 +299,7 @@ export class PostgresAgentRoutingRepository {
   async saveAgent(document: AgentDocument): Promise<void> {
     await this.agents.upsert({
       key: { agent_id: document.agentId },
-      payload: document.payload,
+      payload: agentPayload(document),
       values: { enabled: document.enabled, updated_at: document.updatedAt },
     });
   }
@@ -346,7 +351,7 @@ export class PostgresAgentRoutingRepository {
   async saveWorkspaceSettings(document: WorkspaceSettingsDocument): Promise<void> {
     await this.workspaceSettings.upsert({
       key: { team_id: document.teamId },
-      payload: document.payload,
+      payload: settingsPayload(document),
       values: settingsValues(document),
     });
   }
@@ -358,7 +363,7 @@ export class PostgresAgentRoutingRepository {
   async saveChannelSettings(document: ChannelSettingsDocument): Promise<void> {
     await this.channelSettings.upsert({
       key: { channel_id: document.channelId, team_id: document.teamId },
-      payload: document.payload,
+      payload: settingsPayload(document),
       values: settingsValues(document),
     });
   }
@@ -380,11 +385,12 @@ export class PostgresAgentRoutingRepository {
         team_id: document.teamId,
         thread_ts: document.threadTs,
       },
-      payload: document.payload,
+      payload: slackThreadPayload(document),
       values: snakeValues({
         agentId: document.agentId,
         createdAt: document.createdAt,
         lastMessageTs: document.lastMessageTs,
+        modelId: document.modelId,
         rootMessageTs: document.rootMessageTs,
         status: document.status,
         updatedAt: document.updatedAt,
@@ -404,6 +410,7 @@ export class PostgresAgentRoutingRepository {
     agentId: string;
     channelId: string;
     lastMessageTs: string;
+    modelId?: string;
     rootMessageTs: string;
     teamId: string;
     threadTs: string;
@@ -417,6 +424,7 @@ export class PostgresAgentRoutingRepository {
       channel_id: input.channelId,
       created_at: createdAt,
       last_message_ts: input.lastMessageTs,
+      ...(input.modelId === undefined ? {} : { model_id: input.modelId }),
       root_message_ts: rootMessageTs,
       status: "active",
       team_id: input.teamId,
@@ -428,6 +436,7 @@ export class PostgresAgentRoutingRepository {
       channelId: input.channelId,
       createdAt: new Date(createdAt),
       lastMessageTs: input.lastMessageTs,
+      modelId: input.modelId,
       payload,
       rootMessageTs,
       status: "active",
@@ -468,21 +477,33 @@ export class PostgresAgentRoutingRepository {
         ? Promise.resolve(undefined)
         : this.findSlackThread(input.teamId, input.channelId, input.threadTs),
     ]);
+    const activeThread = stringField(thread, "status", "") === "active" ? thread : undefined;
     const resolved = resolveAgentId({
       channelAgentId: optionalStringField(channelSettings, "default_agent_id"),
-      threadAgentId: optionalStringField(thread, "agent_id"),
+      threadAgentId: optionalStringField(activeThread, "agent_id"),
       workspaceAgentId: optionalStringField(workspaceSettings, "default_agent_id"),
     });
     if (resolved === undefined) {
       return undefined;
     }
     const agent = await this.findAgent(resolved.agentId);
-    if (agent === undefined || booleanField(agent, "enabled") === false) {
+    if (agent === undefined || booleanField(agent, "enabled") !== true) {
       return undefined;
     }
+    const resolvedModel = resolveModelId({
+      channelModelId: optionalStringField(channelSettings, "default_model_id"),
+      threadModelId:
+        optionalStringField(activeThread, "model_scope") === "thread"
+          ? optionalStringField(activeThread, "model_id")
+          : undefined,
+      workspaceModelId: optionalStringField(workspaceSettings, "default_model_id"),
+    });
     return {
       agent,
+      agentId: resolved.agentId,
       channelId: input.channelId,
+      modelId: resolvedModel?.modelId,
+      modelScope: resolvedModel?.scope,
       scope: resolved.scope,
       teamId: input.teamId,
       threadTs: input.threadTs,
@@ -1849,6 +1870,23 @@ function resolveAgentId(input: {
   return undefined;
 }
 
+function resolveModelId(input: {
+  channelModelId?: string;
+  threadModelId?: string;
+  workspaceModelId?: string;
+}): { modelId: string; scope: AgentRouteScope } | undefined {
+  if (input.threadModelId !== undefined) {
+    return { modelId: input.threadModelId, scope: "thread" };
+  }
+  if (input.channelModelId !== undefined) {
+    return { modelId: input.channelModelId, scope: "channel" };
+  }
+  if (input.workspaceModelId !== undefined) {
+    return { modelId: input.workspaceModelId, scope: "workspace" };
+  }
+  return undefined;
+}
+
 function teamId(payload: JsonObject): string {
   return stringField(payload, "team_id");
 }
@@ -1883,7 +1921,11 @@ function optionalStringField(
   fieldName: string,
 ): string | undefined {
   const value = payload?.[fieldName];
-  return typeof value === "string" ? value : undefined;
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
 }
 
 function booleanField(payload: JsonObject | undefined, fieldName: string): boolean | undefined {
@@ -1925,9 +1967,61 @@ function assignIfDefined(
 function settingsValues(document: WorkspaceSettingsDocument): PostgresColumnValues {
   return {
     default_agent_id: document.defaultAgentId ?? null,
+    default_model_id: document.defaultModelId ?? null,
     thread_auto_reply: document.threadAutoReply ?? null,
     updated_at: document.updatedAt,
   };
+}
+
+function agentPayload(document: AgentDocument): JsonObject {
+  const payload: JsonObject = { ...document.payload };
+  delete payload.agent_id;
+  delete payload.enabled;
+  delete payload.updated_at;
+  assignIfDefined(payload, "agent_id", document.agentId);
+  assignIfDefined(payload, "enabled", document.enabled);
+  assignIfDefined(payload, "updated_at", document.updatedAt.toISOString());
+  return payload;
+}
+
+function settingsPayload(document: WorkspaceSettingsDocument): JsonObject {
+  const payload: JsonObject = { ...document.payload };
+  delete payload.default_agent_id;
+  delete payload.default_model_id;
+  delete payload.thread_auto_reply;
+  delete payload.updated_at;
+  assignIfDefined(payload, "default_agent_id", document.defaultAgentId);
+  assignIfDefined(payload, "default_model_id", document.defaultModelId);
+  assignIfDefined(payload, "thread_auto_reply", document.threadAutoReply);
+  assignIfDefined(payload, "updated_at", document.updatedAt.toISOString());
+  return payload;
+}
+
+function slackThreadPayload(document: SlackThreadDocument): JsonObject {
+  const payload: JsonObject = { ...document.payload };
+  delete payload.agent_id;
+  delete payload.channel_id;
+  delete payload.created_at;
+  delete payload.last_message_ts;
+  delete payload.model_id;
+  delete payload.model_scope;
+  delete payload.root_message_ts;
+  delete payload.status;
+  delete payload.team_id;
+  delete payload.thread_ts;
+  delete payload.updated_at;
+  assignIfDefined(payload, "agent_id", document.agentId);
+  assignIfDefined(payload, "channel_id", document.channelId);
+  assignIfDefined(payload, "created_at", document.createdAt.toISOString());
+  assignIfDefined(payload, "last_message_ts", document.lastMessageTs);
+  assignIfDefined(payload, "model_id", document.modelId);
+  assignIfDefined(payload, "model_scope", document.modelId === undefined ? undefined : "thread");
+  assignIfDefined(payload, "root_message_ts", document.rootMessageTs);
+  assignIfDefined(payload, "status", document.status);
+  assignIfDefined(payload, "team_id", document.teamId);
+  assignIfDefined(payload, "thread_ts", document.threadTs);
+  assignIfDefined(payload, "updated_at", document.updatedAt.toISOString());
+  return payload;
 }
 
 function snakeValues(document: Record<string, unknown>): PostgresColumnValues {

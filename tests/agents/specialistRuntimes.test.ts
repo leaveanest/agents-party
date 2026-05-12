@@ -343,6 +343,38 @@ describe("specialist runtimes", () => {
     });
   });
 
+  it("AgentRunner rejects explicit media model overrides without required capability", async () => {
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: new FakeProviderRouter({ content: "generic should not run" }),
+      specialistRuntimes: {
+        image_generation: createImageGenerationRuntime(imageModel.id, {
+          async generateImage() {
+            throw new Error("Unexpected generation call.");
+          },
+          async generateVideo() {
+            throw new Error("Unexpected video generation call.");
+          },
+        }),
+      },
+    });
+
+    await expect(
+      runner.run({
+        channelId: "C1",
+        messageTs: "1.0",
+        modelId: model.id,
+        specialist: "image_generation",
+        teamId: "T1",
+        text: "draw an image",
+        userId: "U1",
+      }),
+    ).rejects.toMatchObject({
+      model: { id: "google:gemini-2.5-flash", provider: "google" },
+      specialist: "image_generation",
+    });
+  });
+
   it("AgentRunner wraps missing native media model failures with attempted model id", async () => {
     const runner = new AgentRunner({
       defaultModelId: model.id,

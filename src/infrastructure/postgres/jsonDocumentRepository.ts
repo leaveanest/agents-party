@@ -82,13 +82,14 @@ export class PostgresJsonDocumentRepository<
   }
 
   async find(key: TKey): Promise<TPayload | undefined> {
-    const result = await this.pool.query<{ payload: TPayload }>(
-      `select ${quoteIdentifier(this.payloadColumn)} as payload
+    const result = await this.pool.query<JsonDocumentRow<TPayload>>(
+      `select ${selectDocumentColumns(this.table, this.payloadColumn)}
        from ${quoteIdentifier(this.table.tableName)}
        where ${whereClause(this.table.keyColumns)}`,
       this.table.keyColumns.map((column) => requiredValue(key, column)),
     );
-    return result.rows[0]?.payload;
+    const row = result.rows[0];
+    return row === undefined ? undefined : mergeDocumentRow(row, this.table, this.payloadColumn);
   }
 
   async findByKeyPrefix(where: PostgresColumnValues): Promise<TPayload[]> {
@@ -129,15 +130,19 @@ export class PostgresJsonDocumentRepository<
   async list(where: PostgresColumnValues = {}): Promise<TPayload[]> {
     const entries = Object.entries(where);
     const clauses = entries.map(([column], index) => `${quoteIdentifier(column)} = $${index + 1}`);
-    const result = await this.pool.query<{ payload: TPayload }>(
-      `select ${quoteIdentifier(this.payloadColumn)} as payload
+    const result = await this.pool.query<JsonDocumentRow<TPayload>>(
+      `select ${selectDocumentColumns(this.table, this.payloadColumn)}
        from ${quoteIdentifier(this.table.tableName)}
        ${clauses.length > 0 ? `where ${clauses.join(" and ")}` : ""}`,
       entries.map(([, value]) => value),
     );
-    return result.rows.map((row) => row.payload);
+    return result.rows.map((row) => mergeDocumentRow(row, this.table, this.payloadColumn));
   }
 }
+
+type JsonDocumentRow<TPayload extends JsonObject> = {
+  payload: TPayload;
+} & Record<string, PostgresColumnValue | null | undefined>;
 
 export const postgresDocumentTables = {
   agent: {
@@ -146,7 +151,7 @@ export const postgresDocumentTables = {
     tableName: "agents",
   },
   channelAppSettings: {
-    columns: ["default_agent_id", "thread_auto_reply", "updated_at"],
+    columns: ["default_agent_id", "default_model_id", "thread_auto_reply", "updated_at"],
     keyColumns: ["team_id", "channel_id"],
     tableName: "channel_app_settings",
   },
@@ -190,6 +195,7 @@ export const postgresDocumentTables = {
   slackThread: {
     columns: [
       "agent_id",
+      "model_id",
       "root_message_ts",
       "last_message_ts",
       "status",
@@ -261,7 +267,7 @@ export const postgresDocumentTables = {
     tableName: "work_item_participants",
   },
   workspaceAppSettings: {
-    columns: ["default_agent_id", "thread_auto_reply", "updated_at"],
+    columns: ["default_agent_id", "default_model_id", "thread_auto_reply", "updated_at"],
     keyColumns: ["team_id"],
     tableName: "workspace_app_settings",
   },
@@ -269,6 +275,40 @@ export const postgresDocumentTables = {
 
 function whereClause(columns: readonly string[]): string {
   return columns.map((column, index) => `${quoteIdentifier(column)} = $${index + 1}`).join(" and ");
+}
+
+function selectDocumentColumns(table: JsonDocumentTable, payloadColumn: string): string {
+  const columns = [payloadColumn, ...table.keyColumns, ...(table.columns ?? [])];
+  return [...new Set(columns)]
+    .map((column) => `${quoteIdentifier(column)} as ${quoteIdentifier(column)}`)
+    .join(", ");
+}
+
+function mergeDocumentRow<TPayload extends JsonObject>(
+  row: JsonDocumentRow<TPayload>,
+  table: JsonDocumentTable,
+  payloadColumn: string,
+): TPayload {
+  const payload: JsonObject = { ...row.payload };
+  for (const column of [...table.keyColumns, ...(table.columns ?? [])]) {
+    if (column === payloadColumn) {
+      continue;
+    }
+    if (!Object.hasOwn(row, column)) {
+      continue;
+    }
+    const value = row[column];
+    if (value === null || value === undefined) {
+      delete payload[column];
+      continue;
+    }
+    payload[column] = toJsonValue(value);
+  }
+  return payload as TPayload;
+}
+
+function toJsonValue(value: PostgresColumnValue): JsonValue {
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 function requiredValue(values: PostgresColumnValues, column: string): PostgresColumnValue {

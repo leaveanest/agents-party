@@ -53,7 +53,12 @@ describeIfPostgres("PostgreSQL TypeScript persistence integration", () => {
     });
 
     await expect(repository.find({ team_id: "T1", work_item_id: "W1" })).resolves.toEqual({
+      status: "captured",
+      team_id: "T1",
       title: "Persist through pg",
+      updated_at: "2026-05-11T00:00:00.000Z",
+      visibility_kind: "private",
+      work_item_id: "W1",
     });
   });
 });

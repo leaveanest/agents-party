@@ -13,8 +13,8 @@ cloud "Slack" as slack
 cloud "Google Identity" as google_identity
 cloud "Salesforce Identity" as salesforce_identity
 cloud "Google Maps Platform" as google_maps_platform
-cloud "Cloud Translation API" as cloud_translation
-cloud "Vertex AI / Google GenAI" as vertex_ai
+cloud "LLM Providers\nAI SDK / native adapters" as llm_providers
+cloud "Google GenAI Media API" as google_genai_media
 
 package "Heroku" {
   rectangle "Heroku App\nNode.js buildpack + Procfile" as heroku_app {
@@ -24,8 +24,9 @@ package "Heroku" {
       component "Google OAuth Router\nGET /oauth/google/start\nGET /oauth/google/callback" as google_oauth_router
       component "Salesforce OAuth Router\nGET /oauth/salesforce/start\nGET /oauth/salesforce/callback\nPOST /oauth/salesforce/disconnect" as salesforce_oauth_router
       component "Slack Event Handlers\napp_home_opened / app_mention /\nmessage / reaction_added" as slack_handlers
-      component "Agent Routing" as agent_routing
-      component "Agent Router" as agent_router
+      component "Routing Resolver\nworkspace / channel / thread" as routing_resolver
+      component "AgentRunner" as agent_runner
+      component "ProviderRouter" as provider_router
       component "Work Manager" as work_manager
       component "Web Research" as web_research
       component "Google Maps" as google_maps
@@ -63,35 +64,34 @@ node_app --> migration_runner : vp run migrate
 migration_runner --> postgres : apply TypeScript migrations
 
 slack_gateway --> slack_handlers
-slack_handlers --> agent_routing : mentions and active-thread replies
-slack_handlers --> cloud_translation : flag reaction translation
+slack_handlers --> routing_resolver : mentions, active-thread replies,\nand flag reaction translation
 
-agent_routing --> pg_workspace_settings : channel enablement defaults
-agent_routing --> pg_channel_settings : thread auto-reply overrides
-agent_routing --> pg_threads : active assistant thread state
-agent_routing --> pg_agents : configured agents
-agent_routing --> slack : fetch thread history / post replies / upload files
+routing_resolver --> pg_workspace_settings : workspace defaults
+routing_resolver --> pg_channel_settings : channel defaults and auto-reply overrides
+routing_resolver --> pg_threads : thread route state
+routing_resolver --> pg_agents : configured agents
+routing_resolver --> slack : fetch thread history / post replies / upload files
 
-agent_routing --> agent_router : Slack invocation with full context
-agent_router --> vertex_ai : decide direct reply or delegation
-agent_router --> heroku_inference : optional Heroku-hosted model calls
+routing_resolver --> agent_runner : resolved agent, model,\nand Slack invocation
+agent_runner --> provider_router : provider request with domain history
+provider_router --> llm_providers : model invocation
+provider_router --> heroku_inference : optional Heroku-hosted model calls
 
-agent_router --> work_manager
-agent_router --> web_research
-agent_router --> google_maps
-agent_router --> translation
-agent_router --> image_generation
-agent_router --> video_generation
+agent_runner --> work_manager
+agent_runner --> web_research
+agent_runner --> google_maps
+agent_runner --> translation
+agent_runner --> image_generation
+agent_runner --> video_generation
 
-work_manager --> vertex_ai : structured task execution
+work_manager --> provider_router : structured task execution
 work_manager --> pg_work_items : relational task persistence
 
-web_research --> vertex_ai : web tool orchestration
-google_maps --> vertex_ai : maps reasoning
+web_research --> provider_router : web-search capable generation
 google_maps --> google_maps_platform : Places / Routes API calls
-translation --> vertex_ai : request-driven translation
-image_generation --> vertex_ai : Gemini image generation
-video_generation --> vertex_ai : Gemini prompt planning and Veo rendering
+translation --> provider_router : request-driven translation
+image_generation --> google_genai_media : Gemini image generation
+video_generation --> google_genai_media : Veo rendering or operation handoff
 
 browser --> google_oauth_router : open signed OAuth start URL
 google_oauth_router --> google_oauth
@@ -110,7 +110,7 @@ salesforce_oauth --> salesforce_identity : authorize / token / identity / revoke
 note bottom of postgres
 Stored data:
 - workspace and channel app settings
-- active assistant thread state
+- active thread agent/model route state
 - Slack installation store records
 - work items, participants, events, and attention index
 - Google OAuth connection documents
