@@ -274,14 +274,14 @@ heroku git:remote -a agents-party-dev
 git push heroku main
 ```
 
-4. After the first release has created the `web` and `worker` process types, set `manage_web_formation = true` and `manage_worker_formation = true` in `terraform.tfvars` and re-apply Terraform if you want Terraform to own dyno quantity and size.
+4. After the first release has created the `web` and `worker` process types, set `manage_web_formation = true`, `manage_worker_formation = true`, and `slack_agent_queue_enabled = true` in `terraform.tfvars` and re-apply Terraform if you want Terraform to own dyno quantity and size and route Slack AI chat work through Redis.
 
-Slack AI chat handling uses Redis-backed worker processing when `REDIS_URL` is configured. The web dyno verifies Slack requests, performs lightweight policy checks, enqueues `app_mention` and active thread follow-up work, and returns independently from provider execution. The worker dyno consumes the queue, runs `AgentRunner`, persists thread route state, and posts the final Slack thread reply. If `REDIS_URL` is not configured, local development keeps the existing in-process execution path.
+Slack AI chat handling uses Redis-backed worker processing when `SLACK_AGENT_QUEUE_ENABLED=true`, `REDIS_URL`, and `DATABASE_URL` are configured. The web dyno verifies Slack requests, performs lightweight policy checks, enqueues `app_mention` and active thread follow-up work, and returns independently from provider execution. The worker dyno consumes the queue, runs `AgentRunner`, persists thread route state, and posts the final Slack thread reply. If queue mode is not enabled, local development keeps the existing in-process execution path.
 
 For local queue testing, run a Redis-compatible server and set `REDIS_URL`, then start both processes:
 
 ```bash
-REDIS_URL=redis://localhost:6379 vp run dev
+SLACK_AGENT_QUEUE_ENABLED=true REDIS_URL=redis://localhost:6379 vp run dev
 REDIS_URL=redis://localhost:6379 vp run worker
 ```
 

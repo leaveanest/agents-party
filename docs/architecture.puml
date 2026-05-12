@@ -132,6 +132,7 @@ health checks, and OAuth browser callbacks, plus a worker process
 for queued AI chat execution.
 The Procfile web process runs node dist/main.mjs and binds to Heroku's PORT.
 The worker process runs node dist/worker.mjs.
+The Redis queue path is enabled by SLACK_AGENT_QUEUE_ENABLED=true.
 end note
 
 note right of postgres

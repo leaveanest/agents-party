@@ -1,8 +1,9 @@
 locals {
   app_config_vars = merge(
     {
-      AGENT_MODEL = var.agent_model
-      APP_ENV     = "heroku"
+      AGENT_MODEL               = var.agent_model
+      APP_ENV                   = "heroku"
+      SLACK_AGENT_QUEUE_ENABLED = tostring(var.slack_agent_queue_enabled)
     },
     var.additional_config_vars,
   )

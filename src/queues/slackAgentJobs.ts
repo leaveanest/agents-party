@@ -4,6 +4,7 @@ import { z } from "zod";
 
 const QUEUE_NAME = "slack-agent-jobs";
 const JOB_NAME = "slack-agent-invocation";
+const JOB_ATTEMPTS = 3;
 const DEDUPE_TTL_MILLIS = 10 * 60 * 1000;
 
 export const slackAgentJobSchema = z.object({
@@ -38,7 +39,10 @@ export type SlackAgentJobWorker = {
   close(): Promise<void>;
 };
 
-export type SlackAgentJobProcessor = (job: SlackAgentJob) => Promise<void>;
+export type SlackAgentJobProcessor = (
+  job: SlackAgentJob,
+  context: { attempts: number; attemptsMade: number },
+) => Promise<void>;
 
 export function createBullMqSlackAgentJobQueue(redisUrl: string): SlackAgentJobQueue {
   const connection = createRedisConnection(redisUrl, {
@@ -83,7 +87,10 @@ export function createBullMqSlackAgentJobWorker(
   const worker = new Worker<SlackAgentJob>(
     QUEUE_NAME,
     async (job) => {
-      await processor(slackAgentJobSchema.parse(job.data));
+      await processor(slackAgentJobSchema.parse(job.data), {
+        attempts: typeof job.opts.attempts === "number" ? job.opts.attempts : 1,
+        attemptsMade: job.attemptsMade,
+      });
     },
     workerOptions,
   );
@@ -115,7 +122,7 @@ function slackAgentJobDedupeKey(jobId: string): string {
 
 function slackAgentJobOptions(jobId: string): JobsOptions {
   return {
-    attempts: 3,
+    attempts: JOB_ATTEMPTS,
     backoff: { delay: 5_000, type: "exponential" },
     jobId,
     removeOnComplete: { age: 24 * 60 * 60, count: 5_000 },

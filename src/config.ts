@@ -22,6 +22,7 @@ export type AppSettings = {
   slackBotToken: string | undefined;
   slackClientId: string | undefined;
   slackClientSecret: string | undefined;
+  slackAgentQueueEnabled?: boolean;
   slackEnabled: boolean;
   slackEventsPath: string;
   slackInstallationStoreEnabled: boolean;
@@ -154,6 +155,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     slackBotToken,
     slackClientId,
     slackClientSecret,
+    slackAgentQueueEnabled: parseBoolean(env.SLACK_AGENT_QUEUE_ENABLED, false),
     slackEnabled,
     slackEventsPath: readPath(env.SLACK_EVENTS_PATH, "/slack/events"),
     slackInstallationStoreEnabled,
@@ -244,4 +246,18 @@ function parseList(value: string | undefined, fallback: string[]): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value.trim() === "") {
+    return fallback;
+  }
+  const normalized = value.trim().toLocaleLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  throw new Error("Boolean environment values must be true or false.");
 }

@@ -25,7 +25,9 @@ const routingRepository =
 const oauthRepository =
   appRepositoryPool === undefined ? undefined : new PostgresOAuthRepository(appRepositoryPool);
 const agentJobQueue =
-  settings.redisUrl === undefined || settings.databaseUrl === undefined
+  !settings.slackAgentQueueEnabled ||
+  settings.redisUrl === undefined ||
+  settings.databaseUrl === undefined
     ? undefined
     : createBullMqSlackAgentJobQueue(settings.redisUrl);
 const salesforceHomeContextSigningSecret = settings.salesforceOAuthContextSigningSecret;

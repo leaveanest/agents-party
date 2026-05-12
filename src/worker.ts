@@ -20,7 +20,7 @@ const pool = new Pool({ connectionString: settings.databaseUrl });
 const routingRepository = new PostgresAgentRoutingRepository(pool);
 const runner = createDefaultAgentRunner(settings);
 const slackClients = createSlackWebClientProvider(settings, { pool });
-const worker = createBullMqSlackAgentJobWorker(settings.redisUrl, async (job) => {
+const worker = createBullMqSlackAgentJobWorker(settings.redisUrl, async (job, context) => {
   const client = await slackClients.forTeam({
     enterpriseId: job.enterpriseId,
     isEnterpriseInstall: job.isEnterpriseInstall,
@@ -29,6 +29,7 @@ const worker = createBullMqSlackAgentJobWorker(settings.redisUrl, async (job) =>
   await processSlackAgentJob(job, {
     client,
     logger: console,
+    retryContext: context,
     routingRepository,
     runner,
   });

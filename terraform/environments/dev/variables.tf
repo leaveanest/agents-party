@@ -65,6 +65,12 @@ variable "manage_worker_formation" {
   default     = false
 }
 
+variable "slack_agent_queue_enabled" {
+  description = "Whether the web process should enqueue Slack AI chat work to Redis instead of running it in-process."
+  type        = bool
+  default     = false
+}
+
 variable "worker_dyno_quantity" {
   description = "Number of worker dynos to run when worker formation management is enabled."
   type        = number

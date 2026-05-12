@@ -75,6 +75,11 @@ export type AgentSlackHandlerOptions = {
   salesforceConnectionHome?: SalesforceConnectionHome;
 };
 
+type SlackAgentJobRetryContext = {
+  attempts: number;
+  attemptsMade: number;
+};
+
 export function createAgentSlackHandlers(
   runner: AgentRunner,
   options: AgentSlackHandlerOptions = {},
@@ -236,10 +241,10 @@ async function handleMention(
       job: {
         botUserId: context.botUserId,
         channelId: event.channel,
-        enterpriseId: readBodyString(body, "enterprise_id"),
+        enterpriseId: readSlackEnterpriseId(body),
         eventId: readSlackEventId(body),
         eventType: "app_mention",
-        isEnterpriseInstall: readBodyBoolean(body, "is_enterprise_install"),
+        isEnterpriseInstall: readSlackEnterpriseInstall(body),
         messageTs: event.ts,
         retryNum: readOptionalContextValue(context.retryNum),
         retryReason: readOptionalContextValue(context.retryReason),
@@ -390,10 +395,10 @@ async function handleMessage(
       eventType: "message_follow_up",
       job: {
         channelId: event.channel,
-        enterpriseId: readBodyString(body, "enterprise_id"),
+        enterpriseId: readSlackEnterpriseId(body),
         eventId: readSlackEventId(body),
         eventType: "message_follow_up",
-        isEnterpriseInstall: readBodyBoolean(body, "is_enterprise_install"),
+        isEnterpriseInstall: readSlackEnterpriseInstall(body),
         messageTs: event.ts,
         retryNum: readOptionalContextValue(context.retryNum),
         retryReason: readOptionalContextValue(context.retryReason),
@@ -490,6 +495,7 @@ export async function processSlackAgentJob(
   input: {
     client: SlackAgentClient;
     logger: unknown;
+    retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
   },
@@ -506,6 +512,7 @@ async function processAppMentionJob(
   input: {
     client: SlackAgentClient;
     logger: unknown;
+    retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
   },
@@ -589,6 +596,9 @@ async function processAppMentionJob(
       teamId: job.teamId,
       threadTs: job.threadTs,
     });
+    if (shouldRetryJobFailure(input.retryContext)) {
+      throw error;
+    }
     text = "I couldn't complete that request. Please try again in a moment.";
   }
 
@@ -607,6 +617,7 @@ async function processFollowUpMessageJob(
   input: {
     client: SlackAgentClient;
     logger: unknown;
+    retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
   },
@@ -690,6 +701,9 @@ async function processFollowUpMessageJob(
       teamId: job.teamId,
       threadTs: job.threadTs,
     });
+    if (shouldRetryJobFailure(input.retryContext)) {
+      throw error;
+    }
     text = "I couldn't complete that request. Please try again in a moment.";
   }
 
@@ -979,6 +993,13 @@ function runnerFailureLogFields(error: unknown): Record<string, unknown> {
   };
 }
 
+function shouldRetryJobFailure(context: SlackAgentJobRetryContext | undefined): boolean {
+  if (context === undefined) {
+    return false;
+  }
+  return context.attemptsMade + 1 < context.attempts;
+}
+
 function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -1158,11 +1179,43 @@ function readBodyString(value: unknown, field: string): string | undefined {
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
 }
 
+function readSlackEnterpriseId(body: unknown): string | undefined {
+  return (
+    readBodyString(body, "enterprise_id") ?? readFirstAuthorizationString(body, "enterprise_id")
+  );
+}
+
+function readSlackEnterpriseInstall(body: unknown): boolean | undefined {
+  return (
+    readBodyBoolean(body, "is_enterprise_install") ??
+    readFirstAuthorizationBoolean(body, "is_enterprise_install")
+  );
+}
+
 function readBodyBoolean(value: unknown, field: string): boolean | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
   return typeof value[field] === "boolean" ? value[field] : undefined;
+}
+
+function readFirstAuthorizationString(body: unknown, field: string): string | undefined {
+  const authorization = readFirstAuthorization(body);
+  const fieldValue = authorization?.[field];
+  return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readFirstAuthorizationBoolean(body: unknown, field: string): boolean | undefined {
+  const authorization = readFirstAuthorization(body);
+  return typeof authorization?.[field] === "boolean" ? authorization[field] : undefined;
+}
+
+function readFirstAuthorization(body: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(body) || !Array.isArray(body.authorizations)) {
+    return undefined;
+  }
+  const [authorization] = body.authorizations;
+  return isRecord(authorization) ? authorization : undefined;
 }
 
 function readOptionalContextValue(value: unknown): string | undefined {

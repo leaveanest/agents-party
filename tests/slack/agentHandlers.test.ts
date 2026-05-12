@@ -135,7 +135,17 @@ describe("createAgentSlackHandlers", () => {
     const handlers = createAgentSlackHandlers(runner as never, { agentJobQueue: queue });
 
     await handlers.handleAppMention({
-      body: { event_id: "Ev1", team_id: "T1" },
+      body: {
+        authorizations: [
+          {
+            enterprise_id: "E1",
+            is_enterprise_install: true,
+            team_id: "T1",
+          },
+        ],
+        event_id: "Ev1",
+        team_id: "T1",
+      },
       client: {
         chat: {
           postMessage: async () => ({}),
@@ -156,6 +166,8 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         eventId: "Ev1",
         eventType: "app_mention",
+        enterpriseId: "E1",
+        isEnterpriseInstall: true,
         retryNum: "1",
         retryReason: "http_timeout",
         text: "assign this to <@U123>",
@@ -747,6 +759,88 @@ describe("createAgentSlackHandlers", () => {
         channel: "C1",
         text: "thread reply",
         thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("rethrows queued AgentRunner failures before the final worker attempt", async () => {
+    const runner = {
+      async run() {
+        throw new Error("provider timeout");
+      },
+    };
+    const posts: unknown[] = [];
+
+    await expect(
+      processSlackAgentJob(
+        {
+          channelId: "C1",
+          eventType: "app_mention",
+          messageTs: "1712345678.000100",
+          teamId: "T1",
+          text: "hello",
+          threadTs: "1712345678.000100",
+          userId: "U1",
+        },
+        {
+          client: {
+            chat: {
+              postMessage: async (payload: unknown) => {
+                posts.push(payload);
+                return {};
+              },
+            },
+            conversations: { replies: async () => ({ messages: [] }) },
+            filesUploadV2: async () => ({}),
+          } as never,
+          logger: { error() {}, info() {}, warn() {} },
+          retryContext: { attempts: 3, attemptsMade: 0 },
+          runner: runner as never,
+        },
+      ),
+    ).rejects.toThrow("provider timeout");
+    expect(posts).toEqual([]);
+  });
+
+  it("posts a fallback for queued AgentRunner failures on the final worker attempt", async () => {
+    const runner = {
+      async run() {
+        throw new Error("provider timeout");
+      },
+    };
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000100",
+        teamId: "T1",
+        text: "hello",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: { replies: async () => ({ messages: [] }) },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        retryContext: { attempts: 3, attemptsMade: 2 },
+        runner: runner as never,
+      },
+    );
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't complete that request. Please try again in a moment.",
       }),
     ]);
   });
