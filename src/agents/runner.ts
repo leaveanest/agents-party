@@ -2,6 +2,7 @@ import type { AppSettings } from "../config.js";
 import type { ConversationHistory, JsonValue, UserMessagePart } from "../domain/messageHistory.js";
 import { createAiSdkAdapters } from "../providers/aiSdkAdapter.js";
 import type { LlmRequest, LlmResult, ModelInfo } from "../providers/contracts.js";
+import type { ProviderCredentialResolver } from "../providers/credentials.js";
 import { createNativeProviderAdapters } from "../providers/nativeProviderAdapters.js";
 import { ProviderRouter } from "../providers/providerRouter.js";
 import {
@@ -47,6 +48,7 @@ export class AgentRunnerExecutionError extends Error {
 }
 
 export type AgentRunnerOptions = {
+  credentialResolver?: ProviderCredentialResolver;
   defaultModelId: string;
   maxToolRounds?: number;
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
@@ -56,7 +58,8 @@ export type AgentRunnerOptions = {
 };
 
 const DEFAULT_SPECIALIST_PROMPTS = {
-  assistant: "You are the general Agents Party assistant. Reply directly and concisely for Slack.",
+  assistant:
+    "You are the general Party on Slack assistant. Reply directly and concisely for Slack.",
   google_maps:
     "You are the Google Maps specialist. Return a concise Slack-ready answer with place, route, or map context.",
   image_generation:
@@ -126,6 +129,9 @@ export class AgentRunner {
         toolResults,
       });
       const requestBase: Omit<LlmRequest, "history"> = {
+        context: {
+          workspaceId: invocation.teamId,
+        },
         maxOutputTokens: 1200,
         metadata: {
           slack_channel_id: invocation.channelId,
@@ -183,14 +189,20 @@ export class AgentRunner {
   }
 }
 
-export function createDefaultAgentRunner(settings: AppSettings): AgentRunner {
+export function createDefaultAgentRunner(
+  settings: AppSettings,
+  options: { credentialResolver?: ProviderCredentialResolver } = {},
+): AgentRunner {
   return new AgentRunner({
+    credentialResolver: options.credentialResolver,
     defaultModelId: settings.agentModelId,
     providerRouter: new ProviderRouter([
-      ...createNativeProviderAdapters(),
-      ...createAiSdkAdapters(),
+      ...createNativeProviderAdapters({ credentialResolver: options.credentialResolver }),
+      ...createAiSdkAdapters({}, { credentialResolver: options.credentialResolver }),
     ]),
-    specialistRuntimes: createDefaultSpecialistRuntimes(settings),
+    specialistRuntimes: createDefaultSpecialistRuntimes(settings, {
+      credentialResolver: options.credentialResolver,
+    }),
     toolRegistry: new AgentToolRegistry(),
   });
 }

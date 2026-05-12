@@ -133,6 +133,9 @@ APP_PORT=8000
 
 ### Slack
 
+The Slack App Manifest template is [`slack-app-manifest.yaml`](slack-app-manifest.yaml).
+Replace `agents-party.example.com` with the public HTTPS host before importing it into Slack.
+
 Use a static bot token locally, or provide `SLACK_CLIENT_ID` together with database settings when using the installation store:
 
 ```bash
@@ -141,7 +144,7 @@ SLACK_SIGNING_SECRET=...
 SLACK_CLIENT_ID=...
 SLACK_CLIENT_SECRET=...
 SLACK_STATE_SECRET=...
-SLACK_SCOPES=app_mentions:read,channels:history,chat:write,groups:history,im:history,mpim:history,reactions:read,users:read,views:write
+SLACK_SCOPES=app_mentions:read,channels:history,chat:write,files:write,groups:history,im:history,mpim:history,reactions:read,users:read,views:write
 SLACK_USER_SCOPES=
 SLACK_EVENTS_PATH=/slack/events
 SLACK_INSTALL_PATH=/slack/install
@@ -152,11 +155,12 @@ AGENT_MODEL=google:gemini-2.5-flash
 ### Specialists
 
 ```bash
-GOOGLE_MAPS_API_KEY=...
 IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
 VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
-GOOGLE_GENERATIVE_AI_API_KEY=...
+LLM_API_KEY_ENCRYPTION_KEY=...
 ```
+
+When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Without that resolver, local development can still use process-level provider environment variables supported by the AI SDK provider packages. Do not rely on process-level API keys for multi-workspace production traffic.
 
 ### Local database
 
@@ -210,7 +214,7 @@ The registered Salesforce redirect URI is `${SALESFORCE_OAUTH_REDIRECT_BASE_URL}
 GOOGLE_MAPS_API_KEY=...
 ```
 
-When present, the TypeScript Google Maps specialist uses the Places Text Search API through a narrow gateway under `src/agents/specialistRuntimes.ts`.
+When the workspace credential resolver is configured, store the Google Maps key in `workspace_credentials` with `provider_kind='google_maps'` and `credential_name='api_key'`. `GOOGLE_MAPS_API_KEY` remains a local fallback only.
 
 ### Media Specialist Models
 
@@ -220,7 +224,7 @@ VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 GOOGLE_GENERATIVE_AI_API_KEY=...
 ```
 
-The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call the Google Gen AI SDK when `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` is configured.
+The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call the Google Gen AI SDK. In workspace-credential mode they use the encrypted `provider_kind='google'` / `credential_name='api_key'` row for the Slack team. `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` remain local fallbacks only.
 
 ## Deployment
 

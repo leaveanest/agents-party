@@ -13,6 +13,7 @@ describe("loadSettings", () => {
       databaseUrl: undefined,
       redisUrl: undefined,
       imageGenerationModelId: "google:gemini-2.5-flash-image",
+      llmApiKeyEncryptionKey: undefined,
       googleOAuthCallbackPath: "/oauth/google/callback",
       googleOAuthCallbackUrl: "/oauth/google/callback",
       googleOAuthClientId: undefined,
@@ -39,6 +40,7 @@ describe("loadSettings", () => {
         "app_mentions:read",
         "channels:history",
         "chat:write",
+        "files:write",
         "groups:history",
         "im:history",
         "mpim:history",
@@ -159,6 +161,12 @@ describe("loadSettings", () => {
     expect(settings.googleGenerativeAiApiKey).toBe("gemini-key");
     expect(settings.imageGenerationModelId).toBe("google:image-model");
     expect(settings.videoGenerationModelId).toBe("google:video-model");
+  });
+
+  it("reads the workspace LLM API key encryption key", () => {
+    expect(loadSettings({ LLM_API_KEY_ENCRYPTION_KEY: "fernet-key" }).llmApiKeyEncryptionKey).toBe(
+      "fernet-key",
+    );
   });
 });
 

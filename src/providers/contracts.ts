@@ -61,7 +61,12 @@ export type LlmResponseFormat =
       type: "json";
     };
 
+export type LlmInvocationContext = {
+  workspaceId?: string;
+};
+
 export type LlmRequest = {
+  context?: LlmInvocationContext;
   history: ConversationHistory;
   maxOutputTokens?: number;
   metadata?: Record<string, JsonValue>;

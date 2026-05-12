@@ -11,6 +11,8 @@
 
 The domain history remains `ConversationHistory`. AI SDK `ModelMessage[]` conversion happens only at provider invocation boundaries.
 
+`LlmRequest.context.workspaceId` carries the Slack workspace identity into provider invocation boundaries. Workspace credentials are resolved by adapters from encrypted PostgreSQL rows; `metadata` remains logging and tracing context, not a credential transport.
+
 ## Model Resolution
 
 `ProviderRouter.resolveModel` resolves configured model ids with this precedence:
@@ -54,6 +56,8 @@ This keeps provider expansion local to `src/providers/`: Slack handlers and agen
 - OpenAI-compatible providers for xAI, PLaMo, NVIDIA NIM, and LiteLLM
 
 The adapter converts repository `ConversationHistory` to AI SDK `ModelMessage[]` only at invocation time, maps AI SDK generation and streaming results back to `LlmResult` and `LlmStreamEvent`, and wraps provider failures as `LlmProviderError`.
+
+When a `ProviderCredentialResolver` is configured and the request has `context.workspaceId`, the adapter looks up `provider_kind=<model provider>` and `credential_name=api_key` before constructing the provider model. Missing workspace credentials fail before falling back to process-level provider keys.
 
 AWS Bedrock and Dify are intentionally left for native adapter lanes because their production integrations need provider-specific configuration and behavior outside this common path.
 
