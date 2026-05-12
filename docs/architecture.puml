@@ -99,6 +99,7 @@ web_research --> provider_router : web-search capable generation
 google_maps --> google_maps_platform : Places / Routes API calls
 translation --> provider_router : request-driven translation
 image_generation --> google_genai_media : Gemini image generation
+image_generation --> llm_providers : OpenAI image generation via AI SDK
 video_generation --> google_genai_media : Veo rendering or operation handoff
 
 browser --> google_oauth_router : open signed OAuth start URL

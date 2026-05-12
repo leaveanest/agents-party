@@ -6,6 +6,7 @@ import type { LlmRequest, ModelInfo } from "../providers/contracts.js";
 import type { ProviderCredentialResolver } from "../providers/credentials.js";
 import { GoogleGenAiMediaGateway } from "../providers/googleGenAiMediaGateway.js";
 import type { MediaGenerationGateway } from "../providers/mediaGenerationGateway.js";
+import { OpenAiMediaGateway } from "../providers/openAiMediaGateway.js";
 import type { ProviderRouter } from "../providers/providerRouter.js";
 import type { AgentSpecialist, SlackAgentInvocation } from "./schemas.js";
 
@@ -61,6 +62,7 @@ export type GoogleMapsGatewayFactory = (input: {
 }) => Promise<GoogleMapsGateway | undefined>;
 
 export type MediaGenerationGatewayFactory = (input: {
+  model: ModelInfo;
   teamId: string;
 }) => Promise<MediaGenerationGateway | undefined>;
 
@@ -195,17 +197,34 @@ function createMediaGatewaySource(
   credentialResolver: ProviderCredentialResolver | undefined,
 ): MediaGenerationGateway | MediaGenerationGatewayFactory | undefined {
   if (credentialResolver !== undefined) {
-    return async ({ teamId }) => {
+    return async ({ model, teamId }) => {
       const credential = await credentialResolver.resolveProviderCredential({
-        provider: "google",
+        provider: model.provider,
         workspaceId: teamId,
       });
-      return credential === undefined ? undefined : new GoogleGenAiMediaGateway(credential.apiKey);
+      if (credential === undefined) {
+        return undefined;
+      }
+      if (model.provider === "google") {
+        return new GoogleGenAiMediaGateway(credential.apiKey);
+      }
+      if (model.provider === "openai") {
+        return new OpenAiMediaGateway(credential);
+      }
+      return undefined;
     };
   }
-  return settings.googleGenerativeAiApiKey === undefined
-    ? undefined
-    : new GoogleGenAiMediaGateway(settings.googleGenerativeAiApiKey);
+  return async ({ model }) => {
+    if (model.provider === "google") {
+      return settings.googleGenerativeAiApiKey === undefined
+        ? undefined
+        : new GoogleGenAiMediaGateway(settings.googleGenerativeAiApiKey);
+    }
+    if (model.provider === "openai") {
+      return undefined;
+    }
+    return undefined;
+  };
 }
 
 async function resolveGoogleMapsGateway(
@@ -224,9 +243,10 @@ async function resolveGoogleMapsGateway(
 async function resolveMediaGateway(
   source: MediaGenerationGateway | MediaGenerationGatewayFactory,
   teamId: string,
+  model: ModelInfo,
 ): Promise<MediaGenerationGateway | undefined> {
   if (typeof source === "function") {
-    return source({ teamId });
+    return source({ model, teamId });
   }
   return source;
 }
@@ -339,8 +359,7 @@ export function createImageGenerationRuntime(
             provider: model.provider,
             status: "generated",
           },
-          message:
-            "Image generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+          message: imageGenerationUnconfiguredMessage(model),
         });
         return {
           message: structured.message,
@@ -348,7 +367,7 @@ export function createImageGenerationRuntime(
           structuredResult: structured,
         };
       }
-      const resolvedGateway = await resolveMediaGateway(gateway, invocation.teamId);
+      const resolvedGateway = await resolveMediaGateway(gateway, invocation.teamId, model);
       if (resolvedGateway === undefined) {
         const structured = imageGenerationResultSchema.parse({
           action: "unconfigured",
@@ -359,8 +378,7 @@ export function createImageGenerationRuntime(
             provider: model.provider,
             status: "generated",
           },
-          message:
-            "Image generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+          message: imageGenerationUnconfiguredMessage(model),
         });
         return {
           message: structured.message,
@@ -415,7 +433,9 @@ export function createVideoGenerationRuntime(
         : "16:9";
       const durationSeconds = 8;
       const resolvedGateway =
-        gateway === undefined ? undefined : await resolveMediaGateway(gateway, invocation.teamId);
+        gateway === undefined
+          ? undefined
+          : await resolveMediaGateway(gateway, invocation.teamId, model);
       if (resolvedGateway === undefined) {
         const structured = videoGenerationResultSchema.parse({
           action: "unconfigured",
@@ -492,6 +512,16 @@ function modelTrace(model: ModelInfo): AgentSpecialistRuntimeModelTrace {
     id: model.id,
     provider: model.provider,
   };
+}
+
+function imageGenerationUnconfiguredMessage(model: ModelInfo): string {
+  if (model.provider === "google") {
+    return "Image generation is not configured. Configure a workspace provider credential or set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.";
+  }
+  if (model.provider === "openai") {
+    return "Image generation is not configured. Configure workspace_credentials.provider_kind=openai with credential_name=api_key.";
+  }
+  return `Image generation is not configured for provider '${model.provider}'.`;
 }
 
 export class FetchGoogleMapsGateway implements GoogleMapsGateway {

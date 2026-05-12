@@ -38,9 +38,17 @@ Native specialist runtimes cover:
 
 - web research through `ProviderRouter` with required `web_search`
 - Google Maps Places lookup through encrypted workspace credentials, with `GOOGLE_MAPS_API_KEY` only as a local fallback
-- typed image generation through the Google Gen AI SDK with explicit `image_generation` model capability
+- typed image generation through provider-aware media gateways with explicit `image_generation` model capability. Google image models use the Google Gen AI SDK; OpenAI image models use AI SDK `generateImage()`.
 - typed video generation operation handoff through the Google Gen AI SDK with explicit `video_generation` model capability
 
 These runtimes return Zod-validated structured results and keep provider-specific behavior outside Slack handlers.
+
+OpenAI image generation can be selected with:
+
+```bash
+IMAGE_GENERATION_MODEL=openai:gpt-image-1.5
+```
+
+Set `workspace_credentials.provider_kind=openai` and `credential_name=api_key` for the Slack workspace. OpenAI image generation does not use process-level API keys; if the DB credential is missing, the specialist fails closed as unconfigured.
 
 Workspace-aware provider credentials are enabled when `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are set. The runner carries Slack `teamId` into `LlmRequest.context.workspaceId`, and provider adapters use that typed context for encrypted `workspace_credentials` lookup instead of inferring credentials from metadata.
