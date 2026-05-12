@@ -8,6 +8,7 @@ import {
   PostgresAgentRoutingRepository,
   PostgresOAuthRepository,
 } from "./infrastructure/postgres/appRepositories.js";
+import { createBullMqSlackAgentJobQueue } from "./queues/slackAgentJobs.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
 
@@ -23,10 +24,15 @@ const routingRepository =
     : new PostgresAgentRoutingRepository(appRepositoryPool);
 const oauthRepository =
   appRepositoryPool === undefined ? undefined : new PostgresOAuthRepository(appRepositoryPool);
+const agentJobQueue =
+  settings.redisUrl === undefined || settings.databaseUrl === undefined
+    ? undefined
+    : createBullMqSlackAgentJobQueue(settings.redisUrl);
 const salesforceHomeContextSigningSecret = settings.salesforceOAuthContextSigningSecret;
 const slackGateway = settings.slackEnabled
   ? createSlackGateway(settings, {
       featureHandlers: createAgentSlackHandlers(agentRunner, {
+        agentJobQueue,
         routingRepository,
         salesforceConnectionHome:
           settings.salesforceOAuthEnabled &&
@@ -75,6 +81,9 @@ function shutdown(signal: NodeJS.Signals): void {
     }
     if (slackGateway !== undefined) {
       await slackGateway.close();
+    }
+    if (agentJobQueue !== undefined) {
+      await agentJobQueue.close();
     }
     if (oauthGateway !== undefined) {
       await oauthGateway.close();

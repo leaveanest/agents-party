@@ -21,6 +21,8 @@ package "Heroku" {
     package "agents-party Application" {
       component "Node HTTP Server" as node_app
       component "Slack Bolt Gateway\nPOST /slack/events" as slack_gateway
+      component "Slack Agent Job Queue\nBullMQ producer" as slack_job_producer
+      component "Slack Agent Worker\nBullMQ consumer" as slack_agent_worker
       component "Google OAuth Router\nGET /oauth/google/start\nGET /oauth/google/callback" as google_oauth_router
       component "Salesforce OAuth Router\nGET /oauth/salesforce/start\nGET /oauth/salesforce/callback\nPOST /oauth/salesforce/disconnect" as salesforce_oauth_router
       component "Slack Event Handlers\napp_home_opened / app_mention /\nmessage / reaction_added" as slack_handlers
@@ -40,6 +42,7 @@ package "Heroku" {
   }
 
   rectangle "Managed Inference and Agents Add-on\nINFERENCE_KEY / INFERENCE_URL" as heroku_inference
+  queue "Heroku Key-Value Store / Redis\nREDIS_URL" as redis_queue
 
   database "Heroku Postgres Add-on\nDATABASE_URL" as postgres {
     folder "agents" as pg_agents
@@ -65,14 +68,19 @@ migration_runner --> postgres : apply TypeScript migrations
 
 slack_gateway --> slack_handlers
 slack_handlers --> routing_resolver : mentions, active-thread replies,\nand flag reaction translation
+slack_handlers --> slack_job_producer : enqueue app_mention and\nactive thread follow-up jobs
+slack_job_producer --> redis_queue : BullMQ job + Redis TTL dedupe
+redis_queue --> slack_agent_worker : dequeue agent jobs
+slack_agent_worker --> routing_resolver : resolve route and policy
+slack_agent_worker --> slack : post replies / upload files
 
 routing_resolver --> pg_workspace_settings : workspace defaults
 routing_resolver --> pg_channel_settings : channel defaults and auto-reply overrides
 routing_resolver --> pg_threads : thread route state
 routing_resolver --> pg_agents : configured agents
-routing_resolver --> slack : fetch thread history / post replies / upload files
+routing_resolver --> slack : fetch thread history
 
-routing_resolver --> agent_runner : resolved agent, model,\nand Slack invocation
+slack_agent_worker --> agent_runner : resolved agent, model,\nand Slack invocation
 agent_runner --> provider_router : provider request with domain history
 provider_router --> llm_providers : model invocation
 provider_router --> heroku_inference : optional Heroku-hosted model calls
@@ -119,9 +127,11 @@ Stored data:
 end note
 
 note top of heroku_app
-Heroku hosts one Node.js service for Slack events,
-health checks, and OAuth browser callbacks.
+Heroku hosts a web process for Slack events,
+health checks, and OAuth browser callbacks, plus a worker process
+for queued AI chat execution.
 The Procfile web process runs node dist/main.mjs and binds to Heroku's PORT.
+The worker process runs node dist/worker.mjs.
 end note
 
 note right of postgres

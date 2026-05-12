@@ -12,10 +12,15 @@ import {
   salesforceConnectionSchema,
 } from "../integrations/oauth/domain.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
+import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
+import { readSlackEventId } from "./idempotency.js";
 
 type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & AllMiddlewareArgs;
-type SlackClient = SlackEventArgs<"app_mention">["client"];
+export type SlackAgentClient = Pick<
+  SlackEventArgs<"app_mention">["client"],
+  "chat" | "conversations" | "filesUploadV2"
+>;
 
 export type SlackResolvedAgentRoute = {
   agent: JsonObject;
@@ -65,6 +70,7 @@ export type SalesforceConnectionHome = {
 };
 
 export type AgentSlackHandlerOptions = {
+  agentJobQueue?: SlackAgentJobQueue;
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
 };
@@ -216,6 +222,39 @@ async function handleMention(
   }
 
   const threadTs = readString(event, "thread_ts") ?? event.ts;
+  if (options.agentJobQueue !== undefined) {
+    if (
+      options.routingRepository !== undefined &&
+      !(await options.routingRepository.isChannelEnabled(teamId, event.channel))
+    ) {
+      return;
+    }
+    await enqueueSlackAgentJob({
+      body,
+      client,
+      eventType: "app_mention",
+      job: {
+        botUserId: context.botUserId,
+        channelId: event.channel,
+        enterpriseId: readBodyString(body, "enterprise_id"),
+        eventId: readSlackEventId(body),
+        eventType: "app_mention",
+        isEnterpriseInstall: readBodyBoolean(body, "is_enterprise_install"),
+        messageTs: event.ts,
+        retryNum: readOptionalContextValue(context.retryNum),
+        retryReason: readOptionalContextValue(context.retryReason),
+        teamId,
+        text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
+        threadTs,
+        userId: event.user,
+      },
+      logger,
+      queue: options.agentJobQueue,
+      threadTs,
+    });
+    return;
+  }
+
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
@@ -310,7 +349,7 @@ async function handleMention(
 }
 
 async function handleMessage(
-  { body, client, event, logger }: SlackEventArgs<"message">,
+  { body, client, context, event, logger }: SlackEventArgs<"message">,
   runner: AgentRunner,
   options: AgentSlackHandlerOptions,
 ): Promise<void> {
@@ -341,6 +380,32 @@ async function handleMessage(
     options.routingRepository.isChannelEnabled(teamId, event.channel),
   ]);
   if (!channelEnabled || !autoReplyEnabled || !isActiveThread(thread)) {
+    return;
+  }
+
+  if (options.agentJobQueue !== undefined) {
+    await enqueueSlackAgentJob({
+      body,
+      client,
+      eventType: "message_follow_up",
+      job: {
+        channelId: event.channel,
+        enterpriseId: readBodyString(body, "enterprise_id"),
+        eventId: readSlackEventId(body),
+        eventType: "message_follow_up",
+        isEnterpriseInstall: readBodyBoolean(body, "is_enterprise_install"),
+        messageTs: event.ts,
+        retryNum: readOptionalContextValue(context.retryNum),
+        retryReason: readOptionalContextValue(context.retryReason),
+        teamId,
+        text: readString(event, "text") ?? "",
+        threadTs,
+        userId: event.user,
+      },
+      logger,
+      queue: options.agentJobQueue,
+      threadTs,
+    });
     return;
   }
 
@@ -418,6 +483,259 @@ async function handleMessage(
     text,
     threadTs,
   });
+}
+
+export async function processSlackAgentJob(
+  job: SlackAgentJob,
+  input: {
+    client: SlackAgentClient;
+    logger: unknown;
+    routingRepository?: SlackAgentRoutingRepository;
+    runner: AgentRunner;
+  },
+): Promise<void> {
+  if (job.eventType === "app_mention") {
+    await processAppMentionJob(job, input);
+    return;
+  }
+  await processFollowUpMessageJob(job, input);
+}
+
+async function processAppMentionJob(
+  job: SlackAgentJob,
+  input: {
+    client: SlackAgentClient;
+    logger: unknown;
+    routingRepository?: SlackAgentRoutingRepository;
+    runner: AgentRunner;
+  },
+): Promise<void> {
+  if (
+    input.routingRepository !== undefined &&
+    !(await input.routingRepository.isChannelEnabled(job.teamId, job.channelId))
+  ) {
+    return;
+  }
+
+  let runnerResult: AgentRunnerResult | undefined;
+  let text: string;
+  try {
+    const route = await resolveSlackAgentRoute(input.routingRepository, {
+      channelId: job.channelId,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (input.routingRepository?.resolveAgent !== undefined && route === undefined) {
+      await input.client.chat.postMessage({
+        channel: job.channelId,
+        text: "No agent is configured for this channel or workspace.",
+        thread_ts: job.threadTs,
+      });
+      return;
+    }
+    const routedSpecialist = specialistFromRoute(route);
+    if (route !== undefined && routedSpecialist === undefined) {
+      await input.client.chat.postMessage({
+        channel: job.channelId,
+        text: "The configured agent is not runnable. Please check the agent settings.",
+        thread_ts: job.threadTs,
+      });
+      return;
+    }
+    const result = await input.runner.run({
+      channelId: job.channelId,
+      messageTs: job.messageTs,
+      modelId: route?.modelId,
+      specialist: routedSpecialist,
+      teamId: job.teamId,
+      text: job.text,
+      threadTs: job.threadTs,
+      userId: job.userId,
+      viewerContextChannelIds: [job.channelId],
+    });
+    runnerResult = result;
+    text = result.message;
+    logAgentRunnerSuccess(input.logger, {
+      channelId: job.channelId,
+      eventType: "app_mention",
+      messageTs: job.messageTs,
+      result,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (input.routingRepository !== undefined) {
+      try {
+        await input.routingRepository.activateThreadAgent({
+          agentId: route?.agentId ?? result.decision.specialist,
+          channelId: job.channelId,
+          lastMessageTs: job.messageTs,
+          modelId: threadScopedModelId(route),
+          rootMessageTs: job.threadTs,
+          teamId: job.teamId,
+          threadTs: job.threadTs,
+        });
+      } catch (error) {
+        logWarn(input.logger, "Failed to persist Slack thread routing state after app_mention.", {
+          error,
+          teamId: job.teamId,
+          threadTs: job.threadTs,
+        });
+      }
+    }
+  } catch (error) {
+    logError(input.logger, "TypeScript AgentRunner failed while handling app_mention.", {
+      error,
+      ...runnerFailureLogFields(error),
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    text = "I couldn't complete that request. Please try again in a moment.";
+  }
+
+  await postAgentResult({
+    channel: job.channelId,
+    client: input.client,
+    logger: input.logger,
+    result: runnerResult,
+    text,
+    threadTs: job.threadTs,
+  });
+}
+
+async function processFollowUpMessageJob(
+  job: SlackAgentJob,
+  input: {
+    client: SlackAgentClient;
+    logger: unknown;
+    routingRepository?: SlackAgentRoutingRepository;
+    runner: AgentRunner;
+  },
+): Promise<void> {
+  if (input.routingRepository === undefined) {
+    return;
+  }
+  const [thread, autoReplyEnabled, channelEnabled] = await Promise.all([
+    input.routingRepository.findSlackThread(job.teamId, job.channelId, job.threadTs),
+    input.routingRepository.isThreadAutoReplyEnabled(job.teamId, job.channelId),
+    input.routingRepository.isChannelEnabled(job.teamId, job.channelId),
+  ]);
+  if (!channelEnabled || !autoReplyEnabled || !isActiveThread(thread)) {
+    return;
+  }
+
+  let runnerResult: AgentRunnerResult | undefined;
+  let text: string;
+  try {
+    const route = await resolveSlackAgentRoute(input.routingRepository, {
+      channelId: job.channelId,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (input.routingRepository.resolveAgent !== undefined && route === undefined) {
+      return;
+    }
+    const routedSpecialist = specialistFromRoute(route);
+    if (route !== undefined && routedSpecialist === undefined) {
+      return;
+    }
+    const specialist = routedSpecialist ?? stringField(thread, "agent_id");
+    const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
+    const result = await input.runner.run({
+      channelId: job.channelId,
+      messageTs: job.messageTs,
+      modelId,
+      specialist,
+      teamId: job.teamId,
+      text: job.text,
+      threadMessages: await readThreadTextMessages(input.client, job.channelId, job.threadTs),
+      threadTs: job.threadTs,
+      userId: job.userId,
+      viewerContextChannelIds: [job.channelId],
+    });
+    runnerResult = result;
+    text = result.message;
+    logAgentRunnerSuccess(input.logger, {
+      channelId: job.channelId,
+      eventType: "message_follow_up",
+      messageTs: job.messageTs,
+      result,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    try {
+      await input.routingRepository.activateThreadAgent({
+        agentId: route?.agentId ?? result.decision.specialist,
+        channelId: job.channelId,
+        lastMessageTs: job.messageTs,
+        modelId: route === undefined ? stringField(thread, "model_id") : threadScopedModelId(route),
+        rootMessageTs: stringField(thread, "root_message_ts") ?? job.threadTs,
+        teamId: job.teamId,
+        threadTs: job.threadTs,
+      });
+    } catch (error) {
+      logWarn(
+        input.logger,
+        "Failed to persist Slack thread routing state after message follow-up.",
+        {
+          error,
+          teamId: job.teamId,
+          threadTs: job.threadTs,
+        },
+      );
+    }
+  } catch (error) {
+    logError(input.logger, "TypeScript AgentRunner failed while handling message follow-up.", {
+      error,
+      ...runnerFailureLogFields(error),
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    text = "I couldn't complete that request. Please try again in a moment.";
+  }
+
+  await postAgentResult({
+    channel: job.channelId,
+    client: input.client,
+    logger: input.logger,
+    result: runnerResult,
+    text,
+    threadTs: job.threadTs,
+  });
+}
+
+async function enqueueSlackAgentJob(input: {
+  body: unknown;
+  client: SlackAgentClient;
+  eventType: SlackAgentJob["eventType"];
+  job: SlackAgentJob;
+  logger: unknown;
+  queue: SlackAgentJobQueue;
+  threadTs: string;
+}): Promise<void> {
+  try {
+    const result = await input.queue.enqueue(input.job);
+    logInfo(input.logger, "Queued Slack agent job.", {
+      deduplicated: result.deduplicated,
+      eventId: readSlackEventId(input.body),
+      eventType: input.eventType,
+      jobId: result.jobId,
+      teamId: input.job.teamId,
+      threadTs: input.threadTs,
+    });
+  } catch (error) {
+    logError(input.logger, "Failed to queue Slack agent job.", {
+      error,
+      eventId: readSlackEventId(input.body),
+      eventType: input.eventType,
+      teamId: input.job.teamId,
+      threadTs: input.threadTs,
+    });
+    await input.client.chat.postMessage({
+      channel: input.job.channelId,
+      text: "I couldn't queue that request. Please try again in a moment.",
+      thread_ts: input.threadTs,
+    });
+  }
 }
 
 async function handleReactionAdded(
@@ -544,7 +862,7 @@ function isSupportedFollowUpMessage(event: StringIndexed, threadTs: string | und
 }
 
 async function readThreadTextMessages(
-  client: SlackEventArgs<"message">["client"],
+  client: SlackAgentClient,
   channelId: string,
   threadTs: string,
 ): Promise<string[]> {
@@ -563,9 +881,9 @@ async function readThreadTextMessages(
   }
 }
 
-async function postAgentResult(input: {
+export async function postAgentResult(input: {
   channel: string;
-  client: SlackClient;
+  client: SlackAgentClient;
   logger: unknown;
   result: AgentRunnerResult | undefined;
   text: string;
@@ -635,6 +953,18 @@ function logAgentRunnerSuccess(
 function logInfo(logger: unknown, message: string, metadata: Record<string, unknown>): void {
   if (isRecord(logger) && typeof logger.info === "function") {
     logger.info(message, metadata);
+  }
+}
+
+function logWarn(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.warn === "function") {
+    logger.warn(message, metadata);
+  }
+}
+
+function logError(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.error === "function") {
+    logger.error(message, metadata);
   }
 }
 
@@ -818,6 +1148,31 @@ function escapeRegExp(value: string): string {
 function readString(value: StringIndexed, field: string): string | undefined {
   const fieldValue = value[field];
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readBodyString(value: unknown, field: string): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const fieldValue = value[field];
+  return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readBodyBoolean(value: unknown, field: string): boolean | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return typeof value[field] === "boolean" ? value[field] : undefined;
+}
+
+function readOptionalContextValue(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return undefined;
 }
 
 function readOptionalString(value: unknown): string | undefined {

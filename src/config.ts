@@ -5,6 +5,7 @@ export type AppSettings = {
   appName: string;
   appPort: number;
   databaseUrl: string | undefined;
+  redisUrl?: string;
   imageGenerationModelId: string;
   googleOAuthCallbackPath: string;
   googleOAuthCallbackUrl: string;
@@ -66,6 +67,7 @@ const DEFAULT_SLACK_SCOPES = [
  */
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings {
   const databaseUrl = readText(env.DATABASE_URL);
+  const redisUrl = readText(env.REDIS_URL);
   const googleOAuthClientId = readText(env.GOOGLE_OAUTH_CLIENT_ID);
   const googleOAuthClientSecret = readText(env.GOOGLE_OAUTH_CLIENT_SECRET);
   const googleOAuthContextSigningSecret = readText(env.GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET);
@@ -133,6 +135,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     appName: env.APP_NAME ?? "agents-party",
     appPort: parsePort(env.PORT ?? env.APP_PORT, DEFAULT_PORT),
     databaseUrl,
+    redisUrl,
     imageGenerationModelId:
       readText(env.IMAGE_GENERATION_MODEL) ?? DEFAULT_IMAGE_GENERATION_MODEL_ID,
     googleOAuthCallbackPath,

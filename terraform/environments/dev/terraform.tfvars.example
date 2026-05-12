@@ -4,4 +4,7 @@ heroku_region   = "us"
 # Enable after the app has at least one release containing the Procfile web process.
 manage_web_formation = false
 
+# Enable after the app has at least one release containing the Procfile worker process.
+manage_worker_formation = false
+
 additional_config_vars = {}
