@@ -2,13 +2,19 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { AgentRunner, AgentRunnerExecutionError } from "../../src/agents/runner.js";
 import {
+  createDefaultSpecialistRuntimes,
   createGoogleMapsRuntime,
   createImageGenerationRuntime,
   createVideoGenerationRuntime,
   createWebResearchRuntime,
 } from "../../src/agents/specialistRuntimes.js";
+import { loadSettings } from "../../src/config.js";
 import type { LlmRequest, LlmResult, ModelInfo } from "../../src/providers/contracts.js";
 import { ModelRegistry } from "../../src/providers/modelRegistry.js";
+import {
+  OpenAiMediaGateway,
+  type GenerateImageFunction,
+} from "../../src/providers/openAiMediaGateway.js";
 
 const model: ModelInfo = {
   capabilities: ["text", "web_search"],
@@ -21,6 +27,12 @@ const imageModel: ModelInfo = {
   id: "google:gemini-2.5-flash-image",
   provider: "google",
   providerModelId: "gemini-2.5-flash-image",
+};
+const openAiImageModel: ModelInfo = {
+  capabilities: ["image_generation"],
+  id: "openai:gpt-image-1.5",
+  provider: "openai",
+  providerModelId: "gpt-image-1.5",
 };
 const videoModel: ModelInfo = {
   capabilities: ["video_generation"],
@@ -163,9 +175,9 @@ describe("specialist runtimes", () => {
   });
 
   it("resolves native specialist gateways from the Slack team context", async () => {
-    const teams: string[] = [];
-    const runtime = createImageGenerationRuntime(imageModel.id, async ({ teamId }) => {
-      teams.push(teamId);
+    const calls: Array<{ model: ModelInfo; teamId: string }> = [];
+    const runtime = createImageGenerationRuntime(imageModel.id, async ({ model, teamId }) => {
+      calls.push({ model, teamId });
       return {
         async generateImage() {
           return { dataBase64: "aW1hZ2U=", mimeType: "image/png" };
@@ -182,11 +194,102 @@ describe("specialist runtimes", () => {
       providerRouter: new FakeProviderRouter({ content: "" }),
     });
 
-    expect(teams).toEqual(["T1"]);
+    expect(calls).toEqual([{ model: expect.objectContaining(imageModel), teamId: "T1" }]);
     expect(result.structuredResult).toMatchObject({
       action: "generated",
       media: { dataBase64: "aW1hZ2U=", kind: "image" },
     });
+  });
+
+  it("selects a provider-aware media gateway for OpenAI image models", async () => {
+    const calls: Array<{ model: ModelInfo; prompt: string; teamId: string }> = [];
+    const runtime = createImageGenerationRuntime(
+      openAiImageModel.id,
+      async ({ model, teamId }) => ({
+        async generateImage(input) {
+          calls.push({ model, prompt: input.prompt, teamId });
+          return { dataBase64: "b3BlbmFpLWltYWdl", mimeType: "image/webp" };
+        },
+        async generateVideo() {
+          throw new Error("Unexpected video generation call.");
+        },
+      }),
+    );
+
+    const result = await runtime({
+      invocation: invocation("draw an image with OpenAI"),
+      model,
+      providerRouter: new FakeProviderRouter({ content: "" }),
+    });
+
+    expect(calls).toEqual([
+      {
+        model: expect.objectContaining(openAiImageModel),
+        prompt: "draw an image with OpenAI",
+        teamId: "T1",
+      },
+    ]);
+    expect(result.model).toEqual({ id: "openai:gpt-image-1.5", provider: "openai" });
+    expect(result.structuredResult).toMatchObject({
+      action: "generated",
+      media: {
+        dataBase64: "b3BlbmFpLWltYWdl",
+        kind: "image",
+        mimeType: "image/webp",
+        provider: "openai",
+      },
+    });
+  });
+
+  it("does not use process-level OpenAI keys for default image generation runtimes", async () => {
+    const runtimes = createDefaultSpecialistRuntimes(
+      loadSettings({ IMAGE_GENERATION_MODEL: openAiImageModel.id }),
+    );
+
+    const result = await runtimes.image_generation?.({
+      invocation: invocation("draw an image with OpenAI"),
+      model,
+      providerRouter: new FakeProviderRouter({ content: "" }),
+    });
+
+    expect(result?.structuredResult).toMatchObject({
+      action: "unconfigured",
+      media: {
+        kind: "image",
+        modelId: "openai:gpt-image-1.5",
+        provider: "openai",
+      },
+      message:
+        "Image generation is not configured. Configure workspace_credentials.provider_kind=openai with credential_name=api_key.",
+    });
+  });
+
+  it("maps OpenAI AI SDK image results into generated media assets", async () => {
+    const calls: unknown[] = [];
+    const generateImageFn: GenerateImageFunction = async (input) => {
+      calls.push(input);
+      return {
+        image: {
+          base64: "aW1hZ2U=",
+          mediaType: "image/png",
+        },
+      } as Awaited<ReturnType<GenerateImageFunction>>;
+    };
+    const gateway = new OpenAiMediaGateway({ apiKey: "openai-key" }, generateImageFn);
+
+    const result = await gateway.generateImage({
+      model: openAiImageModel,
+      prompt: "draw a product sketch",
+    });
+
+    expect(result).toEqual({ dataBase64: "aW1hZ2U=", mimeType: "image/png" });
+    expect(calls).toEqual([
+      expect.objectContaining({
+        prompt: "draw a product sketch",
+        providerOptions: { openai: { quality: "high" } },
+        size: "1024x1024",
+      }),
+    ]);
   });
 
   it("parses Japanese route requests into Google Maps route calls", async () => {
@@ -442,7 +545,7 @@ describe("specialist runtimes", () => {
 });
 
 class FakeProviderRouter {
-  readonly registry = new ModelRegistry([model, imageModel, videoModel]);
+  readonly registry = new ModelRegistry([model, imageModel, openAiImageModel, videoModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly result: LlmResult) {}

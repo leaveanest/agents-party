@@ -163,6 +163,14 @@ describe("loadSettings", () => {
     expect(settings.videoGenerationModelId).toBe("google:video-model");
   });
 
+  it("allows OpenAI image generation models to be configured explicitly", () => {
+    const settings = loadSettings({
+      IMAGE_GENERATION_MODEL: "openai:gpt-image-1.5",
+    });
+
+    expect(settings.imageGenerationModelId).toBe("openai:gpt-image-1.5");
+  });
+
   it("reads the workspace LLM API key encryption key", () => {
     expect(loadSettings({ LLM_API_KEY_ENCRYPTION_KEY: "fernet-key" }).llmApiKeyEncryptionKey).toBe(
       "fernet-key",

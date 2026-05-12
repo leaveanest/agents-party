@@ -38,6 +38,18 @@ describe("ModelRegistry", () => {
       id: "azure_openai:gpt-4o",
       provider: "azure_openai",
     });
+    expect(registry.get("gpt-image-1.5")).toMatchObject({
+      capabilities: ["image_generation"],
+      id: "openai:gpt-image-1.5",
+      provider: "openai",
+      providerModelId: "gpt-image-1.5",
+    });
+  });
+
+  it("does not advertise text models as direct image generation models", () => {
+    const registry = createDefaultModelRegistry();
+
+    expect(registry.get("openai:gpt-4o").capabilities).not.toContain("image_generation");
   });
 
   it("rejects unknown model names instead of inferring provider from strings", () => {
