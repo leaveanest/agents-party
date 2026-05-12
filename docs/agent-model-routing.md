@@ -4,7 +4,7 @@ This document describes the target routing policy for Slack AI execution.
 
 ## Status
 
-This is the intended product direction. The current TypeScript runtime still contains keyword-based specialist selection as a transitional implementation detail. New routing work should move decision-making to explicit workspace, channel, and thread configuration.
+This is the implemented product direction. Slack routing decisions come from explicit workspace, channel, and thread configuration; the TypeScript runner does not infer specialists from prompt keywords.
 
 ## Policy
 

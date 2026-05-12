@@ -44,7 +44,7 @@ export const slackAgentInvocationSchema = z
 export const agentRouterDecisionSchema = z
   .object({
     confidence: z.number().min(0).max(1).default(1),
-    reason: z.string().default("keyword_match"),
+    reason: z.string().default("unrouted_invocation"),
     specialist: agentSpecialistSchema,
   })
   .strict();
