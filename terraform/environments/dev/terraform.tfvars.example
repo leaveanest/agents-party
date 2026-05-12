@@ -4,4 +4,10 @@ heroku_region   = "us"
 # Enable after the app has at least one release containing the Procfile web process.
 manage_web_formation = false
 
+# Enable after the app has at least one release containing the Procfile worker process.
+manage_worker_formation = false
+
+# Enable together with worker formation after the worker process is deployed and scaled.
+slack_agent_queue_enabled = false
+
 additional_config_vars = {}

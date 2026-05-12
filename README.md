@@ -233,8 +233,10 @@ Heroku production deploys use:
 - Heroku Node.js buildpack, configured by Terraform
 - root `Procfile`
   - `web: node dist/main.mjs`
+  - `worker: node dist/worker.mjs`
 - `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` for the TypeScript runtime
 - Heroku Postgres add-on for `DATABASE_URL`
+- Heroku Key-Value Store/Redis add-on for `REDIS_URL`
 - Heroku Managed Inference and Agents add-on for `INFERENCE_KEY` and `INFERENCE_URL`
 
 Terraform for the Heroku app, add-ons, buildpack, non-secret config vars, and optional web formation lives under `terraform/environments/dev/`.
@@ -276,7 +278,18 @@ heroku git:remote -a agents-party-dev
 git push heroku main
 ```
 
-4. After the first release has created the `web` process type, set `manage_web_formation = true` in `terraform.tfvars` and re-apply Terraform if you want Terraform to own web dyno quantity and size.
+4. After the first release has created the `web` and `worker` process types, set `manage_web_formation = true`, `manage_worker_formation = true`, and `slack_agent_queue_enabled = true` in `terraform.tfvars` and re-apply Terraform if you want Terraform to own dyno quantity and size and route Slack AI chat work through Redis.
+
+Slack AI chat handling uses Redis-backed worker processing when `SLACK_AGENT_QUEUE_ENABLED=true`, `REDIS_URL`, and `DATABASE_URL` are configured. The web dyno verifies Slack requests, performs lightweight policy checks, enqueues `app_mention` and active thread follow-up work, and returns independently from provider execution. The worker dyno consumes the queue, runs `AgentRunner`, persists thread route state, and posts the final Slack thread reply. If queue mode is not enabled, local development keeps the existing in-process execution path.
+
+For local queue testing, run a Redis-compatible server and set `REDIS_URL`, then start both processes:
+
+```bash
+SLACK_AGENT_QUEUE_ENABLED=true REDIS_URL=redis://localhost:6379 vp run dev
+REDIS_URL=redis://localhost:6379 vp run worker
+```
+
+Use a persistent Heroku KVS/Redis plan for production queues. The minimal non-persistent plans are not appropriate for durable Slack work handoff.
 
 Rollback rule:
 

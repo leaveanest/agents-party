@@ -19,7 +19,9 @@ import {
   salesforceConnectionSchema,
 } from "../integrations/oauth/domain.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
+import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
+import { readSlackEventId } from "./idempotency.js";
 import {
   WORKSPACE_CREDENTIAL_BASE_URL_ACTION_ID,
   WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID,
@@ -35,6 +37,7 @@ type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & 
 type SlackActionArgs = SlackActionMiddlewareArgs & AllMiddlewareArgs;
 type SlackViewArgs = SlackViewMiddlewareArgs & AllMiddlewareArgs;
 type SlackClient = SlackEventArgs<"app_mention">["client"];
+export type SlackAgentClient = Pick<SlackClient, "chat" | "conversations" | "filesUploadV2">;
 
 const workspaceCredentialProviderKinds = [
   "openai",
@@ -123,9 +126,15 @@ export type WorkspaceCredentialSettingsHome = {
 };
 
 export type AgentSlackHandlerOptions = {
+  agentJobQueue?: SlackAgentJobQueue;
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
   workspaceCredentialSettings?: WorkspaceCredentialSettingsHome;
+};
+
+type SlackAgentJobRetryContext = {
+  attempts: number;
+  attemptsMade: number;
 };
 
 export function createAgentSlackHandlers(
@@ -425,6 +434,39 @@ async function handleMention(
   }
 
   const threadTs = readString(event, "thread_ts") ?? event.ts;
+  if (options.agentJobQueue !== undefined) {
+    if (
+      options.routingRepository !== undefined &&
+      !(await options.routingRepository.isChannelEnabled(teamId, event.channel))
+    ) {
+      return;
+    }
+    await enqueueSlackAgentJob({
+      body,
+      client,
+      eventType: "app_mention",
+      job: {
+        botUserId: context.botUserId,
+        channelId: event.channel,
+        enterpriseId: readSlackEnterpriseId(body),
+        eventId: readSlackEventId(body),
+        eventType: "app_mention",
+        isEnterpriseInstall: readSlackEnterpriseInstall(body),
+        messageTs: event.ts,
+        retryNum: readOptionalContextValue(context.retryNum),
+        retryReason: readOptionalContextValue(context.retryReason),
+        teamId,
+        text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
+        threadTs,
+        userId: event.user,
+      },
+      logger,
+      queue: options.agentJobQueue,
+      threadTs,
+    });
+    return;
+  }
+
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
@@ -519,7 +561,7 @@ async function handleMention(
 }
 
 async function handleMessage(
-  { body, client, event, logger }: SlackEventArgs<"message">,
+  { body, client, context, event, logger }: SlackEventArgs<"message">,
   runner: AgentRunner,
   options: AgentSlackHandlerOptions,
 ): Promise<void> {
@@ -550,6 +592,32 @@ async function handleMessage(
     options.routingRepository.isChannelEnabled(teamId, event.channel),
   ]);
   if (!channelEnabled || !autoReplyEnabled || !isActiveThread(thread)) {
+    return;
+  }
+
+  if (options.agentJobQueue !== undefined) {
+    await enqueueSlackAgentJob({
+      body,
+      client,
+      eventType: "message_follow_up",
+      job: {
+        channelId: event.channel,
+        enterpriseId: readSlackEnterpriseId(body),
+        eventId: readSlackEventId(body),
+        eventType: "message_follow_up",
+        isEnterpriseInstall: readSlackEnterpriseInstall(body),
+        messageTs: event.ts,
+        retryNum: readOptionalContextValue(context.retryNum),
+        retryReason: readOptionalContextValue(context.retryReason),
+        teamId,
+        text: readString(event, "text") ?? "",
+        threadTs,
+        userId: event.user,
+      },
+      logger,
+      queue: options.agentJobQueue,
+      threadTs,
+    });
     return;
   }
 
@@ -627,6 +695,268 @@ async function handleMessage(
     text,
     threadTs,
   });
+}
+
+export async function processSlackAgentJob(
+  job: SlackAgentJob,
+  input: {
+    client: SlackAgentClient;
+    logger: unknown;
+    retryContext?: SlackAgentJobRetryContext;
+    routingRepository?: SlackAgentRoutingRepository;
+    runner: AgentRunner;
+  },
+): Promise<void> {
+  if (job.eventType === "app_mention") {
+    await processAppMentionJob(job, input);
+    return;
+  }
+  await processFollowUpMessageJob(job, input);
+}
+
+async function processAppMentionJob(
+  job: SlackAgentJob,
+  input: {
+    client: SlackAgentClient;
+    logger: unknown;
+    retryContext?: SlackAgentJobRetryContext;
+    routingRepository?: SlackAgentRoutingRepository;
+    runner: AgentRunner;
+  },
+): Promise<void> {
+  if (
+    input.routingRepository !== undefined &&
+    !(await input.routingRepository.isChannelEnabled(job.teamId, job.channelId))
+  ) {
+    return;
+  }
+
+  let runnerResult: AgentRunnerResult | undefined;
+  let text: string;
+  try {
+    const route = await resolveSlackAgentRoute(input.routingRepository, {
+      channelId: job.channelId,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (input.routingRepository?.resolveAgent !== undefined && route === undefined) {
+      await input.client.chat.postMessage({
+        channel: job.channelId,
+        text: "No agent is configured for this channel or workspace.",
+        thread_ts: job.threadTs,
+      });
+      return;
+    }
+    const routedSpecialist = specialistFromRoute(route);
+    if (route !== undefined && routedSpecialist === undefined) {
+      await input.client.chat.postMessage({
+        channel: job.channelId,
+        text: "The configured agent is not runnable. Please check the agent settings.",
+        thread_ts: job.threadTs,
+      });
+      return;
+    }
+    const result = await input.runner.run({
+      channelId: job.channelId,
+      messageTs: job.messageTs,
+      modelId: route?.modelId,
+      specialist: routedSpecialist,
+      teamId: job.teamId,
+      text: job.text,
+      threadTs: job.threadTs,
+      userId: job.userId,
+      viewerContextChannelIds: [job.channelId],
+    });
+    runnerResult = result;
+    text = result.message;
+    logAgentRunnerSuccess(input.logger, {
+      channelId: job.channelId,
+      eventType: "app_mention",
+      messageTs: job.messageTs,
+      result,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (input.routingRepository !== undefined) {
+      try {
+        await input.routingRepository.activateThreadAgent({
+          agentId: route?.agentId ?? result.decision.specialist,
+          channelId: job.channelId,
+          lastMessageTs: job.messageTs,
+          modelId: threadScopedModelId(route),
+          rootMessageTs: job.threadTs,
+          teamId: job.teamId,
+          threadTs: job.threadTs,
+        });
+      } catch (error) {
+        logWarn(input.logger, "Failed to persist Slack thread routing state after app_mention.", {
+          error,
+          teamId: job.teamId,
+          threadTs: job.threadTs,
+        });
+      }
+    }
+  } catch (error) {
+    logError(input.logger, "TypeScript AgentRunner failed while handling app_mention.", {
+      error,
+      ...runnerFailureLogFields(error),
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (shouldRetryJobFailure(input.retryContext)) {
+      throw error;
+    }
+    text = "I couldn't complete that request. Please try again in a moment.";
+  }
+
+  await postAgentResult({
+    channel: job.channelId,
+    client: input.client,
+    logger: input.logger,
+    result: runnerResult,
+    text,
+    threadTs: job.threadTs,
+  });
+}
+
+async function processFollowUpMessageJob(
+  job: SlackAgentJob,
+  input: {
+    client: SlackAgentClient;
+    logger: unknown;
+    retryContext?: SlackAgentJobRetryContext;
+    routingRepository?: SlackAgentRoutingRepository;
+    runner: AgentRunner;
+  },
+): Promise<void> {
+  if (input.routingRepository === undefined) {
+    return;
+  }
+  const [thread, autoReplyEnabled, channelEnabled] = await Promise.all([
+    input.routingRepository.findSlackThread(job.teamId, job.channelId, job.threadTs),
+    input.routingRepository.isThreadAutoReplyEnabled(job.teamId, job.channelId),
+    input.routingRepository.isChannelEnabled(job.teamId, job.channelId),
+  ]);
+  if (!channelEnabled || !autoReplyEnabled || !isActiveThread(thread)) {
+    return;
+  }
+
+  let runnerResult: AgentRunnerResult | undefined;
+  let text: string;
+  try {
+    const route = await resolveSlackAgentRoute(input.routingRepository, {
+      channelId: job.channelId,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (input.routingRepository.resolveAgent !== undefined && route === undefined) {
+      return;
+    }
+    const routedSpecialist = specialistFromRoute(route);
+    if (route !== undefined && routedSpecialist === undefined) {
+      return;
+    }
+    const specialist = routedSpecialist ?? stringField(thread, "agent_id");
+    const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
+    const result = await input.runner.run({
+      channelId: job.channelId,
+      messageTs: job.messageTs,
+      modelId,
+      specialist,
+      teamId: job.teamId,
+      text: job.text,
+      threadMessages: await readThreadTextMessages(input.client, job.channelId, job.threadTs),
+      threadTs: job.threadTs,
+      userId: job.userId,
+      viewerContextChannelIds: [job.channelId],
+    });
+    runnerResult = result;
+    text = result.message;
+    logAgentRunnerSuccess(input.logger, {
+      channelId: job.channelId,
+      eventType: "message_follow_up",
+      messageTs: job.messageTs,
+      result,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    try {
+      await input.routingRepository.activateThreadAgent({
+        agentId: route?.agentId ?? result.decision.specialist,
+        channelId: job.channelId,
+        lastMessageTs: job.messageTs,
+        modelId: route === undefined ? stringField(thread, "model_id") : threadScopedModelId(route),
+        rootMessageTs: stringField(thread, "root_message_ts") ?? job.threadTs,
+        teamId: job.teamId,
+        threadTs: job.threadTs,
+      });
+    } catch (error) {
+      logWarn(
+        input.logger,
+        "Failed to persist Slack thread routing state after message follow-up.",
+        {
+          error,
+          teamId: job.teamId,
+          threadTs: job.threadTs,
+        },
+      );
+    }
+  } catch (error) {
+    logError(input.logger, "TypeScript AgentRunner failed while handling message follow-up.", {
+      error,
+      ...runnerFailureLogFields(error),
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (shouldRetryJobFailure(input.retryContext)) {
+      throw error;
+    }
+    text = "I couldn't complete that request. Please try again in a moment.";
+  }
+
+  await postAgentResult({
+    channel: job.channelId,
+    client: input.client,
+    logger: input.logger,
+    result: runnerResult,
+    text,
+    threadTs: job.threadTs,
+  });
+}
+
+async function enqueueSlackAgentJob(input: {
+  body: unknown;
+  client: SlackAgentClient;
+  eventType: SlackAgentJob["eventType"];
+  job: SlackAgentJob;
+  logger: unknown;
+  queue: SlackAgentJobQueue;
+  threadTs: string;
+}): Promise<void> {
+  try {
+    const result = await input.queue.enqueue(input.job);
+    logInfo(input.logger, "Queued Slack agent job.", {
+      deduplicated: result.deduplicated,
+      eventId: readSlackEventId(input.body),
+      eventType: input.eventType,
+      jobId: result.jobId,
+      teamId: input.job.teamId,
+      threadTs: input.threadTs,
+    });
+  } catch (error) {
+    logError(input.logger, "Failed to queue Slack agent job.", {
+      error,
+      eventId: readSlackEventId(input.body),
+      eventType: input.eventType,
+      teamId: input.job.teamId,
+      threadTs: input.threadTs,
+    });
+    await input.client.chat.postMessage({
+      channel: input.job.channelId,
+      text: "I couldn't queue that request. Please try again in a moment.",
+      thread_ts: input.threadTs,
+    });
+  }
 }
 
 async function handleReactionAdded(
@@ -764,7 +1094,7 @@ function isSupportedFollowUpMessage(event: StringIndexed, threadTs: string | und
 }
 
 async function readThreadTextMessages(
-  client: SlackEventArgs<"message">["client"],
+  client: SlackAgentClient,
   channelId: string,
   threadTs: string,
 ): Promise<string[]> {
@@ -783,9 +1113,9 @@ async function readThreadTextMessages(
   }
 }
 
-async function postAgentResult(input: {
+export async function postAgentResult(input: {
   channel: string;
-  client: SlackClient;
+  client: SlackAgentClient;
   logger: unknown;
   result: AgentRunnerResult | undefined;
   text: string;
@@ -864,6 +1194,12 @@ function logWarn(logger: unknown, message: string, metadata: Record<string, unkn
   }
 }
 
+function logError(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.error === "function") {
+    logger.error(message, metadata);
+  }
+}
+
 function runnerFailureLogFields(error: unknown): Record<string, unknown> {
   if (!(error instanceof AgentRunnerExecutionError)) {
     return {};
@@ -873,6 +1209,13 @@ function runnerFailureLogFields(error: unknown): Record<string, unknown> {
     provider: error.model?.provider,
     specialist: error.specialist,
   };
+}
+
+function shouldRetryJobFailure(context: SlackAgentJobRetryContext | undefined): boolean {
+  if (context === undefined) {
+    return false;
+  }
+  return context.attemptsMade + 1 < context.attempts;
 }
 
 function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia | undefined {
@@ -1276,6 +1619,63 @@ function escapeRegExp(value: string): string {
 function readString(value: StringIndexed, field: string): string | undefined {
   const fieldValue = value[field];
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readBodyString(value: unknown, field: string): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const fieldValue = value[field];
+  return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readSlackEnterpriseId(body: unknown): string | undefined {
+  return (
+    readBodyString(body, "enterprise_id") ?? readFirstAuthorizationString(body, "enterprise_id")
+  );
+}
+
+function readSlackEnterpriseInstall(body: unknown): boolean | undefined {
+  return (
+    readBodyBoolean(body, "is_enterprise_install") ??
+    readFirstAuthorizationBoolean(body, "is_enterprise_install")
+  );
+}
+
+function readBodyBoolean(value: unknown, field: string): boolean | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return typeof value[field] === "boolean" ? value[field] : undefined;
+}
+
+function readFirstAuthorizationString(body: unknown, field: string): string | undefined {
+  const authorization = readFirstAuthorization(body);
+  const fieldValue = authorization?.[field];
+  return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readFirstAuthorizationBoolean(body: unknown, field: string): boolean | undefined {
+  const authorization = readFirstAuthorization(body);
+  return typeof authorization?.[field] === "boolean" ? authorization[field] : undefined;
+}
+
+function readFirstAuthorization(body: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(body) || !Array.isArray(body.authorizations)) {
+    return undefined;
+  }
+  const [authorization] = body.authorizations;
+  return isRecord(authorization) ? authorization : undefined;
+}
+
+function readOptionalContextValue(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  if (typeof value === "number") {
+    return String(value);
+  }
+  return undefined;
 }
 
 function readOptionalString(value: unknown): string | undefined {

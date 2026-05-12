@@ -11,7 +11,8 @@
     "migrate": "tsx src/infrastructure/postgres/runMigrations.ts",
     "start": "node dist/main.mjs",
     "test": "vp test",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "worker": "tsx src/worker.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.76",
@@ -23,7 +24,10 @@
     "@google/genai": "^2.0.1",
     "@slack/bolt": "^4.7.2",
     "@slack/oauth": "^3.0.5",
+    "@slack/web-api": "^7.15.2",
     "ai": "^6.0.177",
+    "bullmq": "^5.76.6",
+    "ioredis": "^5.10.1",
     "pg": "^8.20.0",
     "zod": "^4.4.3"
   },

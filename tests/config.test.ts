@@ -11,6 +11,7 @@ describe("loadSettings", () => {
       appName: "agents-party",
       appPort: 8000,
       databaseUrl: undefined,
+      redisUrl: undefined,
       imageGenerationModelId: "google:gemini-2.5-flash-image",
       llmApiKeyEncryptionKey: undefined,
       googleOAuthCallbackPath: "/oauth/google/callback",
@@ -28,6 +29,7 @@ describe("loadSettings", () => {
       slackBotToken: undefined,
       slackClientId: undefined,
       slackClientSecret: undefined,
+      slackAgentQueueEnabled: false,
       slackEnabled: false,
       slackEventsPath: "/slack/events",
       slackInstallationStoreEnabled: false,
@@ -79,6 +81,16 @@ describe("loadSettings", () => {
     expect(settings.slackEnabled).toBe(true);
     expect(settings.slackInstallationStoreEnabled).toBe(false);
     expect(settings.slackOAuthInstallEnabled).toBe(false);
+  });
+
+  it("reads Redis queue settings for Slack agent worker handoff", () => {
+    const settings = loadSettings({
+      REDIS_URL: "rediss://redis.example.com:6379",
+      SLACK_AGENT_QUEUE_ENABLED: "true",
+    });
+
+    expect(settings.redisUrl).toBe("rediss://redis.example.com:6379");
+    expect(settings.slackAgentQueueEnabled).toBe(true);
   });
 
   it("enables database-backed Slack installation storage with client id and database", () => {

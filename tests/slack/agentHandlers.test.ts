@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { AgentRunnerExecutionError } from "../../src/agents/runner.js";
 import type { JsonObject } from "../../src/infrastructure/postgres/jsonDocumentRepository.js";
-import { createAgentSlackHandlers } from "../../src/slack/agentHandlers.js";
+import { createAgentSlackHandlers, processSlackAgentJob } from "../../src/slack/agentHandlers.js";
 
 describe("createAgentSlackHandlers", () => {
   it("publishes Salesforce connection status and connect entry points on App Home", async () => {
@@ -392,6 +392,63 @@ describe("createAgentSlackHandlers", () => {
         channel: "C1",
         text: expect.stringContaining('"text":"assign this to <@U123>"'),
         thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("queues app mentions instead of running the AgentRunner when a job queue is configured", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { confidence: 0.5, reason: "test", specialist: "assistant" },
+          message: "handled",
+          toolResults: [],
+        };
+      },
+    };
+    const queue = new MemorySlackAgentJobQueue();
+    const handlers = createAgentSlackHandlers(runner as never, { agentJobQueue: queue });
+
+    await handlers.handleAppMention({
+      body: {
+        authorizations: [
+          {
+            enterprise_id: "E1",
+            is_enterprise_install: true,
+            team_id: "T1",
+          },
+        ],
+        event_id: "Ev1",
+        team_id: "T1",
+      },
+      client: {
+        chat: {
+          postMessage: async () => ({}),
+        },
+      },
+      context: { botUserId: "B1", retryNum: 1, retryReason: "http_timeout" },
+      event: {
+        channel: "C1",
+        text: "<@B1> assign this to <@U123>",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+    } as never);
+
+    expect(runs).toBe(0);
+    expect(queue.jobs).toEqual([
+      expect.objectContaining({
+        eventId: "Ev1",
+        eventType: "app_mention",
+        enterpriseId: "E1",
+        isEnterpriseInstall: true,
+        retryNum: "1",
+        retryReason: "http_timeout",
+        text: "assign this to <@U123>",
+        threadTs: "1712345678.000100",
       }),
     ]);
   });
@@ -898,6 +955,169 @@ describe("createAgentSlackHandlers", () => {
         channel: "C1",
         text: "thread reply",
         thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("processes queued follow-up jobs through the AgentRunner and posts the result", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { specialist: "assistant" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "follow-up",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            replies: async () => ({
+              messages: [{ text: "root text" }, { text: "follow-up" }],
+            }),
+          },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        text: "follow-up",
+        threadMessages: ["root text", "follow-up"],
+      }),
+    ]);
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        lastMessageTs: "1712345678.000200",
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "thread reply",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("rethrows queued AgentRunner failures before the final worker attempt", async () => {
+    const runner = {
+      async run() {
+        throw new Error("provider timeout");
+      },
+    };
+    const posts: unknown[] = [];
+
+    await expect(
+      processSlackAgentJob(
+        {
+          channelId: "C1",
+          eventType: "app_mention",
+          messageTs: "1712345678.000100",
+          teamId: "T1",
+          text: "hello",
+          threadTs: "1712345678.000100",
+          userId: "U1",
+        },
+        {
+          client: {
+            chat: {
+              postMessage: async (payload: unknown) => {
+                posts.push(payload);
+                return {};
+              },
+            },
+            conversations: { replies: async () => ({ messages: [] }) },
+            filesUploadV2: async () => ({}),
+          } as never,
+          logger: { error() {}, info() {}, warn() {} },
+          retryContext: { attempts: 3, attemptsMade: 0 },
+          runner: runner as never,
+        },
+      ),
+    ).rejects.toThrow("provider timeout");
+    expect(posts).toEqual([]);
+  });
+
+  it("posts a fallback for queued AgentRunner failures on the final worker attempt", async () => {
+    const runner = {
+      async run() {
+        throw new Error("provider timeout");
+      },
+    };
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000100",
+        teamId: "T1",
+        text: "hello",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: { replies: async () => ({ messages: [] }) },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        retryContext: { attempts: 3, attemptsMade: 2 },
+        runner: runner as never,
+      },
+    );
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't complete that request. Please try again in a moment.",
       }),
     ]);
   });
@@ -1463,5 +1683,16 @@ class MemoryRoutingRepository {
     | undefined
   > {
     return this.options.route;
+  }
+}
+
+class MemorySlackAgentJobQueue {
+  readonly jobs: unknown[] = [];
+
+  async close(): Promise<void> {}
+
+  async enqueue(job: unknown): Promise<{ deduplicated: boolean; jobId: string }> {
+    this.jobs.push(job);
+    return { deduplicated: false, jobId: "job-1" };
   }
 }

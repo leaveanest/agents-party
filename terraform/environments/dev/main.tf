@@ -1,8 +1,9 @@
 locals {
   app_config_vars = merge(
     {
-      AGENT_MODEL = var.agent_model
-      APP_ENV     = "heroku"
+      AGENT_MODEL               = var.agent_model
+      APP_ENV                   = "heroku"
+      SLACK_AGENT_QUEUE_ENABLED = tostring(var.slack_agent_queue_enabled)
     },
     var.additional_config_vars,
   )
@@ -27,6 +28,11 @@ resource "heroku_addon" "inference" {
   plan   = var.heroku_inference_plan
 }
 
+resource "heroku_addon" "redis" {
+  app_id = heroku_app.app.id
+  plan   = var.heroku_redis_plan
+}
+
 resource "heroku_formation" "web" {
   count = var.manage_web_formation ? 1 : 0
 
@@ -34,4 +40,13 @@ resource "heroku_formation" "web" {
   type     = "web"
   quantity = var.web_dyno_quantity
   size     = var.web_dyno_size
+}
+
+resource "heroku_formation" "worker" {
+  count = var.manage_worker_formation ? 1 : 0
+
+  app_id   = heroku_app.app.id
+  type     = "worker"
+  quantity = var.worker_dyno_quantity
+  size     = var.worker_dyno_size
 }

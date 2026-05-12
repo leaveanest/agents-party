@@ -10,7 +10,7 @@ export default defineConfig({
   pack: {
     clean: true,
     dts: false,
-    entry: ["src/main.ts"],
+    entry: ["src/main.ts", "src/worker.ts"],
     format: ["esm"],
     platform: "node",
     sourcemap: true,

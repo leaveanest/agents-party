@@ -35,6 +35,12 @@ variable "heroku_inference_plan" {
   default     = "heroku-inference:standard"
 }
 
+variable "heroku_redis_plan" {
+  description = "Heroku Key-Value Store/Redis plan for Slack agent job queues."
+  type        = string
+  default     = "heroku-redis:premium-0"
+}
+
 variable "manage_web_formation" {
   description = "Whether Terraform manages the web dyno formation. The app must already have a release with a web process."
   type        = bool
@@ -49,6 +55,30 @@ variable "web_dyno_quantity" {
 
 variable "web_dyno_size" {
   description = "Dyno size for the web process when web formation management is enabled."
+  type        = string
+  default     = "basic"
+}
+
+variable "manage_worker_formation" {
+  description = "Whether Terraform manages the worker dyno formation. The app must already have a release with a worker process."
+  type        = bool
+  default     = false
+}
+
+variable "slack_agent_queue_enabled" {
+  description = "Whether the web process should enqueue Slack AI chat work to Redis instead of running it in-process."
+  type        = bool
+  default     = false
+}
+
+variable "worker_dyno_quantity" {
+  description = "Number of worker dynos to run when worker formation management is enabled."
+  type        = number
+  default     = 1
+}
+
+variable "worker_dyno_size" {
+  description = "Dyno size for the worker process when worker formation management is enabled."
   type        = string
   default     = "basic"
 }

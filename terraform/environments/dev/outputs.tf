@@ -17,3 +17,8 @@ output "heroku_inference_addon_name" {
   description = "Heroku Managed Inference and Agents add-on name."
   value       = heroku_addon.inference.name
 }
+
+output "heroku_redis_addon_name" {
+  description = "Heroku Key-Value Store/Redis add-on name."
+  value       = heroku_addon.redis.name
+}

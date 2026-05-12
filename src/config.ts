@@ -5,6 +5,7 @@ export type AppSettings = {
   appName: string;
   appPort: number;
   databaseUrl: string | undefined;
+  redisUrl?: string;
   imageGenerationModelId: string;
   llmApiKeyEncryptionKey: string | undefined;
   googleOAuthCallbackPath: string;
@@ -22,6 +23,7 @@ export type AppSettings = {
   slackBotToken: string | undefined;
   slackClientId: string | undefined;
   slackClientSecret: string | undefined;
+  slackAgentQueueEnabled?: boolean;
   slackEnabled: boolean;
   slackEventsPath: string;
   slackInstallationStoreEnabled: boolean;
@@ -68,6 +70,7 @@ const DEFAULT_SLACK_SCOPES = [
  */
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings {
   const databaseUrl = readText(env.DATABASE_URL);
+  const redisUrl = readText(env.REDIS_URL);
   const googleOAuthClientId = readText(env.GOOGLE_OAUTH_CLIENT_ID);
   const googleOAuthClientSecret = readText(env.GOOGLE_OAUTH_CLIENT_SECRET);
   const googleOAuthContextSigningSecret = readText(env.GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET);
@@ -136,6 +139,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     appName: env.APP_NAME ?? "agents-party",
     appPort: parsePort(env.PORT ?? env.APP_PORT, DEFAULT_PORT),
     databaseUrl,
+    redisUrl,
     imageGenerationModelId:
       readText(env.IMAGE_GENERATION_MODEL) ?? DEFAULT_IMAGE_GENERATION_MODEL_ID,
     llmApiKeyEncryptionKey,
@@ -155,6 +159,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     slackBotToken,
     slackClientId,
     slackClientSecret,
+    slackAgentQueueEnabled: parseBoolean(env.SLACK_AGENT_QUEUE_ENABLED, false),
     slackEnabled,
     slackEventsPath: readPath(env.SLACK_EVENTS_PATH, "/slack/events"),
     slackInstallationStoreEnabled,
@@ -245,4 +250,18 @@ function parseList(value: string | undefined, fallback: string[]): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined || value.trim() === "") {
+    return fallback;
+  }
+  const normalized = value.trim().toLocaleLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  throw new Error("Boolean environment values must be true or false.");
 }
