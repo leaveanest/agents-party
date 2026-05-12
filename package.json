@@ -9,6 +9,7 @@
     "check": "vp check",
     "dev": "tsx src/main.ts",
     "migrate": "tsx src/infrastructure/postgres/runMigrations.ts",
+    "rss:batch": "tsx src/rssFeedWorker.ts",
     "start": "node dist/main.mjs",
     "test": "vp test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -27,6 +28,7 @@
     "@slack/web-api": "^7.15.2",
     "ai": "^6.0.177",
     "bullmq": "^5.76.6",
+    "fast-xml-parser": "^5.7.3",
     "ioredis": "^5.10.1",
     "pg": "^8.20.0",
     "zod": "^4.4.3"
