@@ -65,7 +65,7 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
               type: "header",
               text: {
                 type: "plain_text",
-                text: "Agents Party",
+                text: "Party on Slack",
               },
             },
             {

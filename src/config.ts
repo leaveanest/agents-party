@@ -49,6 +49,7 @@ const DEFAULT_SLACK_SCOPES = [
   "app_mentions:read",
   "channels:history",
   "chat:write",
+  "files:write",
   "groups:history",
   "im:history",
   "mpim:history",
