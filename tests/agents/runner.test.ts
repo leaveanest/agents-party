@@ -74,6 +74,7 @@ describe("AgentRunner", () => {
       id: "1.0",
       role: "user",
     });
+    expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
   });
 
   it("uses an explicit invocation model before the default model", async () => {

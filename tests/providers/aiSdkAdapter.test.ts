@@ -8,6 +8,10 @@ import {
   createAiSdkModelResolver,
   LlmProviderError,
 } from "../../src/providers/aiSdkAdapter.js";
+import {
+  MissingWorkspaceContextError,
+  MissingWorkspaceCredentialError,
+} from "../../src/providers/credentials.js";
 import type { ModelInfo } from "../../src/providers/contracts.js";
 
 const model: ModelInfo = {
@@ -74,6 +78,84 @@ describe("AiSdkLlmAdapter", () => {
       },
     });
     expect(languageModel.doGenerateCalls[0]?.tools).toHaveLength(1);
+  });
+
+  it("passes workspace credentials into the model resolver", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "credential ok", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(1, 1),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter(
+      "openai",
+      (_model, credential) => {
+        expect(credential).toEqual({ apiKey: "workspace-key", baseURL: "https://proxy.example" });
+        return languageModel;
+      },
+      {
+        async resolveProviderCredential(input) {
+          expect(input).toEqual({
+            credentialName: "api_key",
+            provider: "openai",
+            workspaceId: "T1",
+          });
+          return { apiKey: "workspace-key", baseURL: "https://proxy.example" };
+        },
+      },
+    );
+
+    await expect(
+      adapter.generate({
+        context: { workspaceId: "T1" },
+        history,
+        model,
+      }),
+    ).resolves.toMatchObject({ content: "credential ok" });
+  });
+
+  it("fails clearly when a workspace credential resolver is configured but missing", async () => {
+    const adapter = new AiSdkLlmAdapter(
+      "openai",
+      () => {
+        throw new Error("resolver should fail before model creation");
+      },
+      {
+        async resolveProviderCredential() {
+          return undefined;
+        },
+      },
+    );
+
+    await expect(
+      adapter.generate({
+        context: { workspaceId: "T1" },
+        history,
+        model,
+      }),
+    ).rejects.toThrow(MissingWorkspaceCredentialError);
+  });
+
+  it("fails closed when credential resolution is configured without workspace context", async () => {
+    const adapter = new AiSdkLlmAdapter(
+      "openai",
+      () => {
+        throw new Error("resolver should fail before model creation");
+      },
+      {
+        async resolveProviderCredential() {
+          return { apiKey: "workspace-key" };
+        },
+      },
+    );
+
+    await expect(adapter.generate({ history, model })).rejects.toThrow(
+      MissingWorkspaceContextError,
+    );
   });
 
   it("streams text deltas and final usage through repository stream events", async () => {

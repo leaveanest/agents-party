@@ -290,4 +290,30 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         and nullif(btrim(payload ->> 'model_id'), '') is not null;
     `,
   },
+  {
+    id: "20260512_0005",
+    name: "workspace_credentials",
+    upSql: `
+      create table if not exists workspace_credentials (
+        team_id text not null,
+        provider_kind text not null,
+        credential_name text not null,
+        secret_encrypted text not null,
+        status text not null,
+        encryption_scheme text not null,
+        key_version text not null,
+        created_at timestamp with time zone not null,
+        updated_at timestamp with time zone not null,
+        created_by_user_id text,
+        last_used_at timestamp with time zone,
+        last_error_code text,
+        payload json not null,
+        primary key (team_id, provider_kind, credential_name)
+      );
+      create index if not exists ix_workspace_credentials_status
+        on workspace_credentials (team_id, status);
+      create index if not exists ix_workspace_credentials_provider
+        on workspace_credentials (team_id, provider_kind);
+    `,
+  },
 ];

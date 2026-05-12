@@ -152,11 +152,12 @@ AGENT_MODEL=google:gemini-2.5-flash
 ### Specialists
 
 ```bash
-GOOGLE_MAPS_API_KEY=...
 IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
 VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
-GOOGLE_GENERATIVE_AI_API_KEY=...
+LLM_API_KEY_ENCRYPTION_KEY=...
 ```
+
+When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Without that resolver, local development can still use process-level provider environment variables supported by the AI SDK provider packages. Do not rely on process-level API keys for multi-workspace production traffic.
 
 ### Local database
 
@@ -210,7 +211,7 @@ The registered Salesforce redirect URI is `${SALESFORCE_OAUTH_REDIRECT_BASE_URL}
 GOOGLE_MAPS_API_KEY=...
 ```
 
-When present, the TypeScript Google Maps specialist uses the Places Text Search API through a narrow gateway under `src/agents/specialistRuntimes.ts`.
+When the workspace credential resolver is configured, store the Google Maps key in `workspace_credentials` with `provider_kind='google_maps'` and `credential_name='api_key'`. `GOOGLE_MAPS_API_KEY` remains a local fallback only.
 
 ### Media Specialist Models
 
@@ -220,7 +221,7 @@ VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 GOOGLE_GENERATIVE_AI_API_KEY=...
 ```
 
-The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call the Google Gen AI SDK when `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` is configured.
+The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call the Google Gen AI SDK. In workspace-credential mode they use the encrypted `provider_kind='google'` / `credential_name='api_key'` row for the Slack team. `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` remain local fallbacks only.
 
 ## Deployment
 

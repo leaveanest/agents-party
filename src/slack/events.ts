@@ -2,21 +2,33 @@ import type {
   AllMiddlewareArgs,
   App,
   AnyMiddlewareArgs,
+  SlackActionMiddlewareArgs,
   SlackEventMiddlewareArgs,
+  SlackViewMiddlewareArgs,
   StringIndexed,
 } from "@slack/bolt";
 
 import type { SlackEventDeduplicator } from "./idempotency.js";
 import { readSlackEventId } from "./idempotency.js";
+import {
+  WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
+  WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
+} from "./interactiveIds.js";
 
 export type SlackEventFeatureHandlers = {
   handleAppHomeOpened(args: SlackEventArgs<"app_home_opened">): Promise<void>;
   handleAppMention(args: SlackEventArgs<"app_mention">): Promise<void>;
+  handleWorkspaceCredentialConfigureAction(
+    args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
+  handleWorkspaceCredentialModalSubmission(
+    args: SlackViewMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
   handleMessage(args: SlackEventArgs<"message">): Promise<void>;
   handleReactionAdded(args: SlackEventArgs<"reaction_added">): Promise<void>;
 };
 
-type SlackAppRegistration = Pick<App, "event" | "use">;
+type SlackAppRegistration = Pick<App, "action" | "event" | "use" | "view">;
 type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & AllMiddlewareArgs;
 
 export function registerSlackEventHandlers(
@@ -47,6 +59,12 @@ export function registerSlackEventHandlers(
   app.event("app_mention", async (args) => handlers.handleAppMention(args));
   app.event("message", async (args) => handlers.handleMessage(args));
   app.event("reaction_added", async (args) => handlers.handleReactionAdded(args));
+  app.action(WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleWorkspaceCredentialConfigureAction(args),
+  );
+  app.view(WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID, async (args) =>
+    handlers.handleWorkspaceCredentialModalSubmission(args),
+  );
 }
 
 export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
@@ -99,6 +117,12 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
         retryNum: context.retryNum,
         retryReason: context.retryReason,
       });
+    },
+    async handleWorkspaceCredentialConfigureAction({ ack }) {
+      await ack();
+    },
+    async handleWorkspaceCredentialModalSubmission({ ack }) {
+      await ack();
     },
   };
 }

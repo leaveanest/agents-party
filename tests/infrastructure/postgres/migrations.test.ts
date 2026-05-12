@@ -34,6 +34,7 @@ describe("PostgresMigrationRunner", () => {
       "20260508_0002",
       "20260508_0003",
       "20260512_0004",
+      "20260512_0005",
     ]);
     expect(postgresMigrations[0]?.upSql).toContain(
       "create table if not exists slack_installations",
@@ -47,6 +48,9 @@ describe("PostgresMigrationRunner", () => {
     expect(postgresMigrations[3]?.upSql).toContain("add column if not exists default_model_id");
     expect(postgresMigrations[3]?.upSql).toContain("payload ->> 'default_model_id'");
     expect(postgresMigrations[3]?.upSql).toContain("payload ->> 'model_scope' = 'thread'");
+    expect(postgresMigrations[4]?.upSql).toContain(
+      "create table if not exists workspace_credentials",
+    );
   });
 
   it("requires explicit Alembic baseline when legacy metadata is present", async () => {

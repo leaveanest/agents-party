@@ -16,6 +16,7 @@ const settings: AppSettings = {
   appPort: 0,
   databaseUrl: undefined,
   imageGenerationModelId: "google:gemini-2.5-flash-image",
+  llmApiKeyEncryptionKey: undefined,
   googleGenerativeAiApiKey: undefined,
   googleMapsApiKey: undefined,
   googleOAuthCallbackPath: "/oauth/google/callback",

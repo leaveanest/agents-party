@@ -15,8 +15,14 @@ type RegisteredMiddleware = (args: {
 }) => Promise<void>;
 
 class StubSlackApp {
+  readonly actions = new Map<string, RegisteredListener>();
   readonly events = new Map<string, RegisteredListener>();
   readonly middlewares: RegisteredMiddleware[] = [];
+  readonly views = new Map<string, RegisteredListener>();
+
+  action(name: string, listener: RegisteredListener): void {
+    this.actions.set(name, listener);
+  }
 
   event(name: string, listener: RegisteredListener): void {
     this.events.set(name, listener);
@@ -24,6 +30,10 @@ class StubSlackApp {
 
   use(middleware: RegisteredMiddleware): void {
     this.middlewares.push(middleware);
+  }
+
+  view(name: string, listener: RegisteredListener): void {
+    this.views.set(name, listener);
   }
 }
 
@@ -40,6 +50,8 @@ const handlers: SlackEventFeatureHandlers = {
   async handleAppMention() {},
   async handleMessage() {},
   async handleReactionAdded() {},
+  async handleWorkspaceCredentialConfigureAction() {},
+  async handleWorkspaceCredentialModalSubmission() {},
 };
 
 describe("registerSlackEventHandlers", () => {
@@ -54,6 +66,8 @@ describe("registerSlackEventHandlers", () => {
       "message",
       "reaction_added",
     ]);
+    expect([...app.actions.keys()]).toEqual(["workspace_credential_configure"]);
+    expect([...app.views.keys()]).toEqual(["workspace_credential_modal"]);
     expect(app.middlewares).toHaveLength(1);
   });
 

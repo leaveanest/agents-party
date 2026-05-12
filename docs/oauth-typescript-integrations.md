@@ -18,6 +18,8 @@ Context tokens, OAuth state tokens, stored access tokens, stored refresh tokens,
 - Token encryption keys are read directly from `GOOGLE_TOKEN_ENCRYPTION_KEY` and `SALESFORCE_TOKEN_ENCRYPTION_KEY`, matching the existing Fernet key format.
 - JSON payloads are stable-key serialized before context encryption so pre-cutover context tokens can be read during cutover.
 
+Workspace provider API keys use the same Fernet-compatible cipher through `LLM_API_KEY_ENCRYPTION_KEY`, but they are stored separately in `workspace_credentials.secret_encrypted`. The JSON payload for workspace credentials is reserved for non-secret metadata such as provider label, base URL, and audit context.
+
 ## Configuration
 
 Google OAuth is enabled only when all of these are present:

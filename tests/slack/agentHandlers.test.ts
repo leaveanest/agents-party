@@ -77,6 +77,283 @@ describe("createAgentSlackHandlers", () => {
     );
   });
 
+  it("publishes an App Home API key configuration entry point when credential storage is configured", async () => {
+    const publishedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleAppHomeOpened({
+      body: { team_id: "T1" },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            publishedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { user: "U1" },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(publishedViews[0])).toContain("API keys");
+    expect(JSON.stringify(publishedViews[0])).toContain("workspace_credential_configure");
+  });
+
+  it("opens the API key modal for Slack workspace admins", async () => {
+    const acks: unknown[] = [];
+    const openedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialConfigureAction({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, trigger_id: "TRIGGER1", user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(acks).toEqual([undefined]);
+    expect(openedViews).toEqual([
+      expect.objectContaining({
+        trigger_id: "TRIGGER1",
+        view: expect.objectContaining({
+          callback_id: "workspace_credential_modal",
+          private_metadata: "T1",
+        }),
+      }),
+    ]);
+  });
+
+  it("saves workspace provider API keys from modal submissions", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey(input: unknown) {
+          saves.push(input);
+        },
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, info() {}, warn() {} },
+      view: {
+        hash: "HASH1",
+        id: "VIEW1",
+        private_metadata: "T1",
+        state: {
+          values: {
+            workspace_credential_base_url: {
+              base_url: { value: "https://proxy.example.com/v1" },
+            },
+            workspace_credential_provider: {
+              provider_kind: { selected_option: { value: "openai" } },
+            },
+            workspace_credential_secret: {
+              api_key: { value: "sk-test" },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(acks).toEqual([
+      expect.objectContaining({
+        response_action: "update",
+        view: expect.objectContaining({
+          type: "modal",
+        }),
+      }),
+    ]);
+    expect(saves).toEqual([
+      {
+        createdByUserId: "UADMIN",
+        payload: {
+          base_url: "https://proxy.example.com/v1",
+          source: "slack_app_home",
+        },
+        providerKind: "openai",
+        secret: "sk-test",
+        teamId: "T1",
+      },
+    ]);
+    expect(updates).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({
+          title: { text: "API key saved", type: "plain_text" },
+        }),
+      }),
+    ]);
+    expect(updates[0]).not.toHaveProperty("hash");
+  });
+
+  it("returns modal field errors for invalid workspace API key input", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey(input: unknown) {
+          saves.push(input);
+        },
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_primary_owner: true } }),
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: {
+        private_metadata: "T1",
+        state: {
+          values: {
+            workspace_credential_base_url: {
+              base_url: { value: "not a url" },
+            },
+            workspace_credential_provider: {
+              provider_kind: { selected_option: { value: "openai" } },
+            },
+            workspace_credential_secret: {
+              api_key: { value: "   " },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(acks).toEqual([
+      {
+        errors: {
+          workspace_credential_base_url: "Enter a valid http or https URL.",
+          workspace_credential_secret: "Enter an API key.",
+        },
+        response_action: "errors",
+      },
+    ]);
+    expect(saves).toEqual([]);
+  });
+
+  it("rejects workspace API key submissions from non-admin Slack users", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey(input: unknown) {
+          saves.push(input);
+        },
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "U1" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: false, is_owner: false } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: validWorkspaceCredentialView("T1"),
+    } as never);
+
+    expect(acks).toEqual([
+      expect.objectContaining({
+        response_action: "update",
+      }),
+    ]);
+    expect(JSON.stringify(updates[0])).toContain(
+      "Only Slack workspace admins and owners can configure API keys.",
+    );
+    expect(saves).toEqual([]);
+  });
+
+  it("rejects workspace API key submissions when modal metadata and body teams differ", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey(input: unknown) {
+          saves.push(input);
+        },
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T2" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: validWorkspaceCredentialView("T1"),
+    } as never);
+
+    expect(acks).toEqual([
+      {
+        errors: {
+          workspace_credential_secret: "Slack workspace context does not match.",
+        },
+        response_action: "errors",
+      },
+    ]);
+    expect(saves).toEqual([]);
+  });
+
   it("routes app mentions through the TypeScript AgentRunner and posts a thread reply", async () => {
     const runner = {
       async run(invocation: unknown) {
@@ -1118,6 +1395,27 @@ describe("createAgentSlackHandlers", () => {
     expect(runs).toBe(0);
   });
 });
+
+function validWorkspaceCredentialView(teamId: string): unknown {
+  return {
+    hash: "HASH1",
+    id: "VIEW1",
+    private_metadata: teamId,
+    state: {
+      values: {
+        workspace_credential_base_url: {
+          base_url: { value: "https://proxy.example.com/v1" },
+        },
+        workspace_credential_provider: {
+          provider_kind: { selected_option: { value: "openai" } },
+        },
+        workspace_credential_secret: {
+          api_key: { value: "sk-test" },
+        },
+      },
+    },
+  };
+}
 
 class MemoryRoutingRepository {
   readonly activations: unknown[] = [];

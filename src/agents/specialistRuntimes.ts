@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AppSettings } from "../config.js";
 import type { ConversationHistory, JsonValue } from "../domain/messageHistory.js";
 import type { LlmRequest, ModelInfo } from "../providers/contracts.js";
+import type { ProviderCredentialResolver } from "../providers/credentials.js";
 import { GoogleGenAiMediaGateway } from "../providers/googleGenAiMediaGateway.js";
 import type { MediaGenerationGateway } from "../providers/mediaGenerationGateway.js";
 import type { ProviderRouter } from "../providers/providerRouter.js";
@@ -54,6 +55,14 @@ export type GoogleMapsGateway = {
   }): Promise<GoogleMapsPlace[]>;
   searchPlaces(query: string): Promise<GoogleMapsPlace[]>;
 };
+
+export type GoogleMapsGatewayFactory = (input: {
+  teamId: string;
+}) => Promise<GoogleMapsGateway | undefined>;
+
+export type MediaGenerationGatewayFactory = (input: {
+  teamId: string;
+}) => Promise<MediaGenerationGateway | undefined>;
 
 export const webResearchResultSchema = z
   .object({
@@ -151,15 +160,10 @@ export type GoogleMapsRoute = NonNullable<z.infer<typeof googleMapsResultSchema>
 
 export function createDefaultSpecialistRuntimes(
   settings: AppSettings,
+  options: { credentialResolver?: ProviderCredentialResolver } = {},
 ): Partial<Record<AgentSpecialist, AgentSpecialistRuntime>> {
-  const googleMapsGateway =
-    settings.googleMapsApiKey === undefined
-      ? undefined
-      : new FetchGoogleMapsGateway(settings.googleMapsApiKey);
-  const mediaGateway =
-    settings.googleGenerativeAiApiKey === undefined
-      ? undefined
-      : new GoogleGenAiMediaGateway(settings.googleGenerativeAiApiKey);
+  const googleMapsGateway = createGoogleMapsGatewaySource(settings, options.credentialResolver);
+  const mediaGateway = createMediaGatewaySource(settings, options.credentialResolver);
   return {
     google_maps: createGoogleMapsRuntime(googleMapsGateway),
     image_generation: createImageGenerationRuntime(settings.imageGenerationModelId, mediaGateway),
@@ -168,10 +172,72 @@ export function createDefaultSpecialistRuntimes(
   };
 }
 
+function createGoogleMapsGatewaySource(
+  settings: AppSettings,
+  credentialResolver: ProviderCredentialResolver | undefined,
+): GoogleMapsGateway | GoogleMapsGatewayFactory | undefined {
+  if (credentialResolver !== undefined) {
+    return async ({ teamId }) => {
+      const credential = await credentialResolver.resolveProviderCredential({
+        provider: "google_maps",
+        workspaceId: teamId,
+      });
+      return credential === undefined ? undefined : new FetchGoogleMapsGateway(credential.apiKey);
+    };
+  }
+  return settings.googleMapsApiKey === undefined
+    ? undefined
+    : new FetchGoogleMapsGateway(settings.googleMapsApiKey);
+}
+
+function createMediaGatewaySource(
+  settings: AppSettings,
+  credentialResolver: ProviderCredentialResolver | undefined,
+): MediaGenerationGateway | MediaGenerationGatewayFactory | undefined {
+  if (credentialResolver !== undefined) {
+    return async ({ teamId }) => {
+      const credential = await credentialResolver.resolveProviderCredential({
+        provider: "google",
+        workspaceId: teamId,
+      });
+      return credential === undefined ? undefined : new GoogleGenAiMediaGateway(credential.apiKey);
+    };
+  }
+  return settings.googleGenerativeAiApiKey === undefined
+    ? undefined
+    : new GoogleGenAiMediaGateway(settings.googleGenerativeAiApiKey);
+}
+
+async function resolveGoogleMapsGateway(
+  source: GoogleMapsGateway | GoogleMapsGatewayFactory | undefined,
+  teamId: string,
+): Promise<GoogleMapsGateway | undefined> {
+  if (source === undefined) {
+    return undefined;
+  }
+  if (typeof source === "function") {
+    return source({ teamId });
+  }
+  return source;
+}
+
+async function resolveMediaGateway(
+  source: MediaGenerationGateway | MediaGenerationGatewayFactory,
+  teamId: string,
+): Promise<MediaGenerationGateway | undefined> {
+  if (typeof source === "function") {
+    return source({ teamId });
+  }
+  return source;
+}
+
 export function createWebResearchRuntime(): AgentSpecialistRuntime {
   return async ({ invocation, model, providerRouter }) => {
     return withRuntimeContext("web_research", model, async () => {
       const result = await providerRouter.generate({
+        context: {
+          workspaceId: invocation.teamId,
+        },
         history: specialistHistory(
           "You are a web research specialist. Use native web search when available. Return concise JSON with action, answer, sources, and caveats.",
           invocation,
@@ -199,10 +265,11 @@ export function createWebResearchRuntime(): AgentSpecialistRuntime {
 }
 
 export function createGoogleMapsRuntime(
-  gateway: GoogleMapsGateway | undefined,
+  gateway: GoogleMapsGateway | GoogleMapsGatewayFactory | undefined,
 ): AgentSpecialistRuntime {
   return async ({ invocation }) => {
-    if (gateway === undefined) {
+    const resolvedGateway = await resolveGoogleMapsGateway(gateway, invocation.teamId);
+    if (resolvedGateway === undefined) {
       const structured = googleMapsResultSchema.parse({
         action: "unconfigured",
         answer: "Google Maps is not configured. Set GOOGLE_MAPS_API_KEY to enable maps lookup.",
@@ -214,7 +281,7 @@ export function createGoogleMapsRuntime(
     }
     const routeRequest = parseRouteRequest(invocation.text);
     if (routeRequest !== undefined) {
-      const route = await gateway.computeRoute(routeRequest);
+      const route = await resolvedGateway.computeRoute(routeRequest);
       const structured = googleMapsResultSchema.parse({
         action: "answered",
         answer: "Google Maps route:",
@@ -229,8 +296,8 @@ export function createGoogleMapsRuntime(
     const nearbyRequest = parseNearbyRequest(invocation.text);
     const places =
       nearbyRequest === undefined
-        ? await gateway.searchPlaces(invocation.text)
-        : await gateway.searchNearby(nearbyRequest);
+        ? await resolvedGateway.searchPlaces(invocation.text)
+        : await resolvedGateway.searchNearby(nearbyRequest);
     const structured = googleMapsResultSchema.parse({
       action: "answered",
       answer:
@@ -246,7 +313,7 @@ export function createGoogleMapsRuntime(
 
 export function createImageGenerationRuntime(
   modelId: string,
-  gateway?: MediaGenerationGateway,
+  gateway?: MediaGenerationGateway | MediaGenerationGatewayFactory,
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
     const resolvedModelId = invocation.modelId ?? modelId;
@@ -281,7 +348,27 @@ export function createImageGenerationRuntime(
           structuredResult: structured,
         };
       }
-      const generated = await gateway.generateImage({ model, prompt: invocation.text });
+      const resolvedGateway = await resolveMediaGateway(gateway, invocation.teamId);
+      if (resolvedGateway === undefined) {
+        const structured = imageGenerationResultSchema.parse({
+          action: "unconfigured",
+          media: {
+            kind: "image",
+            modelId: model.id,
+            prompt: invocation.text,
+            provider: model.provider,
+            status: "generated",
+          },
+          message:
+            "Image generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+        });
+        return {
+          message: structured.message,
+          model: modelTrace(model),
+          structuredResult: structured,
+        };
+      }
+      const generated = await resolvedGateway.generateImage({ model, prompt: invocation.text });
       const structured = imageGenerationResultSchema.parse({
         action: "generated",
         media: {
@@ -307,7 +394,7 @@ export function createImageGenerationRuntime(
 
 export function createVideoGenerationRuntime(
   modelId: string,
-  gateway?: MediaGenerationGateway,
+  gateway?: MediaGenerationGateway | MediaGenerationGatewayFactory,
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
     const resolvedModelId = invocation.modelId ?? modelId;
@@ -327,7 +414,9 @@ export function createVideoGenerationRuntime(
         ? "9:16"
         : "16:9";
       const durationSeconds = 8;
-      if (gateway === undefined) {
+      const resolvedGateway =
+        gateway === undefined ? undefined : await resolveMediaGateway(gateway, invocation.teamId);
+      if (resolvedGateway === undefined) {
         const structured = videoGenerationResultSchema.parse({
           action: "unconfigured",
           media: {
@@ -348,7 +437,7 @@ export function createVideoGenerationRuntime(
           structuredResult: structured,
         };
       }
-      const generated = await gateway.generateVideo({
+      const generated = await resolvedGateway.generateVideo({
         aspectRatio,
         durationSeconds,
         model,
