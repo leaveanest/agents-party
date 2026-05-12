@@ -564,6 +564,7 @@ function invocation(text: string) {
     teamId: "T1",
     text,
     threadMessages: [],
+    transientAttachments: [],
     userId: "U1",
     viewerContextChannelIds: ["C1"],
   };

@@ -246,6 +246,16 @@ function buildSpecialistHistory(input: {
         author: { id: input.invocation.userId, kind: "user" },
         content: [
           { text: input.invocation.text, type: "text" },
+          ...input.invocation.transientAttachments.flatMap((attachment): UserMessagePart[] =>
+            attachment.kind === "audio" && attachment.transcript !== undefined
+              ? [
+                  {
+                    text: renderTransientAudioTranscript(attachment),
+                    type: "text",
+                  },
+                ]
+              : [],
+          ),
           ...input.invocation.referenceImages.map(
             (image): UserMessagePart => ({
               filename: image.identifier,
@@ -295,6 +305,15 @@ function buildSpecialistHistory(input: {
       ]),
     ],
   };
+}
+
+function renderTransientAudioTranscript(attachment: {
+  filename?: string;
+  id: string;
+  transcript?: string;
+}): string {
+  const label = attachment.filename ?? attachment.id;
+  return `[audio: ${label}]\n${attachment.transcript ?? ""}`;
 }
 
 function normalizeRunnerResult(

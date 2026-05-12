@@ -31,4 +31,23 @@ describe("slackAgentJobs", () => {
 
     expect(slackAgentJobId(job)).toBe("T1:message_follow_up:C1:1712345678.000200");
   });
+
+  it("does not retain audio bytes or transcripts in queued job data", () => {
+    const job = slackAgentJobSchema.parse({
+      audio: new Uint8Array([1, 2, 3]),
+      channelId: "C1",
+      eventType: "app_mention",
+      messageTs: "1712345678.000100",
+      teamId: "T1",
+      text: "hello",
+      threadTs: "1712345678.000100",
+      transcript: "derived text",
+      transientAttachments: [{ transcript: "derived text" }],
+      userId: "U1",
+    });
+
+    expect(job).not.toHaveProperty("audio");
+    expect(job).not.toHaveProperty("transcript");
+    expect(job).not.toHaveProperty("transientAttachments");
+  });
 });

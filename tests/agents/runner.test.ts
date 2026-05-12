@@ -30,6 +30,7 @@ describe("AgentRunner", () => {
         teamId: "T1",
         text: "please translate this",
         threadMessages: [],
+        transientAttachments: [],
         userId: "U1",
         viewerContextChannelIds: [],
       }),
@@ -45,6 +46,7 @@ describe("AgentRunner", () => {
         teamId: "T1",
         text: "画像を生成して",
         threadMessages: [],
+        transientAttachments: [],
         userId: "U1",
         viewerContextChannelIds: [],
       }),
@@ -64,6 +66,7 @@ describe("AgentRunner", () => {
         teamId: "T1",
         text: "画像を生成して",
         threadMessages: [],
+        transientAttachments: [],
         userId: "U1",
         viewerContextChannelIds: [],
       }),
@@ -125,6 +128,42 @@ describe("AgentRunner", () => {
       provider: "anthropic",
     });
     expect(router.requests[0]?.model.id).toBe(explicitModel.id);
+  });
+
+  it("adds transient audio transcripts to provider history without persistence types", async () => {
+    const router = new FakeProviderRouter({
+      content: "heard it",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "summarize this",
+      transientAttachments: [
+        {
+          filename: "voice.mp3",
+          id: "F1",
+          kind: "audio",
+          mediaType: "audio/mpeg",
+          messageTs: "1.0",
+          transcript: "audio transcript",
+        },
+      ],
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.history.messages.at(-1)).toMatchObject({
+      content: [
+        { text: "summarize this", type: "text" },
+        { text: "[audio: voice.mp3]\naudio transcript", type: "text" },
+      ],
+      role: "user",
+    });
   });
 
   it("ignores blank invocation model ids", async () => {

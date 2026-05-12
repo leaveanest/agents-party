@@ -19,7 +19,13 @@ import {
   salesforceConnectionSchema,
 } from "../integrations/oauth/domain.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
+import type { TranscriptionGateway } from "../providers/transcriptionGateway.js";
 import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
+import {
+  SlackAudioProcessingError,
+  hasSlackAudioFiles,
+  resolveSlackAudioAttachments,
+} from "./audioTranscription.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
 import { readSlackEventId } from "./idempotency.js";
 import {
@@ -37,7 +43,10 @@ type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & 
 type SlackActionArgs = SlackActionMiddlewareArgs & AllMiddlewareArgs;
 type SlackViewArgs = SlackViewMiddlewareArgs & AllMiddlewareArgs;
 type SlackClient = SlackEventArgs<"app_mention">["client"];
-export type SlackAgentClient = Pick<SlackClient, "chat" | "conversations" | "filesUploadV2">;
+export type SlackAgentClient = Pick<
+  SlackClient,
+  "chat" | "conversations" | "filesUploadV2" | "token"
+>;
 
 const workspaceCredentialProviderKinds = [
   "openai",
@@ -127,6 +136,8 @@ export type WorkspaceCredentialSettingsHome = {
 
 export type AgentSlackHandlerOptions = {
   agentJobQueue?: SlackAgentJobQueue;
+  audioFetchFn?: typeof fetch;
+  audioTranscriptionGateway?: TranscriptionGateway;
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
   workspaceCredentialSettings?: WorkspaceCredentialSettingsHome;
@@ -500,6 +511,7 @@ async function handleMention(
       });
       return;
     }
+    const threadMessages = await readThreadMessages(client, event.channel, threadTs);
     const result = await runner.run({
       channelId: event.channel,
       messageTs: event.ts,
@@ -508,6 +520,13 @@ async function handleMention(
       teamId,
       text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
       threadTs,
+      transientAttachments: await resolveTransientAudioAttachmentsForInvocation({
+        client,
+        event,
+        messages: threadMessages,
+        options,
+        teamId,
+      }),
       userId: event.user,
       viewerContextChannelIds: [event.channel],
     });
@@ -547,7 +566,7 @@ async function handleMention(
       teamId,
       threadTs,
     });
-    text = "I couldn't complete that request. Please try again in a moment.";
+    text = runnerUserFacingErrorMessage(error);
   }
 
   await postAgentResult({
@@ -638,6 +657,7 @@ async function handleMessage(
     }
     const specialist = routedSpecialist ?? stringField(thread, "agent_id");
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
+    const threadMessages = await readThreadMessages(client, event.channel, threadTs);
     const result = await runner.run({
       channelId: event.channel,
       messageTs: event.ts,
@@ -645,8 +665,15 @@ async function handleMessage(
       specialist,
       teamId,
       text: readString(event, "text") ?? "",
-      threadMessages: await readThreadTextMessages(client, event.channel, threadTs),
+      threadMessages: readThreadTextMessages(threadMessages),
       threadTs,
+      transientAttachments: await resolveTransientAudioAttachmentsForInvocation({
+        client,
+        event,
+        messages: threadMessages,
+        options,
+        teamId,
+      }),
       userId: event.user,
       viewerContextChannelIds: [event.channel],
     });
@@ -684,7 +711,7 @@ async function handleMessage(
       teamId,
       threadTs,
     });
-    text = "I couldn't complete that request. Please try again in a moment.";
+    text = runnerUserFacingErrorMessage(error);
   }
 
   await postAgentResult({
@@ -700,6 +727,8 @@ async function handleMessage(
 export async function processSlackAgentJob(
   job: SlackAgentJob,
   input: {
+    audioFetchFn?: typeof fetch;
+    audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
@@ -717,6 +746,8 @@ export async function processSlackAgentJob(
 async function processAppMentionJob(
   job: SlackAgentJob,
   input: {
+    audioFetchFn?: typeof fetch;
+    audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
@@ -756,6 +787,7 @@ async function processAppMentionJob(
       });
       return;
     }
+    const threadMessages = await readThreadMessages(input.client, job.channelId, job.threadTs);
     const result = await input.runner.run({
       channelId: job.channelId,
       messageTs: job.messageTs,
@@ -764,6 +796,12 @@ async function processAppMentionJob(
       teamId: job.teamId,
       text: job.text,
       threadTs: job.threadTs,
+      transientAttachments: await resolveTransientAudioAttachmentsForInvocation({
+        client: input.client,
+        messages: threadMessages,
+        options: input,
+        teamId: job.teamId,
+      }),
       userId: job.userId,
       viewerContextChannelIds: [job.channelId],
     });
@@ -806,7 +844,7 @@ async function processAppMentionJob(
     if (shouldRetryJobFailure(input.retryContext)) {
       throw error;
     }
-    text = "I couldn't complete that request. Please try again in a moment.";
+    text = runnerUserFacingErrorMessage(error);
   }
 
   await postAgentResult({
@@ -822,6 +860,8 @@ async function processAppMentionJob(
 async function processFollowUpMessageJob(
   job: SlackAgentJob,
   input: {
+    audioFetchFn?: typeof fetch;
+    audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
@@ -858,6 +898,7 @@ async function processFollowUpMessageJob(
     }
     const specialist = routedSpecialist ?? stringField(thread, "agent_id");
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
+    const threadMessages = await readThreadMessages(input.client, job.channelId, job.threadTs);
     const result = await input.runner.run({
       channelId: job.channelId,
       messageTs: job.messageTs,
@@ -865,8 +906,14 @@ async function processFollowUpMessageJob(
       specialist,
       teamId: job.teamId,
       text: job.text,
-      threadMessages: await readThreadTextMessages(input.client, job.channelId, job.threadTs),
+      threadMessages: readThreadTextMessages(threadMessages),
       threadTs: job.threadTs,
+      transientAttachments: await resolveTransientAudioAttachmentsForInvocation({
+        client: input.client,
+        messages: threadMessages,
+        options: input,
+        teamId: job.teamId,
+      }),
       userId: job.userId,
       viewerContextChannelIds: [job.channelId],
     });
@@ -911,7 +958,7 @@ async function processFollowUpMessageJob(
     if (shouldRetryJobFailure(input.retryContext)) {
       throw error;
     }
-    text = "I couldn't complete that request. Please try again in a moment.";
+    text = runnerUserFacingErrorMessage(error);
   }
 
   await postAgentResult({
@@ -1090,14 +1137,14 @@ function isSupportedFollowUpMessage(event: StringIndexed, threadTs: string | und
   if (threadTs === undefined || threadTs === event.ts) {
     return false;
   }
-  return (readString(event, "text") ?? "").trim() !== "";
+  return (readString(event, "text") ?? "").trim() !== "" || hasSlackAudioFiles(event);
 }
 
-async function readThreadTextMessages(
+async function readThreadMessages(
   client: SlackAgentClient,
   channelId: string,
   threadTs: string,
-): Promise<string[]> {
+): Promise<StringIndexed[]> {
   try {
     const response = await client.conversations.replies({
       channel: channelId,
@@ -1105,12 +1152,57 @@ async function readThreadTextMessages(
       ts: threadTs,
     });
     const messages = Array.isArray(response.messages) ? response.messages : [];
-    return messages
-      .map((message) => (isRecord(message) ? readString(message, "text") : undefined))
-      .filter((text): text is string => text !== undefined);
+    return messages.filter((message): message is StringIndexed => isRecord(message));
   } catch {
     return [];
   }
+}
+
+function readThreadTextMessages(messages: readonly StringIndexed[]): string[] {
+  return messages
+    .map((message) => readString(message, "text"))
+    .filter((text): text is string => text !== undefined);
+}
+
+async function resolveTransientAudioAttachmentsForInvocation(input: {
+  client: SlackAgentClient;
+  event?: StringIndexed;
+  messages: readonly StringIndexed[];
+  options: {
+    audioFetchFn?: typeof fetch;
+    audioTranscriptionGateway?: TranscriptionGateway;
+  };
+  teamId: string;
+}) {
+  const messages = mergeSlackMessages(input.messages, input.event);
+  return resolveSlackAudioAttachments({
+    clientToken: input.client.token,
+    fetchFn: input.options.audioFetchFn,
+    messages,
+    teamId: input.teamId,
+    transcriptionGateway: input.options.audioTranscriptionGateway,
+  });
+}
+
+function mergeSlackMessages(
+  messages: readonly StringIndexed[],
+  event: StringIndexed | undefined,
+): StringIndexed[] {
+  const merged = [...messages];
+  const fallbackTs = event === undefined ? undefined : readString(event, "ts");
+  const hasFallback =
+    fallbackTs !== undefined && merged.some((message) => readString(message, "ts") === fallbackTs);
+  if (event !== undefined && (!hasFallback || hasSlackAudioFiles(event))) {
+    merged.push(event);
+  }
+  return merged;
+}
+
+function runnerUserFacingErrorMessage(error: unknown): string {
+  if (error instanceof SlackAudioProcessingError) {
+    return error.message;
+  }
+  return "I couldn't complete that request. Please try again in a moment.";
 }
 
 export async function postAgentResult(input: {

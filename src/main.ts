@@ -12,6 +12,7 @@ import {
 import { createBullMqSlackAgentJobQueue } from "./queues/slackAgentJobs.js";
 import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
 import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
+import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
 
@@ -42,11 +43,15 @@ const workspaceCredentialResolver =
 const agentRunner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
 });
+const audioTranscriptionGateway = createDefaultTranscriptionGateway(settings, {
+  credentialResolver: workspaceCredentialResolver,
+});
 const salesforceHomeContextSigningSecret = settings.salesforceOAuthContextSigningSecret;
 const slackGateway = settings.slackEnabled
   ? createSlackGateway(settings, {
       featureHandlers: createAgentSlackHandlers(agentRunner, {
         agentJobQueue,
+        audioTranscriptionGateway,
         routingRepository,
         salesforceConnectionHome:
           settings.salesforceOAuthEnabled &&

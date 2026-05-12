@@ -33,3 +33,9 @@ The domain model represents:
 - tool results with text, JSON, or execution-denied output
 
 This model is intentionally independent from Slack SDK objects, AI SDK types, and PostgreSQL row shapes.
+
+## Ephemeral Slack Audio
+
+Slack audio attachments are normalized before provider invocation, not persisted as message history. The Slack handler may download supported audio files (`audio/mpeg`, `audio/mp3`, `audio/wav`, `audio/x-wav`, `audio/flac`) using the bot token, transcribe them through the configured transcription gateway, and pass transcript text into the current `SlackAgentInvocation.transientAttachments`.
+
+Transcript text and audio bytes must not be written to PostgreSQL, Slack messages, Redis job payloads, or application logs. Queued Slack jobs store only Slack identifiers and re-read the Slack thread at worker processing time.

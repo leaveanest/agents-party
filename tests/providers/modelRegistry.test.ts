@@ -44,6 +44,30 @@ describe("ModelRegistry", () => {
       provider: "openai",
       providerModelId: "gpt-image-1.5",
     });
+    expect(registry.get("google.speech-to-text")).toMatchObject({
+      capabilities: ["transcription"],
+      id: "google:speech-to-text-latest-long",
+      provider: "google",
+      providerModelId: "latest_long",
+    });
+    expect(registry.get("openai.gpt-4o-mini-transcribe")).toMatchObject({
+      capabilities: ["transcription"],
+      id: "openai:gpt-4o-mini-transcribe",
+      provider: "openai",
+      providerModelId: "gpt-4o-mini-transcribe",
+    });
+    expect(registry.get("azure.whisper-1")).toMatchObject({
+      capabilities: ["transcription"],
+      id: "azure_openai:whisper-1",
+      provider: "azure_openai",
+      providerModelId: "whisper-1",
+    });
+    expect(registry.get("groq.whisper-large-v3")).toMatchObject({
+      capabilities: ["transcription"],
+      id: "groq:whisper-large-v3",
+      provider: "groq",
+      providerModelId: "whisper-large-v3",
+    });
   });
 
   it("does not advertise text models as direct image generation models", () => {
