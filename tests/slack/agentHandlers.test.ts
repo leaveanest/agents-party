@@ -521,8 +521,8 @@ describe("createAgentSlackHandlers", () => {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.8, reason: "keyword_match", specialist: "image_generation" },
-          message: "keyword fallback",
+          decision: { confidence: 0.5, reason: "unrouted_invocation", specialist: "assistant" },
+          message: "unexpected fallback",
           toolResults: [],
         };
       },

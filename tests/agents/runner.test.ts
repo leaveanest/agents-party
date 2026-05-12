@@ -21,7 +21,7 @@ const explicitModel: ModelInfo = {
 };
 
 describe("AgentRunner", () => {
-  it("selects specialists from Slack invocation text", () => {
+  it("does not infer specialists from Slack invocation text", () => {
     expect(
       selectSpecialist({
         channelId: "C1",
@@ -32,20 +32,45 @@ describe("AgentRunner", () => {
         threadMessages: [],
         userId: "U1",
         viewerContextChannelIds: [],
-      }).specialist,
-    ).toBe("translation");
+      }),
+    ).toMatchObject({
+      reason: "unrouted_invocation",
+      specialist: "assistant",
+    });
     expect(
       selectSpecialist({
         channelId: "C1",
         messageTs: "1.0",
         referenceImages: [],
         teamId: "T1",
-        text: "タスクを確認して",
+        text: "画像を生成して",
         threadMessages: [],
         userId: "U1",
         viewerContextChannelIds: [],
-      }).specialist,
-    ).toBe("work_manager");
+      }),
+    ).toMatchObject({
+      reason: "unrouted_invocation",
+      specialist: "assistant",
+    });
+  });
+
+  it("uses an explicitly routed specialist from the invocation", () => {
+    expect(
+      selectSpecialist({
+        channelId: "C1",
+        messageTs: "1.0",
+        referenceImages: [],
+        specialist: "image_generation",
+        teamId: "T1",
+        text: "画像を生成して",
+        threadMessages: [],
+        userId: "U1",
+        viewerContextChannelIds: [],
+      }),
+    ).toMatchObject({
+      reason: "forced_invocation",
+      specialist: "image_generation",
+    });
   });
 
   it("routes primary Slack mentions through provider-backed specialist runners", async () => {
@@ -139,6 +164,7 @@ describe("AgentRunner", () => {
     const result = await runner.run({
       channelId: "C1",
       messageTs: "1.0",
+      specialist: "work_manager",
       teamId: "T1",
       text: "list my tasks",
       userId: "U1",
@@ -187,6 +213,7 @@ describe("AgentRunner", () => {
     const result = await runner.run({
       channelId: "C1",
       messageTs: "1.0",
+      specialist: "work_manager",
       teamId: "T1",
       text: "task echo",
       userId: "U1",
@@ -243,6 +270,7 @@ describe("AgentRunner", () => {
       runner.run({
         channelId: "C1",
         messageTs: "1.0",
+        specialist: "work_manager",
         teamId: "T1",
         text: "task echo",
         userId: "U1",
@@ -262,6 +290,7 @@ describe("AgentRunner", () => {
       runner.run({
         channelId: "C1",
         messageTs: "1.0",
+        specialist: "work_manager",
         teamId: "T1",
         text: "list my tasks",
         userId: "U1",

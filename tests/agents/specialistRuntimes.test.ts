@@ -239,6 +239,7 @@ describe("specialist runtimes", () => {
     const result = await runner.run({
       channelId: "C1",
       messageTs: "1.0",
+      specialist: "google_maps",
       teamId: "T1",
       text: "map Osaka Station",
       userId: "U1",
@@ -269,6 +270,7 @@ describe("specialist runtimes", () => {
     const result = await runner.run({
       channelId: "C1",
       messageTs: "1.0",
+      specialist: "image_generation",
       teamId: "T1",
       text: "draw an image",
       userId: "U1",
@@ -297,6 +299,7 @@ describe("specialist runtimes", () => {
       runner.run({
         channelId: "C1",
         messageTs: "1.0",
+        specialist: "image_generation",
         teamId: "T1",
         text: "draw an image",
         userId: "U1",
@@ -309,6 +312,7 @@ describe("specialist runtimes", () => {
       runner.run({
         channelId: "C1",
         messageTs: "1.0",
+        specialist: "image_generation",
         teamId: "T1",
         text: "draw an image",
         userId: "U1",
@@ -331,6 +335,7 @@ describe("specialist runtimes", () => {
       runner.run({
         channelId: "C1",
         messageTs: "1.0",
+        specialist: "web_research",
         teamId: "T1",
         text: "research this",
         userId: "U1",
@@ -361,6 +366,7 @@ describe("specialist runtimes", () => {
       runner.run({
         channelId: "C1",
         messageTs: "1.0",
+        specialist: "image_generation",
         teamId: "T1",
         text: "draw an image",
         userId: "U1",
@@ -423,6 +429,7 @@ describe("specialist runtimes", () => {
       runner.run({
         channelId: "C1",
         messageTs: "1.0",
+        specialist: "image_generation",
         teamId: "T1",
         text: "draw an image",
         userId: "U1",

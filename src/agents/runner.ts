@@ -216,28 +216,10 @@ export function selectSpecialist(invocation: SlackAgentInvocation): AgentRouterD
     });
   }
 
-  const text = invocation.text.toLocaleLowerCase();
-  const specialist: AgentSpecialist = matchesAny(text, [
-    /\b(todo|tasks?|work items?|remind|due)\b/u,
-    /担当|タスク|リマインド/u,
-  ])
-    ? "work_manager"
-    : matchesAny(text, [/\b(translate|translation)\b/u, /翻訳|訳して/u])
-      ? "translation"
-      : matchesAny(text, [/\b(map|route|place|nearby)\b/u, /地図|場所|経路/u])
-        ? "google_maps"
-        : matchesAny(text, [/\b(image|draw|picture)\b/u, /画像|絵/u])
-          ? "image_generation"
-          : matchesAny(text, [/\b(video|movie)\b/u, /動画/u])
-            ? "video_generation"
-            : matchesAny(text, [/\b(research|source)\b/u, /調べ|検索/u])
-              ? "web_research"
-              : "assistant";
-
   return agentRouterDecisionSchema.parse({
-    confidence: specialist === "assistant" ? 0.5 : 0.8,
-    reason: "keyword_match",
-    specialist,
+    confidence: 0.5,
+    reason: "unrouted_invocation",
+    specialist: "assistant",
   });
 }
 
@@ -368,10 +350,6 @@ function modelTraceFromRuntimeError(error: unknown): AgentRunnerModelTrace | und
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
-}
-
-function matchesAny(text: string, patterns: readonly RegExp[]): boolean {
-  return patterns.some((pattern) => pattern.test(text));
 }
 
 function parseJsonObject(content: string): JsonValue {

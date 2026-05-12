@@ -22,7 +22,7 @@ The target policy is:
 
 See [`agent-model-routing.md`](agent-model-routing.md) for the routing policy.
 
-The current keyword-based specialist selection is transitional. New implementation work should move Slack event handling toward resolving an agent/model before calling `AgentRunner`, then let the selected agent decide whether to use internal specialist runtimes.
+Slack event handling resolves an agent/model before calling `AgentRunner`. If no specialist is supplied in the invocation, the runner uses the general assistant instead of guessing from prompt keywords.
 
 Configure the default model with:
 
