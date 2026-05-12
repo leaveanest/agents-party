@@ -68,6 +68,7 @@ describe("AgentRunner", () => {
       id: "1.0",
       role: "user",
     });
+    expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
   });
 
   it("validates structured work-manager results without an external agent framework", async () => {

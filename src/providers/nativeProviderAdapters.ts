@@ -7,12 +7,13 @@ import type {
   LlmStreamEvent,
   LlmToolCall,
 } from "./contracts.js";
-import { google } from "@ai-sdk/google";
+import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
 import { generateText, type FinishReason } from "ai";
 import {
   aiSdkMessageConversionCapabilitiesForModel,
   convertHistoryToAiSdkMessages,
 } from "./aiSdkMessageConverter.js";
+import { type ProviderCredentialResolver, resolveCredentialForRequest } from "./credentials.js";
 
 export type NativeProviderAdapterSpec = {
   capabilities: readonly LlmCapability[];
@@ -77,22 +78,35 @@ export class UnsupportedNativeProviderAdapter implements LlmAdapter {
 export class GoogleWebSearchNativeAdapter implements LlmAdapter {
   readonly provider = "google" as const;
 
+  constructor(private readonly credentialResolver?: ProviderCredentialResolver) {}
+
   supports(_request: LlmRequest, requiredCapabilities: readonly LlmCapability[]): boolean {
     return requiredCapabilities.includes("web_search");
   }
 
   async generate(request: LlmRequest): Promise<LlmResult> {
+    const credential = await resolveCredentialForRequest(
+      this.credentialResolver,
+      request,
+      request.model.provider,
+    );
+    const googleProvider =
+      credential === undefined
+        ? google
+        : createGoogleGenerativeAI({
+            apiKey: credential.apiKey,
+          });
     const result = await generateText({
       maxOutputTokens: request.maxOutputTokens,
       messages: convertHistoryToAiSdkMessages(
         request.history,
         aiSdkMessageConversionCapabilitiesForModel(request.model),
       ),
-      model: google(request.model.providerModelId),
+      model: googleProvider(request.model.providerModelId),
       providerOptions: request.providerOptions,
       temperature: request.temperature,
       tools: {
-        google_search: google.tools.googleSearch({}),
+        google_search: googleProvider.tools.googleSearch({}),
       },
     });
     return {
@@ -118,9 +132,13 @@ export class GoogleWebSearchNativeAdapter implements LlmAdapter {
   }
 }
 
-export function createNativeProviderAdapters(): LlmAdapter[] {
+export function createNativeProviderAdapters(
+  input: {
+    credentialResolver?: ProviderCredentialResolver;
+  } = {},
+): LlmAdapter[] {
   return [
-    new GoogleWebSearchNativeAdapter(),
+    new GoogleWebSearchNativeAdapter(input.credentialResolver),
     ...nativeProviderAdapterSpecs.map((spec) => new UnsupportedNativeProviderAdapter(spec)),
   ];
 }

@@ -3,16 +3,18 @@ import { createDefaultAgentRunner } from "./agents/runner.js";
 import { createAppServer } from "./server.js";
 import { createOAuthHttpGateway } from "./integrations/oauth/http.js";
 import { issueSalesforceOAuthStartContext } from "./integrations/oauth/coordinators.js";
+import { FernetTextCipher } from "./integrations/oauth/fernet.js";
 import { Pool } from "pg";
 import {
   PostgresAgentRoutingRepository,
   PostgresOAuthRepository,
 } from "./infrastructure/postgres/appRepositories.js";
+import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
+import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
 
 const settings = loadSettings();
-const agentRunner = createDefaultAgentRunner(settings);
 const appRepositoryPool =
   settings.databaseUrl === undefined
     ? undefined
@@ -23,6 +25,16 @@ const routingRepository =
     : new PostgresAgentRoutingRepository(appRepositoryPool);
 const oauthRepository =
   appRepositoryPool === undefined ? undefined : new PostgresOAuthRepository(appRepositoryPool);
+const workspaceCredentialResolver =
+  appRepositoryPool === undefined || settings.llmApiKeyEncryptionKey === undefined
+    ? undefined
+    : new EncryptedWorkspaceCredentialService(
+        new PostgresWorkspaceCredentialRepository(appRepositoryPool),
+        new FernetTextCipher(settings.llmApiKeyEncryptionKey),
+      );
+const agentRunner = createDefaultAgentRunner(settings, {
+  credentialResolver: workspaceCredentialResolver,
+});
 const salesforceHomeContextSigningSecret = settings.salesforceOAuthContextSigningSecret;
 const slackGateway = settings.slackEnabled
   ? createSlackGateway(settings, {

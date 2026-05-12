@@ -6,6 +6,7 @@ export type AppSettings = {
   appPort: number;
   databaseUrl: string | undefined;
   imageGenerationModelId: string;
+  llmApiKeyEncryptionKey: string | undefined;
   googleOAuthCallbackPath: string;
   googleOAuthCallbackUrl: string;
   googleOAuthClientId: string | undefined;
@@ -74,6 +75,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     "GOOGLE_OAUTH_REDIRECT_BASE_URL",
   );
   const googleTokenEncryptionKey = readText(env.GOOGLE_TOKEN_ENCRYPTION_KEY);
+  const llmApiKeyEncryptionKey = readText(env.LLM_API_KEY_ENCRYPTION_KEY);
   const googleMapsApiKey = readText(env.GOOGLE_MAPS_API_KEY);
   const googleGenerativeAiApiKey =
     readText(env.GOOGLE_GENERATIVE_AI_API_KEY) ?? readText(env.GEMINI_API_KEY);
@@ -135,6 +137,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     databaseUrl,
     imageGenerationModelId:
       readText(env.IMAGE_GENERATION_MODEL) ?? DEFAULT_IMAGE_GENERATION_MODEL_ID,
+    llmApiKeyEncryptionKey,
     googleOAuthCallbackPath,
     googleOAuthCallbackUrl: buildCallbackUrl(googleOAuthRedirectBaseUrl, googleOAuthCallbackPath),
     googleOAuthClientId,

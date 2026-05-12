@@ -47,6 +47,7 @@ describe("specialist runtimes", () => {
     });
 
     expect(router.requests[0]?.requiredCapabilities).toEqual(["web_search"]);
+    expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
     expect(result.message).toContain("Official: https://example.com/source");
     expect(result.structuredResult).toMatchObject({
       action: "answered",
@@ -159,6 +160,33 @@ describe("specialist runtimes", () => {
       },
     });
     expect(video.model).toEqual({ id: "google:veo-3.1-fast-generate-001", provider: "google" });
+  });
+
+  it("resolves native specialist gateways from the Slack team context", async () => {
+    const teams: string[] = [];
+    const runtime = createImageGenerationRuntime(imageModel.id, async ({ teamId }) => {
+      teams.push(teamId);
+      return {
+        async generateImage() {
+          return { dataBase64: "aW1hZ2U=", mimeType: "image/png" };
+        },
+        async generateVideo() {
+          throw new Error("Unexpected video generation call.");
+        },
+      };
+    });
+
+    const result = await runtime({
+      invocation: invocation("draw an image"),
+      model,
+      providerRouter: new FakeProviderRouter({ content: "" }),
+    });
+
+    expect(teams).toEqual(["T1"]);
+    expect(result.structuredResult).toMatchObject({
+      action: "generated",
+      media: { dataBase64: "aW1hZ2U=", kind: "image" },
+    });
   });
 
   it("parses Japanese route requests into Google Maps route calls", async () => {

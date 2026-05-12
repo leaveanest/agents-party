@@ -37,8 +37,18 @@ import type {
   LlmUsage,
   ModelInfo,
 } from "./contracts.js";
+import {
+  MissingWorkspaceContextError,
+  MissingWorkspaceCredentialError,
+  type ProviderCredential,
+  type ProviderCredentialResolver,
+  resolveCredentialForRequest,
+} from "./credentials.js";
 
-export type AiSdkModelResolver = (model: ModelInfo) => LanguageModel;
+export type AiSdkModelResolver = (
+  model: ModelInfo,
+  credential?: ProviderCredential,
+) => LanguageModel;
 
 export type AiSdkAdapterSettings = {
   anthropic?: AnthropicProviderSettings;
@@ -47,6 +57,10 @@ export type AiSdkAdapterSettings = {
   groq?: GroqProviderSettings;
   openAI?: OpenAIProviderSettings;
   openAICompatible?: Partial<Record<OpenAICompatibleProvider, OpenAICompatibleProviderConfig>>;
+};
+
+export type AiSdkAdapterOptions = {
+  credentialResolver?: ProviderCredentialResolver;
 };
 
 export type OpenAICompatibleProvider = "litellm" | "nvidia" | "plamo" | "xai";
@@ -75,18 +89,24 @@ export class AiSdkLlmAdapter implements LlmAdapter {
   constructor(
     readonly provider: LlmProvider,
     private readonly resolveModel: AiSdkModelResolver,
+    private readonly credentialResolver?: ProviderCredentialResolver,
   ) {}
 
   async generate(request: LlmRequest): Promise<LlmResult> {
     try {
       assertSupportedResponseFormat(request);
+      const credential = await resolveCredentialForRequest(
+        this.credentialResolver,
+        request,
+        request.model.provider,
+      );
       const result = await generateText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
           request.history,
           aiSdkMessageConversionCapabilitiesForModel(request.model),
         ),
-        model: this.resolveModel(request.model),
+        model: this.resolveModel(request.model, credential),
         providerOptions: request.providerOptions,
         temperature: request.temperature,
         tools: toAiSdkTools(request.tools),
@@ -100,6 +120,12 @@ export class AiSdkLlmAdapter implements LlmAdapter {
         usage: mapUsage(result.usage),
       };
     } catch (error) {
+      if (
+        error instanceof MissingWorkspaceCredentialError ||
+        error instanceof MissingWorkspaceContextError
+      ) {
+        throw error;
+      }
       throw normalizeProviderError(request.model, error);
     }
   }
@@ -121,13 +147,18 @@ export class AiSdkLlmAdapter implements LlmAdapter {
   private async *streamResponse(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
     try {
       assertSupportedResponseFormat(request);
+      const credential = await resolveCredentialForRequest(
+        this.credentialResolver,
+        request,
+        request.model.provider,
+      );
       const result = streamText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
           request.history,
           aiSdkMessageConversionCapabilitiesForModel(request.model),
         ),
-        model: this.resolveModel(request.model),
+        model: this.resolveModel(request.model, credential),
         providerOptions: request.providerOptions,
         temperature: request.temperature,
         tools: toAiSdkTools(request.tools),
@@ -193,7 +224,11 @@ export class AiSdkLlmAdapter implements LlmAdapter {
       };
     } catch (error) {
       yield {
-        error: normalizeProviderError(request.model, error),
+        error:
+          error instanceof MissingWorkspaceCredentialError ||
+          error instanceof MissingWorkspaceContextError
+            ? error
+            : normalizeProviderError(request.model, error),
         type: "error",
       };
     }
@@ -219,7 +254,10 @@ function assertSupportedResponseFormat(request: LlmRequest): void {
   }
 }
 
-export function createAiSdkAdapters(settings: AiSdkAdapterSettings = {}): AiSdkLlmAdapter[] {
+export function createAiSdkAdapters(
+  settings: AiSdkAdapterSettings = {},
+  options: AiSdkAdapterOptions = {},
+): AiSdkLlmAdapter[] {
   const resolveModel = createAiSdkModelResolver(settings);
   const commonLaneProviders = [
     "openai",
@@ -233,7 +271,9 @@ export function createAiSdkAdapters(settings: AiSdkAdapterSettings = {}): AiSdkL
     "litellm",
   ] as const satisfies readonly LlmProvider[];
 
-  return commonLaneProviders.map((provider) => new AiSdkLlmAdapter(provider, resolveModel));
+  return commonLaneProviders.map(
+    (provider) => new AiSdkLlmAdapter(provider, resolveModel, options.credentialResolver),
+  );
 }
 
 export function createAiSdkModelResolver(settings: AiSdkAdapterSettings = {}): AiSdkModelResolver {
@@ -247,23 +287,74 @@ export function createAiSdkModelResolver(settings: AiSdkAdapterSettings = {}): A
   const configuredGroq = settings.groq === undefined ? groq : createGroq(settings.groq);
   const openAICompatibleProviders = createOpenAICompatibleProviders(settings.openAICompatible);
 
-  return (model: ModelInfo): LanguageModel => {
+  return (model: ModelInfo, credential?: ProviderCredential): LanguageModel => {
     switch (model.provider) {
       case "openai":
-        return configuredOpenAI(model.providerModelId);
+        return (
+          credential === undefined
+            ? configuredOpenAI
+            : createOpenAI({
+                ...settings.openAI,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.openAI?.baseURL,
+              })
+        )(model.providerModelId);
       case "azure_openai":
-        return configuredAzure(model.providerModelId);
+        return (
+          credential === undefined
+            ? configuredAzure
+            : createAzure({
+                ...settings.azureOpenAI,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.azureOpenAI?.baseURL,
+              })
+        )(model.providerModelId);
       case "anthropic":
-        return configuredAnthropic(model.providerModelId);
+        return (
+          credential === undefined
+            ? configuredAnthropic
+            : createAnthropic({
+                ...settings.anthropic,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.anthropic?.baseURL,
+              })
+        )(model.providerModelId);
       case "google":
-        return configuredGoogle(model.providerModelId);
+        return (
+          credential === undefined
+            ? configuredGoogle
+            : createGoogleGenerativeAI({
+                ...settings.google,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.google?.baseURL,
+              })
+        )(model.providerModelId);
       case "groq":
-        return configuredGroq(model.providerModelId);
+        return (
+          credential === undefined
+            ? configuredGroq
+            : createGroq({
+                ...settings.groq,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.groq?.baseURL,
+              })
+        )(model.providerModelId);
       case "xai":
       case "plamo":
       case "nvidia":
       case "litellm":
-        return openAICompatibleProviders[model.provider](model.providerModelId);
+        return (
+          credential === undefined
+            ? openAICompatibleProviders[model.provider]
+            : createOpenAICompatible(
+                openAICompatibleSettings(model.provider, {
+                  ...settings.openAICompatible?.[model.provider],
+                  apiKey: credential.apiKey,
+                  baseURL:
+                    credential.baseURL ?? settings.openAICompatible?.[model.provider]?.baseURL,
+                }),
+              )
+        )(model.providerModelId);
       case "bedrock":
       case "dify":
         throw new LlmProviderError(
