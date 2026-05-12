@@ -1010,6 +1010,122 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("adds ephemeral audio transcripts to active thread follow-up invocations", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { specialist: "assistant" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const posts: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never, {
+      audioFetchFn: async () => new Response(new Uint8Array([1, 2, 3])),
+      audioTranscriptionGateway: {
+        async transcribe(request) {
+          expect(request.audio).toEqual(new Uint8Array([1, 2, 3]));
+          return {
+            model: "google:speech-to-text-latest-long",
+            provider: "google",
+            text: "音声内容",
+          };
+        },
+      },
+      routingRepository: repository,
+    });
+
+    await handlers.handleMessage({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: {
+          replies: async () => ({
+            messages: [
+              { text: "root text", ts: "1712345678.000100" },
+              {
+                files: [
+                  {
+                    id: "F1",
+                    mimetype: "audio/mpeg",
+                    name: "voice.mp3",
+                    size: 3,
+                    url_private_download:
+                      "https://files.slack.com/files-pri/T-F1/download/voice.mp3",
+                  },
+                ],
+                text: "",
+                ts: "1712345678.000200",
+              },
+            ],
+          }),
+        },
+        token: "xoxb-token",
+      },
+      event: {
+        channel: "C1",
+        files: [
+          {
+            id: "F1",
+            mimetype: "audio/mpeg",
+            name: "voice.mp3",
+            size: 3,
+            url_private_download: "https://files.slack.com/files-pri/T-F1/download/voice.mp3",
+          },
+        ],
+        text: "",
+        thread_ts: "1712345678.000100",
+        ts: "1712345678.000200",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        text: "",
+        threadMessages: ["root text"],
+        transientAttachments: [
+          {
+            filename: "voice.mp3",
+            id: "F1",
+            kind: "audio",
+            mediaType: "audio/mpeg",
+            messageTs: "1712345678.000200",
+            transcript: "音声内容",
+          },
+        ],
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        text: "thread reply",
+      }),
+    ]);
+  });
+
   it("processes queued follow-up jobs through the AgentRunner and posts the result", async () => {
     const invocations: unknown[] = [];
     const runner = {
@@ -1058,11 +1174,40 @@ describe("createAgentSlackHandlers", () => {
           },
           conversations: {
             replies: async () => ({
-              messages: [{ text: "root text" }, { text: "follow-up" }],
+              messages: [
+                {
+                  files: [
+                    {
+                      id: "F-root",
+                      mimetype: "audio/mpeg",
+                      name: "root-voice.mp3",
+                      size: 3,
+                      ts: "1712345678.000100",
+                      url_private_download:
+                        "https://files.slack.com/files-pri/T-F-root/download/root-voice.mp3",
+                    },
+                  ],
+                  text: "root text",
+                  ts: "1712345678.000100",
+                },
+                { text: "follow-up", ts: "1712345678.000200" },
+              ],
             }),
           },
           filesUploadV2: async () => ({}),
+          token: "xoxb-token",
         } as never,
+        audioFetchFn: async () => new Response(new Uint8Array([4, 5, 6])),
+        audioTranscriptionGateway: {
+          async transcribe(request) {
+            expect(request.audio).toEqual(new Uint8Array([4, 5, 6]));
+            return {
+              model: "google:speech-to-text-latest-long",
+              provider: "google",
+              text: "前の音声",
+            };
+          },
+        },
         logger: { error() {}, info() {}, warn() {} },
         routingRepository: repository,
         runner: runner as never,
@@ -1074,6 +1219,16 @@ describe("createAgentSlackHandlers", () => {
         channelId: "C1",
         text: "follow-up",
         threadMessages: ["root text", "follow-up"],
+        transientAttachments: [
+          {
+            filename: "root-voice.mp3",
+            id: "F-root",
+            kind: "audio",
+            mediaType: "audio/mpeg",
+            messageTs: "1712345678.000100",
+            transcript: "前の音声",
+          },
+        ],
       }),
     ]);
     expect(repository.activations).toEqual([

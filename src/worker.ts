@@ -2,8 +2,12 @@ import { Pool } from "pg";
 
 import { createDefaultAgentRunner } from "./agents/runner.js";
 import { loadSettings } from "./config.js";
+import { FernetTextCipher } from "./integrations/oauth/fernet.js";
 import { PostgresAgentRoutingRepository } from "./infrastructure/postgres/appRepositories.js";
+import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
+import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createBullMqSlackAgentJobWorker } from "./queues/slackAgentJobs.js";
+import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
 import { processSlackAgentJob } from "./slack/agentHandlers.js";
 import { createSlackWebClientProvider } from "./slack/webClient.js";
 
@@ -18,7 +22,19 @@ if (settings.databaseUrl === undefined) {
 
 const pool = new Pool({ connectionString: settings.databaseUrl });
 const routingRepository = new PostgresAgentRoutingRepository(pool);
-const runner = createDefaultAgentRunner(settings);
+const workspaceCredentialResolver =
+  settings.llmApiKeyEncryptionKey === undefined
+    ? undefined
+    : new EncryptedWorkspaceCredentialService(
+        new PostgresWorkspaceCredentialRepository(pool),
+        new FernetTextCipher(settings.llmApiKeyEncryptionKey),
+      );
+const runner = createDefaultAgentRunner(settings, {
+  credentialResolver: workspaceCredentialResolver,
+});
+const audioTranscriptionGateway = createDefaultTranscriptionGateway(settings, {
+  credentialResolver: workspaceCredentialResolver,
+});
 const slackClients = createSlackWebClientProvider(settings, { pool });
 const worker = createBullMqSlackAgentJobWorker(settings.redisUrl, async (job, context) => {
   const client = await slackClients.forTeam({
@@ -29,6 +45,7 @@ const worker = createBullMqSlackAgentJobWorker(settings.redisUrl, async (job, co
   await processSlackAgentJob(job, {
     client,
     logger: console,
+    audioTranscriptionGateway,
     retryContext: context,
     routingRepository,
     runner,

@@ -31,11 +31,17 @@ Slack OAuth install routes additionally require:
 
 `SLACK_USER_SCOPES` is optional and comma-separated.
 
+Audio attachment understanding requires the bot `files:read` scope in addition to channel history scopes. Audio bytes are fetched only for the current agent invocation and are kept in memory.
+
+Transcription uses `TRANSCRIPTION_MODEL` (default `google:speech-to-text-latest-long`), `TRANSCRIPTION_LANGUAGE_CODE` (default `ja-JP`), and `TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES` (default `en-US`). Provider credentials are resolved from `workspace_credentials`; Google Speech-to-Text uses `provider_kind=google` and `credential_name=service_account_json`, with the encrypted secret containing the service account JSON. AI SDK transcription providers use their provider kind (`openai`, `groq`, or `azure_openai`) with `credential_name=api_key`.
+
+Provider-side data handling is outside application storage. Enable Google Speech-to-Text only for workspaces approved to send audio to Google Cloud. OpenAI, Groq, and Azure OpenAI transcription models are optional workspace-selected routes; enable them only when the workspace has approved that provider's current retention and training terms. The app does not add transcript caching for any provider.
+
 ## Ack, Retry, And Idempotency
 
 Bolt `HTTPReceiver` is configured with `processBeforeResponse: false` so Slack requests are acknowledged independently from feature handler completion. Duplicate Events API deliveries are suppressed by `event_id` before feature handlers run.
 
-When `SLACK_AGENT_QUEUE_ENABLED=true`, `REDIS_URL`, and `DATABASE_URL` are configured, app mentions and active thread follow-up messages are handed off to a BullMQ-backed Redis queue. The web process performs request validation, channel/thread policy checks, and enqueue; the worker process runs `AgentRunner`, updates PostgreSQL thread route state, and posts the final Slack reply. Without queue mode enabled, local/runtime behavior falls back to the in-process handler path.
+When `SLACK_AGENT_QUEUE_ENABLED=true`, `REDIS_URL`, and `DATABASE_URL` are configured, app mentions and active thread follow-up messages are handed off to a BullMQ-backed Redis queue. The web process performs request validation, channel/thread policy checks, and enqueue; the worker process re-reads Slack thread context, performs any ephemeral audio transcription, runs `AgentRunner`, updates PostgreSQL thread route state, and posts the final Slack reply. Without queue mode enabled, local/runtime behavior falls back to the in-process handler path.
 
 Slack retry metadata remains available on Bolt context:
 

@@ -25,6 +25,9 @@ describe("loadSettings", () => {
       googleTokenEncryptionKey: undefined,
       googleMapsApiKey: undefined,
       googleGenerativeAiApiKey: undefined,
+      transcriptionAlternativeLanguageCodes: ["en-US"],
+      transcriptionLanguageCode: "ja-JP",
+      transcriptionModelId: "google:speech-to-text-latest-long",
       videoGenerationModelId: "google:veo-3.1-fast-generate-001",
       slackBotToken: undefined,
       slackClientId: undefined,
@@ -40,6 +43,7 @@ describe("loadSettings", () => {
         "app_mentions:read",
         "channels:history",
         "chat:write",
+        "files:read",
         "files:write",
         "groups:history",
         "im:history",
@@ -161,6 +165,18 @@ describe("loadSettings", () => {
     expect(settings.googleGenerativeAiApiKey).toBe("gemini-key");
     expect(settings.imageGenerationModelId).toBe("google:image-model");
     expect(settings.videoGenerationModelId).toBe("google:video-model");
+  });
+
+  it("reads transcription model and language settings", () => {
+    const settings = loadSettings({
+      TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES: "en-US,fr-FR",
+      TRANSCRIPTION_LANGUAGE_CODE: "ja-JP",
+      TRANSCRIPTION_MODEL: "google:speech-to-text-latest-long",
+    });
+
+    expect(settings.transcriptionAlternativeLanguageCodes).toEqual(["en-US", "fr-FR"]);
+    expect(settings.transcriptionLanguageCode).toBe("ja-JP");
+    expect(settings.transcriptionModelId).toBe("google:speech-to-text-latest-long");
   });
 
   it("allows OpenAI image generation models to be configured explicitly", () => {

@@ -20,6 +20,17 @@ export const slackReferenceImageSchema = z
   })
   .strict();
 
+export const slackTransientAudioAttachmentSchema = z
+  .object({
+    filename: z.string().min(1).optional(),
+    id: z.string().min(1),
+    kind: z.literal("audio"),
+    mediaType: z.string().min(1),
+    messageTs: z.string().min(1).optional(),
+    transcript: z.string().min(1).optional(),
+  })
+  .strict();
+
 export const slackAgentInvocationSchema = z
   .object({
     channelId: z.string().min(1),
@@ -36,6 +47,7 @@ export const slackAgentInvocationSchema = z
     text: z.string().default(""),
     threadMessages: z.array(z.string()).default([]),
     threadTs: z.string().min(1).optional(),
+    transientAttachments: z.array(slackTransientAudioAttachmentSchema).default([]),
     userId: z.string().min(1),
     viewerContextChannelIds: z.array(z.string().min(1)).default([]),
   })

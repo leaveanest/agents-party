@@ -169,12 +169,28 @@ export const defaultModelRegistryEntries: readonly ModelInfo[] = [
     providerModelId: "gpt-image-1",
   },
   {
+    aliases: ["openai.gpt-4o-mini-transcribe"],
+    capabilities: ["transcription"],
+    displayName: "OpenAI GPT-4o Mini Transcribe",
+    id: "openai:gpt-4o-mini-transcribe",
+    provider: "openai",
+    providerModelId: "gpt-4o-mini-transcribe",
+  },
+  {
     aliases: ["azure.gpt-4o"],
     capabilities: ["text", "streaming", "image_input", "tool_calling", "structured_output"],
     displayName: "Azure OpenAI GPT-4o deployment",
     id: "azure_openai:gpt-4o",
     provider: "azure_openai",
     providerModelId: "gpt-4o",
+  },
+  {
+    aliases: ["azure.whisper-1"],
+    capabilities: ["transcription"],
+    displayName: "Azure OpenAI Whisper deployment",
+    id: "azure_openai:whisper-1",
+    provider: "azure_openai",
+    providerModelId: "whisper-1",
   },
   {
     aliases: ["claude-3-5-sonnet-latest"],
@@ -219,6 +235,14 @@ export const defaultModelRegistryEntries: readonly ModelInfo[] = [
     providerModelId: "gemini-2.5-flash-image",
   },
   {
+    aliases: ["google.speech-to-text"],
+    capabilities: ["transcription"],
+    displayName: "Google Cloud Speech-to-Text latest long",
+    id: "google:speech-to-text-latest-long",
+    provider: "google",
+    providerModelId: "latest_long",
+  },
+  {
     aliases: ["veo-3.1-fast-generate-001"],
     capabilities: ["video_generation"],
     displayName: "Veo 3.1 Fast",
@@ -241,6 +265,14 @@ export const defaultModelRegistryEntries: readonly ModelInfo[] = [
     id: "groq:llama-3.1-70b-versatile",
     provider: "groq",
     providerModelId: "llama-3.1-70b-versatile",
+  },
+  {
+    aliases: ["groq.whisper-large-v3"],
+    capabilities: ["transcription"],
+    displayName: "Groq Whisper Large v3",
+    id: "groq:whisper-large-v3",
+    provider: "groq",
+    providerModelId: "whisper-large-v3",
   },
   {
     aliases: ["nvidia.meta/llama-3.1-70b-instruct"],

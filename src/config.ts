@@ -19,6 +19,9 @@ export type AppSettings = {
   googleTokenEncryptionKey: string | undefined;
   googleMapsApiKey: string | undefined;
   googleGenerativeAiApiKey: string | undefined;
+  transcriptionAlternativeLanguageCodes: string[];
+  transcriptionLanguageCode: string;
+  transcriptionModelId: string;
   videoGenerationModelId: string;
   slackBotToken: string | undefined;
   slackClientId: string | undefined;
@@ -47,11 +50,15 @@ export type AppSettings = {
 const DEFAULT_PORT = 8000;
 const DEFAULT_AGENT_MODEL_ID = "google:gemini-2.5-flash";
 const DEFAULT_IMAGE_GENERATION_MODEL_ID = "google:gemini-2.5-flash-image";
+const DEFAULT_TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES = ["en-US"];
+const DEFAULT_TRANSCRIPTION_LANGUAGE_CODE = "ja-JP";
+const DEFAULT_TRANSCRIPTION_MODEL_ID = "google:speech-to-text-latest-long";
 const DEFAULT_VIDEO_GENERATION_MODEL_ID = "google:veo-3.1-fast-generate-001";
 const DEFAULT_SLACK_SCOPES = [
   "app_mentions:read",
   "channels:history",
   "chat:write",
+  "files:read",
   "files:write",
   "groups:history",
   "im:history",
@@ -154,6 +161,13 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     googleTokenEncryptionKey,
     googleMapsApiKey,
     googleGenerativeAiApiKey,
+    transcriptionAlternativeLanguageCodes: parseList(
+      env.TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES,
+      DEFAULT_TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES,
+    ),
+    transcriptionLanguageCode:
+      readText(env.TRANSCRIPTION_LANGUAGE_CODE) ?? DEFAULT_TRANSCRIPTION_LANGUAGE_CODE,
+    transcriptionModelId: readText(env.TRANSCRIPTION_MODEL) ?? DEFAULT_TRANSCRIPTION_MODEL_ID,
     videoGenerationModelId:
       readText(env.VIDEO_GENERATION_MODEL) ?? DEFAULT_VIDEO_GENERATION_MODEL_ID,
     slackBotToken,

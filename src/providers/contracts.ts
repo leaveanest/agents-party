@@ -29,6 +29,7 @@ export const LlmCapabilityId = {
   Text: "text",
   Thinking: "thinking",
   ToolCalling: "tool_calling",
+  Transcription: "transcription",
   VideoGeneration: "video_generation",
   WebSearch: "web_search",
 } as const;

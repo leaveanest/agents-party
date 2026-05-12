@@ -613,7 +613,19 @@ function specialistHistory(prompt: string, invocation: SlackAgentInvocation): Co
       })),
       {
         author: { id: invocation.userId, kind: "user" as const },
-        content: [{ text: invocation.text, type: "text" as const }],
+        content: [
+          { text: invocation.text, type: "text" as const },
+          ...invocation.transientAttachments.flatMap((attachment) =>
+            attachment.kind === "audio" && attachment.transcript !== undefined
+              ? [
+                  {
+                    text: `[audio: ${attachment.filename ?? attachment.id}]\n${attachment.transcript}`,
+                    type: "text" as const,
+                  },
+                ]
+              : [],
+          ),
+        ],
         id: invocation.messageTs,
         role: "user" as const,
       },
