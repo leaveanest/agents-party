@@ -13,6 +13,12 @@ const model: ModelInfo = {
   provider: "google",
   providerModelId: "gemini-2.5-flash",
 };
+const explicitModel: ModelInfo = {
+  capabilities: ["text", "tool_calling"],
+  id: "anthropic:claude-3-5-sonnet-latest",
+  provider: "anthropic",
+  providerModelId: "claude-3-5-sonnet-latest",
+};
 
 describe("AgentRunner", () => {
   it("selects specialists from Slack invocation text", () => {
@@ -69,6 +75,53 @@ describe("AgentRunner", () => {
       role: "user",
     });
     expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
+  });
+
+  it("uses an explicit invocation model before the default model", async () => {
+    const router = new FakeProviderRouter({
+      content: "model override",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      modelId: explicitModel.id,
+      teamId: "T1",
+      text: "hello",
+      userId: "U1",
+    });
+
+    expect(result.model).toEqual({
+      id: "anthropic:claude-3-5-sonnet-latest",
+      provider: "anthropic",
+    });
+    expect(router.requests[0]?.model.id).toBe(explicitModel.id);
+  });
+
+  it("ignores blank invocation model ids", async () => {
+    const router = new FakeProviderRouter({
+      content: "default model",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      modelId: "   ",
+      teamId: "T1",
+      text: "hello",
+      userId: "U1",
+    });
+
+    expect(result.model).toEqual({ id: model.id, provider: "google" });
+    expect(router.requests[0]?.model.id).toBe(model.id);
   });
 
   it("validates structured work-manager results without an external agent framework", async () => {
@@ -241,7 +294,7 @@ describe("AgentRunner", () => {
 });
 
 class FakeProviderRouter {
-  readonly registry = new ModelRegistry([model]);
+  readonly registry = new ModelRegistry([model, explicitModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly result: LlmResult) {}
@@ -253,7 +306,7 @@ class FakeProviderRouter {
 }
 
 class SequencedProviderRouter {
-  readonly registry = new ModelRegistry([model]);
+  readonly registry = new ModelRegistry([model, explicitModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly results: LlmResult[]) {}

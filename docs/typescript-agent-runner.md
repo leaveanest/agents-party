@@ -4,10 +4,25 @@ OSA-14 introduces the TypeScript agent runtime under `src/agents/`.
 
 The runtime is repository-owned:
 
-- `schemas.ts` defines Zod-validated Slack invocation, specialist routing, and structured result contracts.
-- `runner.ts` selects a specialist, dispatches native specialist runtimes when available, builds repository domain message history, invokes the `ProviderRouter`, and validates structured work-manager/translation results.
+- `schemas.ts` defines Zod-validated Slack invocation, agent/specialist routing inputs, and structured result contracts.
+- `runner.ts` executes the selected agent runtime, dispatches native specialist runtimes when configured, builds repository domain message history, invokes the `ProviderRouter`, and validates structured work-manager/translation results.
 - `toolContracts.ts` defines typed tool declarations and execution for model tool calls without depending on external agent-framework tool contracts.
 - `src/slack/agentHandlers.ts` connects `app_mention` events to the TypeScript `AgentRunner` and replies in the Slack thread.
+
+## Routing Direction
+
+Top-level AI routing should be configuration-driven, not keyword-driven.
+
+The target policy is:
+
+1. resolve the effective agent and model from thread settings
+2. fall back to channel defaults
+3. fall back to workspace defaults
+4. use application defaults only for explicit local/bootstrap configuration
+
+See [`agent-model-routing.md`](agent-model-routing.md) for the routing policy.
+
+The current keyword-based specialist selection is transitional. New implementation work should move Slack event handling toward resolving an agent/model before calling `AgentRunner`, then let the selected agent decide whether to use internal specialist runtimes.
 
 Configure the default model with:
 

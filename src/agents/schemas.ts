@@ -24,6 +24,12 @@ export const slackAgentInvocationSchema = z
   .object({
     channelId: z.string().min(1),
     messageTs: z.string().min(1),
+    modelId: z
+      .preprocess(
+        (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+        z.string().trim().min(1).optional(),
+      )
+      .optional(),
     referenceImages: z.array(slackReferenceImageSchema).default([]),
     specialist: agentSpecialistSchema.optional(),
     teamId: z.string().min(1),

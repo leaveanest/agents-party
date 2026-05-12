@@ -262,6 +262,36 @@ export const postgresMigrations: readonly PostgresMigration[] = [
   },
   {
     id: "20260512_0004",
+    name: "agent_model_routing",
+    upSql: `
+      alter table workspace_app_settings
+        add column if not exists default_model_id text;
+
+      alter table channel_app_settings
+        add column if not exists default_model_id text;
+
+      alter table slack_threads
+        add column if not exists model_id text;
+
+      update workspace_app_settings
+      set default_model_id = nullif(btrim(payload ->> 'default_model_id'), '')
+      where default_model_id is null
+        and nullif(btrim(payload ->> 'default_model_id'), '') is not null;
+
+      update channel_app_settings
+      set default_model_id = nullif(btrim(payload ->> 'default_model_id'), '')
+      where default_model_id is null
+        and nullif(btrim(payload ->> 'default_model_id'), '') is not null;
+
+      update slack_threads
+      set model_id = nullif(btrim(payload ->> 'model_id'), '')
+      where model_id is null
+        and payload ->> 'model_scope' = 'thread'
+        and nullif(btrim(payload ->> 'model_id'), '') is not null;
+    `,
+  },
+  {
+    id: "20260512_0005",
     name: "workspace_credentials",
     upSql: `
       create table if not exists workspace_credentials (

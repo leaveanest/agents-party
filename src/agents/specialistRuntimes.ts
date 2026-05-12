@@ -316,14 +316,15 @@ export function createImageGenerationRuntime(
   gateway?: MediaGenerationGateway | MediaGenerationGatewayFactory,
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
+    const resolvedModelId = invocation.modelId ?? modelId;
     let model: ModelInfo | undefined;
     try {
-      model = providerRouter.registry.get(modelId);
+      model = providerRouter.registry.get(resolvedModelId);
       providerRouter.registry.assertCapabilities(model, ["image_generation"]);
     } catch (error) {
       throw new AgentSpecialistRuntimeError(
         "image_generation",
-        model === undefined ? { id: modelId } : modelTrace(model),
+        model === undefined ? { id: resolvedModelId } : modelTrace(model),
         error,
       );
     }
@@ -396,14 +397,15 @@ export function createVideoGenerationRuntime(
   gateway?: MediaGenerationGateway | MediaGenerationGatewayFactory,
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
+    const resolvedModelId = invocation.modelId ?? modelId;
     let model: ModelInfo | undefined;
     try {
-      model = providerRouter.registry.get(modelId);
+      model = providerRouter.registry.get(resolvedModelId);
       providerRouter.registry.assertCapabilities(model, ["video_generation"]);
     } catch (error) {
       throw new AgentSpecialistRuntimeError(
         "video_generation",
-        model === undefined ? { id: modelId } : modelTrace(model),
+        model === undefined ? { id: resolvedModelId } : modelTrace(model),
         error,
       );
     }
