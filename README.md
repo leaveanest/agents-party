@@ -133,6 +133,9 @@ APP_PORT=8000
 
 ### Slack
 
+The Slack App Manifest template is [`slack-app-manifest.yaml`](slack-app-manifest.yaml).
+Replace `agents-party.example.com` with the public HTTPS host before importing it into Slack.
+
 Use a static bot token locally, or provide `SLACK_CLIENT_ID` together with database settings when using the installation store:
 
 ```bash
@@ -141,7 +144,7 @@ SLACK_SIGNING_SECRET=...
 SLACK_CLIENT_ID=...
 SLACK_CLIENT_SECRET=...
 SLACK_STATE_SECRET=...
-SLACK_SCOPES=app_mentions:read,channels:history,chat:write,groups:history,im:history,mpim:history,reactions:read,users:read,views:write
+SLACK_SCOPES=app_mentions:read,channels:history,chat:write,files:write,groups:history,im:history,mpim:history,reactions:read,users:read,views:write
 SLACK_USER_SCOPES=
 SLACK_EVENTS_PATH=/slack/events
 SLACK_INSTALL_PATH=/slack/install

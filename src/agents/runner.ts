@@ -58,7 +58,8 @@ export type AgentRunnerOptions = {
 };
 
 const DEFAULT_SPECIALIST_PROMPTS = {
-  assistant: "You are the general Agents Party assistant. Reply directly and concisely for Slack.",
+  assistant:
+    "You are the general Party on Slack assistant. Reply directly and concisely for Slack.",
   google_maps:
     "You are the Google Maps specialist. Return a concise Slack-ready answer with place, route, or map context.",
   image_generation:
