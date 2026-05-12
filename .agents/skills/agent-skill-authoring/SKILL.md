@@ -18,14 +18,14 @@ Keep the trigger description precise, keep the main instructions short, and move
    - Write a description that states both what the skill does and when it should trigger.
    - Keep the folder name identical to the skill name.
 3. Scaffold the skill under `.agents/skills/`.
-   - Run `scripts/init_codex_skill.py` to create a new local Codex skill skeleton.
+   - Run `vp exec tsx scripts/init_codex_skill.ts` to create a new local Codex skill skeleton.
    - Create only the directories the skill actually needs.
 4. Keep `SKILL.md` lean.
    - Put the workflow, guardrails, and repository-specific decisions in `SKILL.md`.
    - Move long examples, checklists, and domain detail into `references/`.
    - Add scripts only when the same code would otherwise be rewritten repeatedly.
 5. Validate after editing.
-   - Run `scripts/validate_codex_skill.py <skill>` to check the folder layout and frontmatter.
+   - Run `vp exec tsx scripts/validate_codex_skill.ts <skill>` to check the folder layout and frontmatter.
    - Forward-test the skill on a realistic task if the workflow is non-trivial.
 
 ## References

@@ -42,7 +42,7 @@ Do not use `npm`, `pnpm`, `yarn`, or `bun` directly for normal project workflows
 - `terraform/`: infrastructure code, separated from application code
 - `docs/`: design notes, migration plans, and operational documentation
 
-Retained `.agents/skills/*/scripts/*.py` files are Codex development helper scripts, not application runtime or deployment artifacts.
+Repository-local Codex skills under `.agents/skills/` use TypeScript helper scripts when helpers are needed. They are not application runtime or deployment artifacts.
 
 ## Architecture Boundaries
 

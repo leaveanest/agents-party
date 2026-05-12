@@ -53,7 +53,7 @@ The replacement was split into child issues so each boundary could be reviewed a
 
 The cutover is destructive at the application-runtime level. After OSA-16, rollback means restoring an older deployment artifact and validating database compatibility or restoring a database backup. The repository does not retain a Python service, Python dependency workflow, or Python test suite for the removed application.
 
-Retained `.agents/skills/*/scripts/*.py` files are Codex development helper scripts only. They are not application runtime, deployment, package, or test paths.
+Repository-local Codex skill helpers under `.agents/skills/` use TypeScript when helpers are needed. They are not application runtime, deployment, package, or test paths.
 
 ## Validation Policy
 

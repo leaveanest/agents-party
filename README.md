@@ -28,7 +28,7 @@ See [`docs/provider-router.md`](docs/provider-router.md) for the routing and cap
 
 Agent routing through `app_mention`, active thread follow-up auto-routing, flag-reaction translation commands, native specialist runtimes, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, encrypted token persistence, Salesforce token refresh, and Salesforce revoke-backed disconnect are available in the TypeScript runtime. Full App Home settings and native provider adapters for Bedrock/Dify/provider-specific features remain planned work.
 
-The Python application runtime has been removed. Retained `.agents/skills/*/scripts/*.py` files are Codex development helper scripts only and are not used by the app, tests, deploy, or package workflow.
+The Python application runtime has been removed. Repository-local Codex development helpers under `.agents/skills/` use the TypeScript toolchain and are not part of the app, tests, deploy, or package workflow.
 
 ## Specialist Runtimes
 
