@@ -316,4 +316,74 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         on workspace_credentials (team_id, provider_kind);
     `,
   },
+  {
+    id: "20260512_0006",
+    name: "rss_feed_batch_processing",
+    upSql: `
+      create table if not exists rss_feed_subscriptions (
+        id uuid primary key,
+        team_id text not null,
+        channel_id text not null,
+        feed_url text not null,
+        enabled boolean not null default true,
+        last_seen_published_at timestamp with time zone,
+        last_processed_at timestamp with time zone,
+        payload jsonb not null default '{}'::jsonb,
+        created_at timestamp with time zone not null,
+        updated_at timestamp with time zone not null,
+        unique (team_id, channel_id, feed_url)
+      );
+      create index if not exists ix_rss_feed_subscriptions_enabled
+        on rss_feed_subscriptions (enabled, team_id, channel_id);
+      create index if not exists ix_rss_feed_subscriptions_feed_url
+        on rss_feed_subscriptions (feed_url);
+
+      create table if not exists rss_feed_fetch_cache (
+        feed_url text primary key,
+        etag text,
+        last_modified text,
+        body text,
+        status integer,
+        fetched_at timestamp with time zone not null,
+        expires_at timestamp with time zone not null,
+        error_count integer not null default 0,
+        last_error text
+      );
+      create index if not exists ix_rss_feed_fetch_cache_expires_at
+        on rss_feed_fetch_cache (expires_at);
+
+      create table if not exists rss_article_content_cache (
+        article_url text primary key,
+        content text,
+        content_hash text,
+        fetched_at timestamp with time zone not null,
+        expires_at timestamp with time zone not null,
+        fetch_failed_at timestamp with time zone,
+        error_count integer not null default 0,
+        last_error text
+      );
+      create index if not exists ix_rss_article_content_cache_expires_at
+        on rss_article_content_cache (expires_at);
+
+      create table if not exists rss_processed_articles (
+        id uuid primary key,
+        subscription_id uuid not null references rss_feed_subscriptions(id),
+        article_key text not null,
+        article_url text not null,
+        published_at timestamp with time zone,
+        model_id text,
+        model_source text,
+        llm_output text,
+        slack_channel_id text not null,
+        slack_message_ts text,
+        processed_at timestamp with time zone not null,
+        payload jsonb not null default '{}'::jsonb,
+        unique (subscription_id, article_key)
+      );
+      create index if not exists ix_rss_processed_articles_subscription
+        on rss_processed_articles (subscription_id, processed_at desc);
+      create index if not exists ix_rss_processed_articles_article_url
+        on rss_processed_articles (article_url);
+    `,
+  },
 ];
