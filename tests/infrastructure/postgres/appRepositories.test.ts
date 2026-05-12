@@ -12,6 +12,7 @@ describe("Postgres app repositories", () => {
 
     await new PostgresAgentRoutingRepository(pool as never).saveWorkspaceSettings({
       defaultAgentId: "triage",
+      defaultModelId: "google:gemini-2.5-flash",
       payload: { defaultAgentId: "triage" },
       teamId: "T1",
       threadAutoReply: true,
@@ -41,6 +42,56 @@ describe("Postgres app repositories", () => {
       expect.stringContaining('insert into "google_oauth_states"'),
       expect.stringContaining('insert into "work_item_attention_index"'),
     ]);
+    expect(JSON.parse(String(pool.queries[0]?.values?.at(-1)))).toMatchObject({
+      default_agent_id: "triage",
+      default_model_id: "google:gemini-2.5-flash",
+      thread_auto_reply: true,
+    });
+  });
+
+  it("removes stale routing fields from persisted payloads when values are cleared", async () => {
+    const pool = new RecordingPool();
+    const repository = new PostgresAgentRoutingRepository(pool as never);
+
+    await repository.saveWorkspaceSettings({
+      payload: {
+        default_agent_id: "old-agent",
+        default_model_id: "old-model",
+        thread_auto_reply: true,
+        untouched: "keep",
+      },
+      teamId: "T1",
+      updatedAt: new Date("2026-05-11T00:00:00Z"),
+    });
+    await repository.saveSlackThread({
+      channelId: "C1",
+      createdAt: new Date("2026-05-11T00:00:00Z"),
+      payload: {
+        agent_id: "old-agent",
+        model_id: "old-model",
+        untouched: "keep",
+      },
+      rootMessageTs: "1.0",
+      status: "active",
+      teamId: "T1",
+      threadTs: "1.0",
+      updatedAt: new Date("2026-05-11T00:00:00Z"),
+    });
+
+    expect(JSON.parse(String(pool.queries[0]?.values?.at(-1)))).toEqual({
+      untouched: "keep",
+      updated_at: "2026-05-11T00:00:00.000Z",
+    });
+    expect(JSON.parse(String(pool.queries[1]?.values?.at(-1)))).toEqual({
+      channel_id: "C1",
+      created_at: "2026-05-11T00:00:00.000Z",
+      root_message_ts: "1.0",
+      status: "active",
+      team_id: "T1",
+      thread_ts: "1.0",
+      untouched: "keep",
+      updated_at: "2026-05-11T00:00:00.000Z",
+    });
   });
 
   it("reads OAuth connections, auth configs, and work-item aggregates", async () => {
@@ -108,6 +159,178 @@ describe("Postgres app repositories", () => {
 
     expect(agentPool.queries.map((query) => query.text)).toEqual(
       expect.arrayContaining(["begin", expect.stringContaining('insert into "agents"'), "commit"]),
+    );
+  });
+
+  it("normalizes saved agent enabled state into payloads used by routing", async () => {
+    const pool = new RecordingPool();
+
+    await new PostgresAgentRoutingRepository(pool as never).saveAgent({
+      agentId: "assistant",
+      enabled: false,
+      payload: { enabled: true, untouched: "keep" },
+      updatedAt: new Date("2026-05-11T00:00:00Z"),
+    });
+
+    expect(JSON.parse(String(pool.queries[0]?.values?.at(-1)))).toMatchObject({
+      agent_id: "assistant",
+      enabled: false,
+      untouched: "keep",
+      updated_at: "2026-05-11T00:00:00.000Z",
+    });
+  });
+
+  it("does not resolve disabled agents when routing payload omits column data", async () => {
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: {} },
+          { payload: { default_agent_id: "assistant" } },
+          { payload: {} },
+          { payload: {} },
+          { agent_id: "assistant", enabled: false, payload: { agent_id: "assistant" } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("resolves configured agents and models from thread, channel, and workspace settings", async () => {
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: { enabled_channel_ids: ["C1"] } },
+          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
+          { payload: { default_agent_id: "channel", default_model_id: "channel-model" } },
+          {
+            payload: {
+              agent_id: "thread",
+              model_id: "thread-model",
+              model_scope: "thread",
+              status: "active",
+            },
+          },
+          { payload: { agent_id: "thread", enabled: true } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        agentId: "thread",
+        modelId: "thread-model",
+        modelScope: "thread",
+        scope: "thread",
+      }),
+    );
+
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: {} },
+          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
+          { payload: { default_agent_id: "channel", default_model_id: "channel-model" } },
+          { payload: {} },
+          { payload: { agent_id: "channel", enabled: true } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        agentId: "channel",
+        modelId: "channel-model",
+        modelScope: "channel",
+        scope: "channel",
+      }),
+    );
+
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: {} },
+          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
+          { payload: {} },
+          { payload: {} },
+          { payload: { agent_id: "workspace", enabled: true } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        agentId: "workspace",
+        modelId: "workspace-model",
+        modelScope: "workspace",
+        scope: "workspace",
+      }),
+    );
+  });
+
+  it("ignores unscoped stale thread model ids when resolving configured models", async () => {
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: {} },
+          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
+          { payload: { default_model_id: "channel-model" } },
+          { payload: { agent_id: "workspace", model_id: "stale-thread-model" } },
+          { payload: { agent_id: "workspace", enabled: true } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        modelId: "channel-model",
+        modelScope: "channel",
+        scope: "workspace",
+      }),
+    );
+  });
+
+  it("ignores blank higher-precedence model ids when resolving configured models", async () => {
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: {} },
+          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
+          { payload: { default_model_id: "  " } },
+          {
+            payload: {
+              agent_id: "workspace",
+              model_id: "",
+              model_scope: "thread",
+              status: "active",
+            },
+          },
+          { payload: { agent_id: "workspace", enabled: true } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        modelId: "workspace-model",
+        modelScope: "workspace",
+      }),
+    );
+  });
+
+  it("ignores inactive thread agent and model routes", async () => {
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: {} },
+          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
+          { payload: { default_agent_id: "channel", default_model_id: "channel-model" } },
+          {
+            payload: {
+              agent_id: "thread",
+              model_id: "thread-model",
+              model_scope: "thread",
+              status: "closed",
+            },
+          },
+          { payload: { agent_id: "channel", enabled: true } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        agentId: "channel",
+        modelId: "channel-model",
+        modelScope: "channel",
+        scope: "channel",
+      }),
     );
   });
 
@@ -353,7 +576,7 @@ class RecordingPool {
   readonly queries: Array<{ text: string; values?: unknown[] }> = [];
 
   constructor(
-    private readonly rows: Array<{ payload: unknown } | Array<{ payload: unknown }>> = [],
+    private readonly rows: Array<Record<string, unknown> | Array<Record<string, unknown>>> = [],
   ) {}
 
   async connect() {

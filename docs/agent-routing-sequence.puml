@@ -15,15 +15,17 @@ box "Heroku"
   participant "Slack Events Endpoint\nPOST /slack/events" as slack_events_endpoint
   participant "Mention Handler" as mention_handler
   participant "Message Handler" as message_handler
-  participant "Agent Routing" as agent_routing
-  participant "Agent Router" as agent_router
-  participant "Text Specialist(s)" as text_specialists
-  participant "Media Specialist" as media_specialist
-  database "PostgreSQL\nworkspace/channel settings\nslack_threads" as pg_threads
+  participant "Routing Resolver" as routing_resolver
+  participant "AgentRunner" as agent_runner
+  participant "Selected Agent Runtime" as agent_runtime
+  participant "Specialist Runtime\n(optional)" as specialist_runtime
+  participant "ProviderRouter" as provider_router
+  database "PostgreSQL\nworkspace/channel/thread settings\nagents" as pg_routes
 end box
 
-participant "LLM Provider\nVertex AI / Heroku Inference" as llm_provider
+participant "LLM Provider" as llm_provider
 participant "Google Maps Platform" as google_maps
+participant "Google GenAI Media API" as media_api
 
 slack_user -> slack : Post in channel or thread
 
@@ -31,83 +33,81 @@ alt Explicit app mention
   slack -> slack_events_endpoint : app_mention event
   slack_events_endpoint -> mention_handler : Pass event payload
   mention_handler -> mention_handler : Normalize invocation
-  alt Mention has no prompt text
-    mention_handler -> slack : Post thread menu / usage help
-    slack --> slack_user : Show menu blocks
-  else Mention has prompt text
-    mention_handler -> agent_routing : Route request
-  end
+  mention_handler -> routing_resolver : Resolve route for new or existing thread
 else Message event
   slack -> slack_events_endpoint : message event
   slack_events_endpoint -> message_handler : Pass event payload
-  alt Message starts with bot mention
-    message_handler -> mention_handler : Reuse mention flow
-  else Plain follow-up message
-    message_handler -> pg_threads : Read stored thread state
-    pg_threads --> message_handler : active agent_id and status
-    message_handler -> pg_threads : Read auto-reply / channel enablement settings
-    alt Active assistant thread and auto-reply enabled
-      message_handler -> agent_routing : Continue routed conversation
-    else Ignore message
-      message_handler --> slack : No response
-    end
+  message_handler -> routing_resolver : Resolve active thread route
+  routing_resolver -> pg_routes : Read thread state and channel policy
+  pg_routes --> routing_resolver : active agent/model and auto-reply policy
+  alt Thread inactive or auto-reply disabled
+    routing_resolver --> message_handler : No route
+    message_handler --> slack : No response
   end
 end
 
-agent_routing -> pg_threads : Check channel enablement and thread route
-agent_routing -> slack_api : Fetch full thread history
-slack_api --> agent_routing : Root message + thread transcript
-agent_routing -> agent_router : Build Slack invocation with full context
-agent_router -> llm_provider : Decide direct reply or delegation
+routing_resolver -> pg_routes : Resolve agent and model
+note right
+Precedence:
+1. thread
+2. channel
+3. workspace
+4. explicit app fallback
+end note
+pg_routes --> routing_resolver : effective agent, model, scope
+routing_resolver -> slack_api : Fetch thread history when needed
+slack_api --> routing_resolver : Thread transcript and attachment context
+routing_resolver -> agent_runner : Run resolved agent with resolved model
 
-alt Direct reply
-  llm_provider --> agent_router : Slack-ready response
-  agent_router --> agent_routing : Final text
-else One or more text specialists
-  loop zero or more text specialists
-    agent_router -> text_specialists : Delegate specialist call
-    text_specialists -> llm_provider : Specialist reasoning
-    opt Maps specialist
-      text_specialists -> google_maps : Places / Routes lookup
-      google_maps --> text_specialists : Structured maps data
-    end
-    llm_provider --> text_specialists : Specialist result
-    text_specialists --> agent_router : Normalized outcome
+agent_runner -> agent_runtime : Execute selected agent
+
+alt Generic text agent
+  agent_runtime -> provider_router : Generate with resolved model
+  provider_router -> llm_provider : Invoke provider adapter
+  llm_provider --> provider_router : LLM result
+  provider_router --> agent_runtime : Normalized result
+else Agent uses internal specialist
+  agent_runtime -> specialist_runtime : Call specialist
+  alt Web research
+    specialist_runtime -> provider_router : Generate with web_search capability
+    provider_router -> llm_provider : Native/search-capable invocation
+    llm_provider --> provider_router : Answer with sources
+  else Maps
+    specialist_runtime -> google_maps : Places / Routes lookup
+    google_maps --> specialist_runtime : Structured maps data
+  else Image or video
+    specialist_runtime -> media_api : Generate media or operation
+    media_api --> specialist_runtime : Bytes, URI, or operation name
   end
-  agent_router -> llm_provider : Synthesize final answer
-  llm_provider --> agent_router : Slack-ready response
-  agent_router --> agent_routing : Final text
-else Media specialist
-  agent_router -> media_specialist : Delegate image or video request
-  media_specialist -> llm_provider : Generate media payload
-  llm_provider --> media_specialist : Binary image or video
-  media_specialist --> agent_router : Media outcome
-  agent_router --> agent_routing : Uploadable media + optional comment
+  specialist_runtime --> agent_runtime : Structured specialist result
 end
+
+agent_runtime --> agent_runner : Slack-ready result
+agent_runner --> routing_resolver : Text or generated media
 
 alt Text response
-  agent_routing -> pg_threads : Persist active agent_id=`assistant`
-  agent_routing -> slack : Post reply in thread
+  routing_resolver -> pg_routes : Persist active thread route
+  routing_resolver -> slack : Post reply in thread
 else Media response
-  agent_routing -> slack : Upload generated file to thread
-  agent_routing -> pg_threads : Persist active agent_id=`assistant`
+  routing_resolver -> slack : Upload file or post provider handoff
+  routing_resolver -> pg_routes : Persist active thread route
 end
 slack --> slack_user : Show assistant result
 
-note right of agent_router
-The router may combine multiple text specialists in one run.
-At most one media specialist can run, and it must be last.
+note right of routing_resolver
+Top-level routing is configuration-driven.
+The user message does not select the primary agent by keyword.
 end note
 
-note over agent_routing, slack_api
-Before execution, the routing layer always loads the full Slack thread.
-Recent thread images may also be downloaded and passed through for image generation.
+note over agent_runner, provider_router
+ProviderRouter enforces model registry and capability checks.
+It does not infer providers from model name strings.
 end note
 
 note over message_handler
 Follow-up auto-replies run only when:
 - the message is user-authored text
-- the thread is marked active in PostgreSQL
+- the thread has an active route in PostgreSQL
 - channel auto-reply remains enabled
 end note
 

@@ -5,6 +5,7 @@ import {
   type AgentRunner,
   type AgentRunnerResult,
 } from "../agents/runner.js";
+import { agentSpecialistSchema, type AgentSpecialist } from "../agents/schemas.js";
 import type { JsonValue } from "../domain/messageHistory.js";
 import {
   salesforceAuthConfigSchema,
@@ -16,11 +17,20 @@ import type { SlackEventFeatureHandlers } from "./events.js";
 type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & AllMiddlewareArgs;
 type SlackClient = SlackEventArgs<"app_mention">["client"];
 
+export type SlackResolvedAgentRoute = {
+  agent: JsonObject;
+  agentId: string;
+  modelId?: string;
+  modelScope?: string;
+  scope: string;
+};
+
 export type SlackAgentRoutingRepository = {
   activateThreadAgent(input: {
     agentId: string;
     channelId: string;
     lastMessageTs: string;
+    modelId?: string;
     rootMessageTs: string;
     teamId: string;
     threadTs: string;
@@ -32,6 +42,11 @@ export type SlackAgentRoutingRepository = {
   ): Promise<JsonObject | undefined>;
   isChannelEnabled(teamId: string, channelId: string): Promise<boolean>;
   isThreadAutoReplyEnabled(teamId: string, channelId: string): Promise<boolean>;
+  resolveAgent?(input: {
+    channelId: string;
+    teamId: string;
+    threadTs?: string;
+  }): Promise<SlackResolvedAgentRoute | undefined>;
 };
 
 export type SalesforceConnectionHomeRepository = {
@@ -204,9 +219,41 @@ async function handleMention(
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
+    if (
+      options.routingRepository !== undefined &&
+      !(await options.routingRepository.isChannelEnabled(teamId, event.channel))
+    ) {
+      return;
+    }
+    const route = await resolveSlackAgentRoute(options.routingRepository, {
+      channelId: event.channel,
+      teamId,
+      threadTs,
+    });
+    if (options.routingRepository?.resolveAgent !== undefined && route === undefined) {
+      text = "No agent is configured for this channel or workspace.";
+      await client.chat.postMessage({
+        channel: event.channel,
+        text,
+        thread_ts: threadTs,
+      });
+      return;
+    }
+    const routedSpecialist = specialistFromRoute(route);
+    if (route !== undefined && routedSpecialist === undefined) {
+      text = "The configured agent is not runnable. Please check the agent settings.";
+      await client.chat.postMessage({
+        channel: event.channel,
+        text,
+        thread_ts: threadTs,
+      });
+      return;
+    }
     const result = await runner.run({
       channelId: event.channel,
       messageTs: event.ts,
+      modelId: route?.modelId,
+      specialist: routedSpecialist,
       teamId,
       text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
       threadTs,
@@ -226,9 +273,10 @@ async function handleMention(
     if (options.routingRepository !== undefined) {
       try {
         await options.routingRepository.activateThreadAgent({
-          agentId: result.decision.specialist,
+          agentId: route?.agentId ?? result.decision.specialist,
           channelId: event.channel,
           lastMessageTs: event.ts,
+          modelId: threadScopedModelId(route),
           rootMessageTs: threadTs,
           teamId,
           threadTs,
@@ -299,10 +347,24 @@ async function handleMessage(
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
-    const specialist = stringField(thread, "agent_id");
+    const route = await resolveSlackAgentRoute(options.routingRepository, {
+      channelId: event.channel,
+      teamId,
+      threadTs,
+    });
+    if (options.routingRepository.resolveAgent !== undefined && route === undefined) {
+      return;
+    }
+    const routedSpecialist = specialistFromRoute(route);
+    if (route !== undefined && routedSpecialist === undefined) {
+      return;
+    }
+    const specialist = routedSpecialist ?? stringField(thread, "agent_id");
+    const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
     const result = await runner.run({
       channelId: event.channel,
       messageTs: event.ts,
+      modelId,
       specialist,
       teamId,
       text: readString(event, "text") ?? "",
@@ -323,9 +385,10 @@ async function handleMessage(
     });
     try {
       await options.routingRepository.activateThreadAgent({
-        agentId: result.decision.specialist,
+        agentId: route?.agentId ?? result.decision.specialist,
         channelId: event.channel,
         lastMessageTs: event.ts,
+        modelId: route === undefined ? stringField(thread, "model_id") : threadScopedModelId(route),
         rootMessageTs: stringField(thread, "root_message_ts") ?? threadTs,
         teamId,
         threadTs,
@@ -396,20 +459,33 @@ async function handleReactionAdded(
       threadTs,
     });
   }
-  if (sourceText === undefined || sourceText.trim() === "") {
-    await client.chat.postMessage({
-      channel: channelId,
-      text: "I couldn't read text from the reacted message.",
-      thread_ts: threadTs,
-    });
-    return;
-  }
 
   let text: string;
   try {
+    const route = await resolveSlackAgentRoute(options.routingRepository, {
+      channelId,
+      teamId,
+      threadTs,
+    });
+    if (options.routingRepository.resolveAgent !== undefined && route === undefined) {
+      return;
+    }
+    const routedSpecialist = specialistFromRoute(route);
+    if (route !== undefined && routedSpecialist !== "translation") {
+      return;
+    }
+    if (sourceText === undefined || sourceText.trim() === "") {
+      await client.chat.postMessage({
+        channel: channelId,
+        text: "I couldn't read text from the reacted message.",
+        thread_ts: threadTs,
+      });
+      return;
+    }
     const result = await runner.run({
       channelId,
       messageTs,
+      modelId: route?.modelId,
       specialist: "translation",
       teamId,
       text: `Translate the following Slack message to ${targetLanguage}:\n\n${sourceText}`,
@@ -656,6 +732,32 @@ function isActiveThread(thread: JsonObject | undefined): boolean {
     stringField(thread, "status") === "active" &&
     stringField(thread, "agent_id") !== undefined
   );
+}
+
+async function resolveSlackAgentRoute(
+  repository: SlackAgentRoutingRepository | undefined,
+  input: {
+    channelId: string;
+    teamId: string;
+    threadTs?: string;
+  },
+): Promise<SlackResolvedAgentRoute | undefined> {
+  return repository?.resolveAgent?.(input);
+}
+
+function specialistFromRoute(
+  route: SlackResolvedAgentRoute | undefined,
+): AgentSpecialist | undefined {
+  if (route === undefined) {
+    return undefined;
+  }
+  const candidate = stringField(route.agent, "specialist") ?? route.agentId;
+  const parsed = agentSpecialistSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function threadScopedModelId(route: SlackResolvedAgentRoute | undefined): string | undefined {
+  return route?.modelScope === "thread" ? route.modelId : undefined;
 }
 
 function stringField(value: JsonObject | undefined, field: string): string | undefined {
