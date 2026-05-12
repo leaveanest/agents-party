@@ -63,6 +63,7 @@ const slackGateway = settings.slackEnabled
                 repository: oauthRepository,
               }
             : undefined,
+        workspaceCredentialSettings: workspaceCredentialResolver,
       }),
     })
   : undefined;

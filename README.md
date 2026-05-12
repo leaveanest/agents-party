@@ -156,7 +156,7 @@ VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 LLM_API_KEY_ENCRYPTION_KEY=...
 ```
 
-When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Without that resolver, local development can still use process-level provider environment variables supported by the AI SDK provider packages. Do not rely on process-level API keys for multi-workspace production traffic.
+When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Without that resolver, local development can still use process-level provider environment variables supported by the AI SDK provider packages. Do not rely on process-level API keys for multi-workspace production traffic.
 
 ### Local database
 

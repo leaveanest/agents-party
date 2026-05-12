@@ -1,4 +1,10 @@
-import type { AllMiddlewareArgs, SlackEventMiddlewareArgs, StringIndexed } from "@slack/bolt";
+import type {
+  AllMiddlewareArgs,
+  SlackActionMiddlewareArgs,
+  SlackEventMiddlewareArgs,
+  SlackViewMiddlewareArgs,
+  StringIndexed,
+} from "@slack/bolt";
 
 import {
   AgentRunnerExecutionError,
@@ -6,15 +12,57 @@ import {
   type AgentRunnerResult,
 } from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
+import type { CredentialProviderKind } from "../providers/credentials.js";
 import {
   salesforceAuthConfigSchema,
   salesforceConnectionSchema,
 } from "../integrations/oauth/domain.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
+import {
+  WORKSPACE_CREDENTIAL_BASE_URL_ACTION_ID,
+  WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID,
+  WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
+  WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
+  WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
+  WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
+  WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
+  WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
+} from "./interactiveIds.js";
 
 type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & AllMiddlewareArgs;
+type SlackActionArgs = SlackActionMiddlewareArgs & AllMiddlewareArgs;
+type SlackViewArgs = SlackViewMiddlewareArgs & AllMiddlewareArgs;
 type SlackClient = SlackEventArgs<"app_mention">["client"];
+
+const workspaceCredentialProviderKinds = [
+  "openai",
+  "azure_openai",
+  "anthropic",
+  "google",
+  "google_maps",
+  "groq",
+  "xai",
+  "plamo",
+  "nvidia",
+  "litellm",
+] as const satisfies readonly CredentialProviderKind[];
+
+const workspaceCredentialProviderOptions = [
+  { text: { text: "OpenAI", type: "plain_text" }, value: "openai" },
+  { text: { text: "Azure OpenAI", type: "plain_text" }, value: "azure_openai" },
+  { text: { text: "Anthropic", type: "plain_text" }, value: "anthropic" },
+  { text: { text: "Google", type: "plain_text" }, value: "google" },
+  { text: { text: "Google Maps", type: "plain_text" }, value: "google_maps" },
+  { text: { text: "Groq", type: "plain_text" }, value: "groq" },
+  { text: { text: "xAI", type: "plain_text" }, value: "xai" },
+  { text: { text: "PLaMo", type: "plain_text" }, value: "plamo" },
+  { text: { text: "NVIDIA", type: "plain_text" }, value: "nvidia" },
+  { text: { text: "LiteLLM", type: "plain_text" }, value: "litellm" },
+] as const satisfies readonly {
+  text: { text: string; type: "plain_text" };
+  value: CredentialProviderKind;
+}[];
 
 export type SlackAgentRoutingRepository = {
   activateThreadAgent(input: {
@@ -49,9 +97,20 @@ export type SalesforceConnectionHome = {
   repository: SalesforceConnectionHomeRepository;
 };
 
+export type WorkspaceCredentialSettingsHome = {
+  saveProviderApiKey(input: {
+    createdByUserId?: string;
+    payload?: JsonObject;
+    providerKind: CredentialProviderKind;
+    secret: string;
+    teamId: string;
+  }): Promise<void>;
+};
+
 export type AgentSlackHandlerOptions = {
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
+  workspaceCredentialSettings?: WorkspaceCredentialSettingsHome;
 };
 
 export function createAgentSlackHandlers(
@@ -88,6 +147,12 @@ export function createAgentSlackHandlers(
     async handleReactionAdded(args) {
       await handleReactionAdded(args, runner, options);
     },
+    async handleWorkspaceCredentialConfigureAction(args) {
+      await handleWorkspaceCredentialConfigureAction(args, options);
+    },
+    async handleWorkspaceCredentialModalSubmission(args) {
+      await handleWorkspaceCredentialModalSubmission(args, options);
+    },
   };
 }
 
@@ -110,6 +175,25 @@ async function buildAppHomeBlocks(input: {
       type: "section",
     },
   ];
+  if (input.options.workspaceCredentialSettings !== undefined && input.teamId !== undefined) {
+    blocks.push({ type: "divider" });
+    blocks.push({
+      text: { text: "API keys", type: "plain_text" },
+      type: "header",
+    });
+    blocks.push({
+      accessory: {
+        action_id: WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
+        text: { text: "Configure", type: "plain_text" },
+        type: "button",
+      },
+      text: {
+        text: "Store workspace provider API keys for this Slack workspace.",
+        type: "mrkdwn",
+      },
+      type: "section",
+    });
+  }
   if (input.options.salesforceConnectionHome === undefined || input.teamId === undefined) {
     return blocks;
   }
@@ -179,6 +263,131 @@ function salesforceStatusText(status: string, accountLabel: string | undefined):
     return "Connection needs attention";
   }
   return "Not connected";
+}
+
+async function handleWorkspaceCredentialConfigureAction(
+  { ack, body, client, logger }: SlackActionArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  await ack();
+  const teamId = readTeamId(body, {});
+  const slackUserId = readSlackUserId(body);
+  const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
+  if (teamId === undefined || slackUserId === undefined || triggerId === undefined) {
+    logger.warn("Ignoring API key configuration action with missing Slack context.");
+    return;
+  }
+  if (options.workspaceCredentialSettings === undefined) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildWorkspaceCredentialUnavailableModal() as never,
+    });
+    return;
+  }
+  await client.views.open({
+    trigger_id: triggerId,
+    view: buildWorkspaceCredentialModal(teamId) as never,
+  });
+}
+
+async function handleWorkspaceCredentialModalSubmission(
+  { ack, body, client, logger, view }: SlackViewArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  const metadataTeamId = readString(view as unknown as StringIndexed, "private_metadata");
+  const bodyTeamId = readTeamId(body, {});
+  const teamId = bodyTeamId ?? metadataTeamId;
+  const slackUserId = readSlackUserId(body);
+  if (options.workspaceCredentialSettings === undefined) {
+    await ack({
+      errors: {
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: "API key storage is not configured.",
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  if (metadataTeamId !== undefined && bodyTeamId !== undefined && metadataTeamId !== bodyTeamId) {
+    await ack({
+      errors: {
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: "Slack workspace context does not match.",
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  if (teamId === undefined || slackUserId === undefined) {
+    await ack({
+      errors: {
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: "Slack workspace context is missing.",
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  const parsed = parseWorkspaceCredentialModal(view);
+  if ("errors" in parsed) {
+    await ack({
+      errors: parsed.errors,
+      response_action: "errors",
+    });
+    return;
+  }
+
+  await ack({
+    response_action: "update",
+    view: buildWorkspaceCredentialSavingModal() as never,
+  });
+
+  try {
+    if (!(await isWorkspaceAdmin(client, slackUserId, logger))) {
+      await updateWorkspaceCredentialModal(
+        client,
+        view,
+        buildWorkspaceCredentialResultModal(
+          "API key",
+          "Only Slack workspace admins and owners can configure API keys.",
+        ),
+        logger,
+      );
+      return;
+    }
+    await options.workspaceCredentialSettings.saveProviderApiKey({
+      createdByUserId: slackUserId,
+      payload: {
+        ...(parsed.baseURL === undefined ? {} : { base_url: parsed.baseURL }),
+        source: "slack_app_home",
+      },
+      providerKind: parsed.providerKind,
+      secret: parsed.apiKey,
+      teamId,
+    });
+    logInfo(logger, "Saved workspace provider API key from Slack modal.", {
+      providerKind: parsed.providerKind,
+      teamId,
+    });
+    await updateWorkspaceCredentialModal(
+      client,
+      view,
+      buildWorkspaceCredentialResultModal("API key saved", "The workspace API key was saved."),
+      logger,
+    );
+  } catch (error) {
+    logger.error("Failed to save workspace provider API key from Slack modal.", {
+      error,
+      providerKind: parsed.providerKind,
+      teamId,
+    });
+    await updateWorkspaceCredentialModal(
+      client,
+      view,
+      buildWorkspaceCredentialResultModal(
+        "API key",
+        "Could not save this API key. Try again later.",
+      ),
+      logger,
+    );
+  }
 }
 
 async function handleMention(
@@ -444,8 +653,19 @@ async function handleReactionAdded(
 }
 
 function readTeamId(body: unknown, event: StringIndexed): string | undefined {
-  if (isRecord(body) && typeof body.team_id === "string") {
-    return body.team_id;
+  if (isRecord(body)) {
+    if (typeof body.team_id === "string") {
+      return body.team_id;
+    }
+    if (typeof body.team === "string") {
+      return body.team;
+    }
+    if (isRecord(body.team) && typeof body.team.id === "string") {
+      return body.team.id;
+    }
+    if (isRecord(body.user) && typeof body.user.team_id === "string") {
+      return body.user.team_id;
+    }
   }
   return readString(event, "team");
 }
@@ -562,6 +782,12 @@ function logInfo(logger: unknown, message: string, metadata: Record<string, unkn
   }
 }
 
+function logWarn(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.warn === "function") {
+    logger.warn(message, metadata);
+  }
+}
+
 function runnerFailureLogFields(error: unknown): Record<string, unknown> {
   if (!(error instanceof AgentRunnerExecutionError)) {
     return {};
@@ -637,6 +863,238 @@ async function fetchSingleMessage(
     throw new Error("Slack history response did not contain a message.");
   }
   return message;
+}
+
+function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> {
+  return {
+    callback_id: WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
+    private_metadata: teamId,
+    submit: { text: "Save", type: "plain_text" },
+    title: { text: "API key", type: "plain_text" },
+    type: "modal",
+    blocks: [
+      {
+        block_id: WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
+        element: {
+          action_id: WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
+          initial_option: workspaceCredentialProviderOptions[0],
+          options: workspaceCredentialProviderOptions,
+          type: "static_select",
+        },
+        label: { text: "Provider", type: "plain_text" },
+        type: "input",
+      },
+      {
+        block_id: WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
+        element: {
+          action_id: WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
+          type: "plain_text_input",
+        },
+        label: { text: "API key", type: "plain_text" },
+        type: "input",
+      },
+      {
+        block_id: WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID,
+        element: {
+          action_id: WORKSPACE_CREDENTIAL_BASE_URL_ACTION_ID,
+          placeholder: { text: "https://proxy.example/v1", type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "Base URL", type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
+    ],
+  };
+}
+
+function buildWorkspaceCredentialSavingModal(): Record<string, unknown> {
+  return buildWorkspaceCredentialResultModal("API key", "Saving API key...");
+}
+
+function buildWorkspaceCredentialResultModal(title: string, text: string): Record<string, unknown> {
+  return {
+    close: { text: "Close", type: "plain_text" },
+    title: { text: title, type: "plain_text" },
+    type: "modal",
+    blocks: [
+      {
+        text: {
+          text,
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+    ],
+  };
+}
+
+function buildWorkspaceCredentialUnavailableModal(): Record<string, unknown> {
+  return {
+    close: { text: "Close", type: "plain_text" },
+    title: { text: "API key", type: "plain_text" },
+    type: "modal",
+    blocks: [
+      {
+        text: {
+          text: "API key storage is not configured for this app process.",
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+    ],
+  };
+}
+
+async function updateWorkspaceCredentialModal(
+  client: SlackClient,
+  view: unknown,
+  modal: Record<string, unknown>,
+  logger: unknown,
+): Promise<void> {
+  const viewId = readString(view as unknown as StringIndexed, "id");
+  if (viewId === undefined) {
+    logWarn(logger, "Could not update API key modal without Slack view id.", {});
+    return;
+  }
+  try {
+    await client.views.update({
+      view: modal as never,
+      view_id: viewId,
+    });
+  } catch (error) {
+    logWarn(logger, "Failed to update API key modal.", { error, viewId });
+  }
+}
+
+function parseWorkspaceCredentialModal(view: unknown):
+  | {
+      apiKey: string;
+      baseURL?: string;
+      providerKind: CredentialProviderKind;
+    }
+  | { errors: Record<string, string> } {
+  const providerValue = readSelectedOptionValue(
+    view,
+    WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
+    WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
+  );
+  const providerKind = parseCredentialProviderKind(providerValue);
+  const apiKey = readModalInputValue(
+    view,
+    WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
+    WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
+  )?.trim();
+  const baseURL = readModalInputValue(
+    view,
+    WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID,
+    WORKSPACE_CREDENTIAL_BASE_URL_ACTION_ID,
+  )?.trim();
+  const errors: Record<string, string> = {};
+  if (providerKind === undefined) {
+    errors[WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID] = "Choose a supported provider.";
+  }
+  if (apiKey === undefined || apiKey === "") {
+    errors[WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID] = "Enter an API key.";
+  }
+  if (baseURL !== undefined && baseURL !== "" && !isHttpUrl(baseURL)) {
+    errors[WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID] = "Enter a valid http or https URL.";
+  }
+  if (Object.keys(errors).length > 0) {
+    return { errors };
+  }
+  return {
+    apiKey: apiKey as string,
+    baseURL: baseURL === undefined || baseURL === "" ? undefined : baseURL,
+    providerKind: providerKind as CredentialProviderKind,
+  };
+}
+
+function parseCredentialProviderKind(
+  value: string | undefined,
+): CredentialProviderKind | undefined {
+  return workspaceCredentialProviderKinds.find((providerKind) => providerKind === value);
+}
+
+async function isWorkspaceAdmin(
+  client: SlackClient,
+  slackUserId: string,
+  logger: unknown,
+): Promise<boolean> {
+  try {
+    const response = await client.users.info({ user: slackUserId });
+    const user = response.user;
+    if (!isRecord(user)) {
+      return false;
+    }
+    return (
+      readBoolean(user, "is_admin") === true ||
+      readBoolean(user, "is_owner") === true ||
+      readBoolean(user, "is_primary_owner") === true
+    );
+  } catch (error) {
+    logWarn(logger, "Failed to verify Slack workspace admin status.", {
+      error,
+      slackUserId,
+    });
+    return false;
+  }
+}
+
+function readSlackUserId(body: unknown): string | undefined {
+  if (!isRecord(body)) {
+    return undefined;
+  }
+  if (typeof body.user === "string") {
+    return body.user;
+  }
+  if (isRecord(body.user) && typeof body.user.id === "string") {
+    return body.user.id;
+  }
+  return undefined;
+}
+
+function readModalInputValue(view: unknown, blockId: string, actionId: string): string | undefined {
+  const element = readModalElement(view, blockId, actionId);
+  return isRecord(element) && typeof element.value === "string" ? element.value : undefined;
+}
+
+function readSelectedOptionValue(
+  view: unknown,
+  blockId: string,
+  actionId: string,
+): string | undefined {
+  const element = readModalElement(view, blockId, actionId);
+  const option = isRecord(element) ? element.selected_option : undefined;
+  return isRecord(option) && typeof option.value === "string" ? option.value : undefined;
+}
+
+function readModalElement(view: unknown, blockId: string, actionId: string): unknown {
+  if (!isRecord(view)) {
+    return undefined;
+  }
+  const state = view.state;
+  if (!isRecord(state)) {
+    return undefined;
+  }
+  const values = state.values;
+  if (!isRecord(values)) {
+    return undefined;
+  }
+  const block = values[blockId];
+  if (!isRecord(block)) {
+    return undefined;
+  }
+  return block[actionId];
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function resolveTranslationLanguageFromReaction(reaction: string | undefined): string | undefined {
@@ -720,6 +1178,11 @@ function readString(value: StringIndexed, field: string): string | undefined {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function readBoolean(value: StringIndexed, field: string): boolean | undefined {
+  const fieldValue = value[field];
+  return typeof fieldValue === "boolean" ? fieldValue : undefined;
 }
 
 function hasStringField<TField extends string>(
