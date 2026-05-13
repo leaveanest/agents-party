@@ -30,6 +30,16 @@ Agent routing through `app_mention`, active thread follow-up auto-routing, flag-
 
 The Python application runtime has been removed. Repository-local Codex development helpers under `.agents/skills/` use the TypeScript toolchain and are not part of the app, tests, deploy, or package workflow.
 
+## Data Handling / External Providers
+
+`agents-party` processes Slack events, messages, and thread context so configured agents and providers can execute requested work. Slack message text, thread context, and supported attachments may be sent to the configured model provider at invocation time; media and specialist features may additionally send files, images, PDFs, or audio to configured external providers for transcription, image generation, video generation, search, or related tool execution. See [`docs/slack-typescript-ingress.md`](docs/slack-typescript-ingress.md), [`docs/message-history-model.md`](docs/message-history-model.md), and [`docs/provider-router.md`](docs/provider-router.md) for the Slack ingress, message conversion, and provider boundary.
+
+Provider-side retention, training, logging, and data handling terms depend on the selected provider, account, region, feature, and operator configuration. OSS operators should review each provider's current terms before enabling it for a workspace.
+
+In production, keep OAuth tokens and workspace provider API keys in the runtime's encrypted repository-backed stores where those flows are implemented, and inject static Slack, OAuth client, encryption, and fallback provider secrets through the deployment platform or CI secret manager. The [`Specialists`](#specialists) configuration notes describe workspace credential resolution and local fallback keys. Do not rely on process-level provider keys for multi-workspace production traffic.
+
+Terraform state can contain managed values, so it should not contain Slack secrets, OAuth secrets, provider API keys, encryption keys, or other credentials. Keep secrets outside Terraform state as described in [`Deployment`](#deployment).
+
 ## Agent And Specialist Runtimes
 
 Top-level Slack AI routing is moving toward explicit workspace, channel, and thread configuration. See [`docs/agent-model-routing.md`](docs/agent-model-routing.md) for the target policy.
