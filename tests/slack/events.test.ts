@@ -50,6 +50,8 @@ const handlers: SlackEventFeatureHandlers = {
   async handleAppMention() {},
   async handleMessage() {},
   async handleReactionAdded() {},
+  async handleSalesforcePdfWorkflowConfigureAction() {},
+  async handleSalesforcePdfWorkflowModalSubmission() {},
   async handleWorkspaceCredentialConfigureAction() {},
   async handleWorkspaceCredentialModalSubmission() {},
 };
@@ -66,8 +68,14 @@ describe("registerSlackEventHandlers", () => {
       "message",
       "reaction_added",
     ]);
-    expect([...app.actions.keys()]).toEqual(["workspace_credential_configure"]);
-    expect([...app.views.keys()]).toEqual(["workspace_credential_modal"]);
+    expect([...app.actions.keys()].sort()).toEqual([
+      "salesforce_pdf_workflow_configure",
+      "workspace_credential_configure",
+    ]);
+    expect([...app.views.keys()].sort()).toEqual([
+      "salesforce_pdf_workflow_modal",
+      "workspace_credential_modal",
+    ]);
     expect(app.middlewares).toHaveLength(1);
   });
 

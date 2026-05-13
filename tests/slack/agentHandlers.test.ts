@@ -81,6 +81,273 @@ describe("createAgentSlackHandlers", () => {
     );
   });
 
+  it("publishes Salesforce PDF workflow settings on App Home", async () => {
+    const publishedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      salesforceConnectionHome: salesforceConnectionHomeFixture(),
+      salesforcePdfWorkflowHome: {
+        repository: {
+          async findSalesforcePdfWorkflowSetting() {
+            return undefined;
+          },
+          async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
+            return [
+              {
+                action: "quote_pdf",
+                allowed_record_type_ids: [],
+                allowed_record_type_names: [],
+                allowed_stages: ["Proposal"],
+                allowed_statuses: [],
+                attach_to: "quote",
+                created_at: "2026-05-13T00:00:00.000Z",
+                enabled: true,
+                field_mapping: {},
+                required_fields: ["AccountId"],
+                require_confirmation_before_attach: true,
+                salesforce_org_id: "00DORG",
+                slack_channel_allowlist: [],
+                slack_user_group_allowlist: [],
+                team_id: "T1",
+                template_id: "quote_v1",
+                updated_at: "2026-05-13T00:00:00.000Z",
+              },
+            ];
+          },
+          async saveSalesforcePdfWorkflowSetting() {},
+        },
+      },
+    });
+
+    await handlers.handleAppHomeOpened({
+      body: { team_id: "T1" },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            publishedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { user: "U1" },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(publishedViews[0]);
+    expect(serialized).toContain("Quote PDF");
+    expect(serialized).toContain("Enabled - template: quote_v1");
+    expect(serialized).toContain("Deal Review Pack");
+    expect(serialized).toContain("salesforce_pdf_workflow_configure");
+  });
+
+  it("opens the Salesforce PDF workflow modal for Slack workspace admins", async () => {
+    const openedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      salesforcePdfWorkflowHome: {
+        repository: {
+          async findSalesforcePdfWorkflowSetting(): Promise<JsonObject> {
+            return validSalesforcePdfWorkflowSetting();
+          },
+          async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
+            return [];
+          },
+          async saveSalesforcePdfWorkflowSetting() {},
+        },
+      },
+    });
+
+    await handlers.handleSalesforcePdfWorkflowConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [{ value: JSON.stringify({ action: "quote_pdf", salesforceOrgId: "00DORG" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(openedViews).toEqual([
+      expect.objectContaining({
+        trigger_id: "TRIGGER1",
+        view: expect.objectContaining({
+          callback_id: "salesforce_pdf_workflow_modal",
+          private_metadata: JSON.stringify({
+            action: "quote_pdf",
+            salesforceOrgId: "00DORG",
+            teamId: "T1",
+          }),
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(openedViews[0])).toContain("quote_v1");
+    expect(JSON.stringify(openedViews[0])).toContain("012000000000001AAA");
+  });
+
+  it("saves Salesforce PDF workflow settings from modal submissions", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      salesforcePdfWorkflowHome: {
+        repository: {
+          async findSalesforcePdfWorkflowSetting() {
+            return undefined;
+          },
+          async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
+            return [];
+          },
+          async saveSalesforcePdfWorkflowSetting(input: unknown) {
+            saves.push(input);
+          },
+        },
+      },
+    });
+
+    await handlers.handleSalesforcePdfWorkflowModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, info() {}, warn() {} },
+      view: validSalesforcePdfWorkflowView(),
+    } as never);
+
+    expect(acks).toEqual([
+      expect.objectContaining({
+        response_action: "update",
+      }),
+    ]);
+    expect(saves).toEqual([
+      expect.objectContaining({
+        action: "quote_pdf",
+        enabled: true,
+        salesforceOrgId: "00DORG",
+        teamId: "T1",
+        templateId: "quote_v1",
+      }),
+    ]);
+    expect(saves[0]).toMatchObject({
+      payload: expect.objectContaining({
+        allowed_stages: ["Proposal", "Negotiation"],
+        field_mapping: { customerName: "Account.Name" },
+        required_fields: ["AccountId", "Amount"],
+      }),
+    });
+    expect(JSON.stringify(updates[0])).toContain("Quote PDF is enabled");
+  });
+
+  it("preserves Salesforce PDF workflow creation and enable audit fields on updates", async () => {
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      salesforcePdfWorkflowHome: {
+        repository: {
+          async findSalesforcePdfWorkflowSetting(): Promise<JsonObject> {
+            return {
+              ...validSalesforcePdfWorkflowSetting(),
+              created_at: "2026-05-01T00:00:00.000Z",
+              enabled_at: "2026-05-02T00:00:00.000Z",
+              enabled_by_slack_user_id: "UORIGINAL",
+            };
+          },
+          async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
+            return [];
+          },
+          async saveSalesforcePdfWorkflowSetting(input: unknown) {
+            saves.push(input);
+          },
+        },
+      },
+    });
+
+    await handlers.handleSalesforcePdfWorkflowModalSubmission({
+      ack: async () => undefined,
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {}, warn() {} },
+      view: validSalesforcePdfWorkflowView(),
+    } as never);
+
+    expect(saves[0]).toMatchObject({
+      payload: expect.objectContaining({
+        created_at: "2026-05-01T00:00:00.000Z",
+        enabled_at: "2026-05-02T00:00:00.000Z",
+        enabled_by_slack_user_id: "UORIGINAL",
+      }),
+    });
+  });
+
+  it("rejects Salesforce PDF workflow submissions from non-admin Slack users", async () => {
+    const saves: unknown[] = [];
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      salesforcePdfWorkflowHome: {
+        repository: {
+          async findSalesforcePdfWorkflowSetting() {
+            return undefined;
+          },
+          async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
+            return [];
+          },
+          async saveSalesforcePdfWorkflowSetting(input: unknown) {
+            saves.push(input);
+          },
+        },
+      },
+    });
+
+    await handlers.handleSalesforcePdfWorkflowModalSubmission({
+      ack: async () => undefined,
+      body: { team: { id: "T1" }, user: { id: "U1" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: false, is_owner: false } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: validSalesforcePdfWorkflowView(),
+    } as never);
+
+    expect(JSON.stringify(updates[0])).toContain(
+      "Only Slack workspace admins and owners can configure Salesforce PDF workflows.",
+    );
+    expect(saves).toEqual([]);
+  });
+
   it("publishes an App Home API key configuration entry point when credential storage is configured", async () => {
     const publishedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
@@ -1821,6 +2088,97 @@ describe("createAgentSlackHandlers", () => {
     expect(runs).toBe(0);
   });
 });
+
+function salesforceConnectionHomeFixture() {
+  return {
+    buildStartUrl(input: { salesforceOrgId: string }) {
+      return `https://app.example.com/oauth/salesforce/start?org=${input.salesforceOrgId}`;
+    },
+    repository: {
+      async listSalesforceAuthConfigs(): Promise<JsonObject[]> {
+        return [
+          {
+            default_scopes: ["api", "refresh_token"],
+            oauth_client_id: "salesforce-client",
+            redirect_uri: "https://app.example.com/oauth/salesforce/callback",
+            salesforce_my_domain_host: "example.my.salesforce.com",
+            salesforce_org_id: "00DORG",
+            salesforce_org_name: "Salesforce Production",
+            status: "active",
+            team_id: "T1",
+          },
+        ];
+      },
+      async listSalesforceConnections(): Promise<JsonObject[]> {
+        return [];
+      },
+    },
+  };
+}
+
+function validSalesforcePdfWorkflowSetting(): JsonObject {
+  return {
+    action: "quote_pdf",
+    allowed_record_type_ids: ["012000000000001AAA"],
+    allowed_record_type_names: [],
+    allowed_stages: ["Proposal"],
+    allowed_statuses: [],
+    attach_to: "quote",
+    created_at: "2026-05-13T00:00:00.000Z",
+    enabled: true,
+    field_mapping: { customerName: "Account.Name" },
+    required_fields: ["AccountId"],
+    require_confirmation_before_attach: true,
+    salesforce_org_id: "00DORG",
+    slack_channel_allowlist: [],
+    slack_user_group_allowlist: [],
+    team_id: "T1",
+    template_id: "quote_v1",
+    updated_at: "2026-05-13T00:00:00.000Z",
+  };
+}
+
+function validSalesforcePdfWorkflowView(): unknown {
+  return {
+    id: "VIEW1",
+    private_metadata: JSON.stringify({
+      action: "quote_pdf",
+      salesforceOrgId: "00DORG",
+      teamId: "T1",
+    }),
+    state: {
+      values: {
+        salesforce_pdf_workflow_allowed_stages: {
+          allowed_stages: { value: "Proposal, Negotiation" },
+        },
+        salesforce_pdf_workflow_allowed_statuses: {
+          allowed_statuses: { value: "" },
+        },
+        salesforce_pdf_workflow_attach_to: {
+          attach_to: { selected_option: { value: "quote" } },
+        },
+        salesforce_pdf_workflow_confirmation: {
+          require_confirmation: { selected_option: { value: "true" } },
+        },
+        salesforce_pdf_workflow_enabled: {
+          enabled: { selected_option: { value: "true" } },
+        },
+        salesforce_pdf_workflow_field_mapping: {
+          field_mapping: { value: '{"customerName":"Account.Name"}' },
+        },
+        salesforce_pdf_workflow_record_types: {
+          record_types: { value: "New Business" },
+        },
+        salesforce_pdf_workflow_required_fields: {
+          required_fields: { value: "AccountId, Amount" },
+        },
+        salesforce_pdf_workflow_template: {
+          template_id: { value: "quote_v1" },
+        },
+      },
+    },
+  };
+}
 
 function validWorkspaceCredentialView(teamId: string): unknown {
   return {

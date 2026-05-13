@@ -18,6 +18,15 @@ import {
   salesforceAuthConfigSchema,
   salesforceConnectionSchema,
 } from "../integrations/oauth/domain.js";
+import {
+  salesforcePdfAttachTargetSchema,
+  salesforcePdfWorkflowActionLabel,
+  salesforcePdfWorkflowActions,
+  salesforcePdfWorkflowSettingsSchema,
+  type SalesforcePdfAttachTarget,
+  type SalesforcePdfWorkflowAction,
+  type SalesforcePdfWorkflowSettings,
+} from "../domain/salesforcePdfWorkflows.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import type { TranscriptionGateway } from "../providers/transcriptionGateway.js";
 import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
@@ -29,6 +38,26 @@ import {
 import type { SlackEventFeatureHandlers } from "./events.js";
 import { readSlackEventId } from "./idempotency.js";
 import {
+  SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_ATTACH_TO_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_ATTACH_TO_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_CONFIRMATION_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_CONFIRMATION_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_ENABLED_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
+  SALESFORCE_PDF_WORKFLOW_RECORD_TYPES_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_RECORD_TYPES_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_TEMPLATE_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_TEMPLATE_BLOCK_ID,
   WORKSPACE_CREDENTIAL_BASE_URL_ACTION_ID,
   WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID,
   WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
@@ -124,6 +153,31 @@ export type SalesforceConnectionHome = {
   repository: SalesforceConnectionHomeRepository;
 };
 
+export type SalesforcePdfWorkflowRepository = {
+  findSalesforcePdfWorkflowSetting(
+    teamId: string,
+    salesforceOrgId: string,
+    action: string,
+  ): Promise<JsonObject | undefined>;
+  listSalesforcePdfWorkflowSettings(
+    teamId: string,
+    salesforceOrgId?: string,
+  ): Promise<JsonObject[]>;
+  saveSalesforcePdfWorkflowSetting(document: {
+    action: string;
+    enabled: boolean;
+    payload: JsonObject;
+    salesforceOrgId: string;
+    teamId: string;
+    templateId: string;
+    updatedAt: Date;
+  }): Promise<void>;
+};
+
+export type SalesforcePdfWorkflowHome = {
+  repository: SalesforcePdfWorkflowRepository;
+};
+
 export type WorkspaceCredentialSettingsHome = {
   saveProviderApiKey(input: {
     createdByUserId?: string;
@@ -140,6 +194,7 @@ export type AgentSlackHandlerOptions = {
   audioTranscriptionGateway?: TranscriptionGateway;
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
+  salesforcePdfWorkflowHome?: SalesforcePdfWorkflowHome;
   workspaceCredentialSettings?: WorkspaceCredentialSettingsHome;
 };
 
@@ -188,6 +243,12 @@ export function createAgentSlackHandlers(
     async handleWorkspaceCredentialModalSubmission(args) {
       await handleWorkspaceCredentialModalSubmission(args, options);
     },
+    async handleSalesforcePdfWorkflowConfigureAction(args) {
+      await handleSalesforcePdfWorkflowConfigureAction(args, options);
+    },
+    async handleSalesforcePdfWorkflowModalSubmission(args) {
+      await handleSalesforcePdfWorkflowModalSubmission(args, options);
+    },
   };
 }
 
@@ -235,14 +296,21 @@ async function buildAppHomeBlocks(input: {
 
   try {
     const { repository } = input.options.salesforceConnectionHome;
-    const [rawConfigs, rawConnections] = await Promise.all([
+    const [rawConfigs, rawConnections, rawWorkflowSettings] = await Promise.all([
       repository.listSalesforceAuthConfigs(input.teamId),
       repository.listSalesforceConnections(input.teamId, input.slackUserId),
+      input.options.salesforcePdfWorkflowHome?.repository.listSalesforcePdfWorkflowSettings(
+        input.teamId,
+      ) ?? Promise.resolve([]),
     ]);
     const configs = rawConfigs.map((config) => salesforceAuthConfigSchema.parse(config));
     const connections = rawConnections.map((connection) =>
       salesforceConnectionSchema.parse(connection),
     );
+    const workflowSettings = rawWorkflowSettings
+      .map((setting) => salesforcePdfWorkflowSettingsSchema.safeParse(setting))
+      .filter((result) => result.success)
+      .map((result) => result.data);
     if (configs.length === 0) {
       return blocks;
     }
@@ -277,11 +345,43 @@ async function buildAppHomeBlocks(input: {
         },
         type: "section",
       });
+      if (input.options.salesforcePdfWorkflowHome !== undefined) {
+        blocks.push(
+          ...buildSalesforcePdfWorkflowBlocks(config.salesforce_org_id, workflowSettings),
+        );
+      }
     }
   } catch (error) {
     input.logger.warn("Failed to load Salesforce App Home connection status.", { error });
   }
   return blocks;
+}
+
+function buildSalesforcePdfWorkflowBlocks(
+  salesforceOrgId: string,
+  settings: readonly SalesforcePdfWorkflowSettings[],
+): Record<string, unknown>[] {
+  return salesforcePdfWorkflowActions.map((action) => {
+    const setting = settings.find(
+      (item) => item.salesforce_org_id === salesforceOrgId && item.action === action,
+    );
+    const enabled = setting?.enabled === true;
+    return {
+      accessory: {
+        action_id: SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
+        text: { text: "Configure", type: "plain_text" },
+        type: "button",
+        value: JSON.stringify({ action, salesforceOrgId }),
+      },
+      text: {
+        text: `*${salesforcePdfWorkflowActionLabel(action)}*\n${enabled ? "Enabled" : "Disabled"}${
+          setting === undefined ? "" : ` - template: ${setting.template_id}`
+        }`,
+        type: "mrkdwn",
+      },
+      type: "section",
+    };
+  });
 }
 
 function salesforceStatusText(status: string, accountLabel: string | undefined): string {
@@ -419,6 +519,207 @@ async function handleWorkspaceCredentialModalSubmission(
       buildWorkspaceCredentialResultModal(
         "API key",
         "Could not save this API key. Try again later.",
+      ),
+      logger,
+    );
+  }
+}
+
+async function handleSalesforcePdfWorkflowConfigureAction(
+  { ack, body, client, logger }: SlackActionArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  await ack();
+  const teamId = readTeamId(body, {});
+  const slackUserId = readSlackUserId(body);
+  const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
+  const actionValue = parseSalesforcePdfWorkflowActionValue(readActionValue(body));
+  if (
+    teamId === undefined ||
+    slackUserId === undefined ||
+    triggerId === undefined ||
+    actionValue === undefined
+  ) {
+    logger.warn("Ignoring Salesforce PDF workflow configuration action with missing context.");
+    return;
+  }
+  if (options.salesforcePdfWorkflowHome === undefined) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildSalesforcePdfWorkflowResultModal(
+        "Salesforce PDF",
+        "Salesforce PDF workflow settings are not configured for this app process.",
+      ) as never,
+    });
+    return;
+  }
+  if (!(await isWorkspaceAdmin(client, slackUserId, logger))) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildSalesforcePdfWorkflowResultModal(
+        "Salesforce PDF",
+        "Only Slack workspace admins and owners can configure Salesforce PDF workflows.",
+      ) as never,
+    });
+    return;
+  }
+
+  const current =
+    await options.salesforcePdfWorkflowHome.repository.findSalesforcePdfWorkflowSetting(
+      teamId,
+      actionValue.salesforceOrgId,
+      actionValue.action,
+    );
+  const parsedCurrent =
+    current === undefined ? undefined : salesforcePdfWorkflowSettingsSchema.safeParse(current);
+  await client.views.open({
+    trigger_id: triggerId,
+    view: buildSalesforcePdfWorkflowModal({
+      action: actionValue.action,
+      salesforceOrgId: actionValue.salesforceOrgId,
+      settings: parsedCurrent?.success === true ? parsedCurrent.data : undefined,
+      teamId,
+    }) as never,
+  });
+}
+
+async function handleSalesforcePdfWorkflowModalSubmission(
+  { ack, body, client, logger, view }: SlackViewArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  const metadata = parseSalesforcePdfWorkflowModalMetadata(
+    readString(view as unknown as StringIndexed, "private_metadata"),
+  );
+  const bodyTeamId = readTeamId(body, {});
+  const slackUserId = readSlackUserId(body);
+  if (options.salesforcePdfWorkflowHome === undefined) {
+    await ack({
+      errors: {
+        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]:
+          "Salesforce PDF workflow settings are not configured.",
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  if (
+    metadata === undefined ||
+    slackUserId === undefined ||
+    (bodyTeamId !== undefined && metadata.teamId !== bodyTeamId)
+  ) {
+    await ack({
+      errors: {
+        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]: "Slack workspace context is missing.",
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  const parsed = parseSalesforcePdfWorkflowModal(view);
+  if ("errors" in parsed) {
+    await ack({
+      errors: parsed.errors,
+      response_action: "errors",
+    });
+    return;
+  }
+
+  await ack({
+    response_action: "update",
+    view: buildSalesforcePdfWorkflowResultModal(
+      "Salesforce PDF",
+      "Saving workflow settings...",
+    ) as never,
+  });
+
+  try {
+    if (!(await isWorkspaceAdmin(client, slackUserId, logger))) {
+      await updateSalesforcePdfWorkflowModal(
+        client,
+        view,
+        buildSalesforcePdfWorkflowResultModal(
+          "Salesforce PDF",
+          "Only Slack workspace admins and owners can configure Salesforce PDF workflows.",
+        ),
+        logger,
+      );
+      return;
+    }
+    const now = new Date();
+    const existingPayload =
+      await options.salesforcePdfWorkflowHome.repository.findSalesforcePdfWorkflowSetting(
+        metadata.teamId,
+        metadata.salesforceOrgId,
+        metadata.action,
+      );
+    const existing = parseExistingSalesforcePdfWorkflowSetting(existingPayload);
+    const payload = salesforcePdfWorkflowSettingsSchema.parse({
+      action: metadata.action,
+      allowed_record_type_ids: parsed.allowedRecordTypeIds,
+      allowed_record_type_names: parsed.allowedRecordTypeNames,
+      allowed_stages: parsed.allowedStages,
+      allowed_statuses: parsed.allowedStatuses,
+      attach_to: parsed.attachTo,
+      created_at: existing?.created_at ?? now,
+      enabled: parsed.enabled,
+      enabled_at:
+        parsed.enabled === false
+          ? null
+          : existing?.enabled === true
+            ? (existing.enabled_at ?? now)
+            : now,
+      enabled_by_slack_user_id:
+        parsed.enabled === false
+          ? null
+          : existing?.enabled === true
+            ? (existing.enabled_by_slack_user_id ?? slackUserId)
+            : slackUserId,
+      field_mapping: parsed.fieldMapping,
+      required_fields: parsed.requiredFields,
+      require_confirmation_before_attach: parsed.requireConfirmationBeforeAttach,
+      salesforce_org_id: metadata.salesforceOrgId,
+      team_id: metadata.teamId,
+      template_id: parsed.templateId,
+      updated_at: now,
+      updated_by_slack_user_id: slackUserId,
+    });
+    await options.salesforcePdfWorkflowHome.repository.saveSalesforcePdfWorkflowSetting({
+      action: payload.action,
+      enabled: payload.enabled,
+      payload: salesforcePdfWorkflowPayload(payload),
+      salesforceOrgId: payload.salesforce_org_id,
+      teamId: payload.team_id,
+      templateId: payload.template_id,
+      updatedAt: payload.updated_at,
+    });
+    logInfo(logger, "Saved Salesforce PDF workflow settings from Slack modal.", {
+      action: payload.action,
+      enabled: payload.enabled,
+      salesforceOrgId: payload.salesforce_org_id,
+      teamId: payload.team_id,
+    });
+    await updateSalesforcePdfWorkflowModal(
+      client,
+      view,
+      buildSalesforcePdfWorkflowResultModal(
+        "Salesforce PDF",
+        `${salesforcePdfWorkflowActionLabel(payload.action)} is ${
+          payload.enabled ? "enabled" : "disabled"
+        } for this Salesforce org.`,
+      ),
+      logger,
+    );
+  } catch (error) {
+    logger.error("Failed to save Salesforce PDF workflow settings from Slack modal.", {
+      error,
+      metadata,
+    });
+    await updateSalesforcePdfWorkflowModal(
+      client,
+      view,
+      buildSalesforcePdfWorkflowResultModal(
+        "Salesforce PDF",
+        "Could not save these workflow settings. Try again later.",
       ),
       logger,
     );
@@ -1457,6 +1758,209 @@ function buildWorkspaceCredentialUnavailableModal(): Record<string, unknown> {
   };
 }
 
+const salesforcePdfWorkflowEnabledOptions = [
+  { text: { text: "Disabled", type: "plain_text" }, value: "false" },
+  { text: { text: "Enabled", type: "plain_text" }, value: "true" },
+] as const;
+
+const salesforcePdfWorkflowAttachTargetOptions = [
+  { text: { text: "Source record", type: "plain_text" }, value: "source_record" },
+  { text: { text: "Quote", type: "plain_text" }, value: "quote" },
+  { text: { text: "Opportunity", type: "plain_text" }, value: "opportunity" },
+  { text: { text: "Quote and Opportunity", type: "plain_text" }, value: "both" },
+] as const;
+
+const salesforcePdfWorkflowConfirmationOptions = [
+  { text: { text: "Require confirmation", type: "plain_text" }, value: "true" },
+  { text: { text: "Do not require confirmation", type: "plain_text" }, value: "false" },
+] as const;
+
+function buildSalesforcePdfWorkflowModal(input: {
+  action: SalesforcePdfWorkflowAction;
+  salesforceOrgId: string;
+  settings?: SalesforcePdfWorkflowSettings;
+  teamId: string;
+}): Record<string, unknown> {
+  const settings = input.settings;
+  const enabledOption = salesforcePdfWorkflowEnabledOptions.find(
+    (option) => option.value === String(settings?.enabled === true),
+  );
+  const attachTo = settings?.attach_to ?? "source_record";
+  const attachOption = salesforcePdfWorkflowAttachTargetOptions.find(
+    (option) => option.value === attachTo,
+  );
+  const confirmationOption = salesforcePdfWorkflowConfirmationOptions.find(
+    (option) => option.value === String(settings?.require_confirmation_before_attach !== false),
+  );
+  return {
+    callback_id: SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
+    private_metadata: JSON.stringify({
+      action: input.action,
+      salesforceOrgId: input.salesforceOrgId,
+      teamId: input.teamId,
+    }),
+    submit: { text: "Save", type: "plain_text" },
+    title: { text: "Salesforce PDF", type: "plain_text" },
+    type: "modal",
+    blocks: [
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_ENABLED_ACTION_ID,
+          initial_option: enabledOption ?? salesforcePdfWorkflowEnabledOptions[0],
+          options: salesforcePdfWorkflowEnabledOptions,
+          type: "static_select",
+        },
+        label: { text: salesforcePdfWorkflowActionLabel(input.action), type: "plain_text" },
+        type: "input",
+      },
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_TEMPLATE_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_TEMPLATE_ACTION_ID,
+          initial_value: settings?.template_id,
+          placeholder: { text: `${input.action}_v1`, type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "Template ID", type: "plain_text" },
+        type: "input",
+      },
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_ACTION_ID,
+          initial_value: settings?.allowed_stages.join(", "),
+          placeholder: { text: "Proposal, Negotiation", type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "Allowed stages", type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_ACTION_ID,
+          initial_value: settings?.allowed_statuses.join(", "),
+          placeholder: { text: "Approved, Presented", type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "Allowed statuses", type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_ACTION_ID,
+          initial_value: settings?.required_fields.join(", "),
+          placeholder: { text: "AccountId, Amount, CloseDate", type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "Required fields", type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_RECORD_TYPES_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_RECORD_TYPES_ACTION_ID,
+          initial_value:
+            settings === undefined
+              ? undefined
+              : [...settings.allowed_record_type_names, ...settings.allowed_record_type_ids].join(
+                  ", ",
+                ),
+          placeholder: { text: "New Business, Renewal", type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "Allowed RecordTypes", type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_ATTACH_TO_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_ATTACH_TO_ACTION_ID,
+          initial_option: attachOption ?? salesforcePdfWorkflowAttachTargetOptions[0],
+          options: salesforcePdfWorkflowAttachTargetOptions,
+          type: "static_select",
+        },
+        label: { text: "Attach to", type: "plain_text" },
+        type: "input",
+      },
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_CONFIRMATION_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_CONFIRMATION_ACTION_ID,
+          initial_option: confirmationOption ?? salesforcePdfWorkflowConfirmationOptions[0],
+          options: salesforcePdfWorkflowConfirmationOptions,
+          type: "static_select",
+        },
+        label: { text: "Attachment confirmation", type: "plain_text" },
+        type: "input",
+      },
+      {
+        block_id: SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_BLOCK_ID,
+        element: {
+          action_id: SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_ACTION_ID,
+          initial_value:
+            settings === undefined || Object.keys(settings.field_mapping).length === 0
+              ? undefined
+              : JSON.stringify(settings.field_mapping, null, 2),
+          multiline: true,
+          placeholder: { text: '{"customerName":"Account.Name"}', type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "Field mapping JSON", type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
+    ],
+  };
+}
+
+function buildSalesforcePdfWorkflowResultModal(
+  title: string,
+  text: string,
+): Record<string, unknown> {
+  return {
+    close: { text: "Close", type: "plain_text" },
+    title: { text: title, type: "plain_text" },
+    type: "modal",
+    blocks: [
+      {
+        text: {
+          text,
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+    ],
+  };
+}
+
+async function updateSalesforcePdfWorkflowModal(
+  client: SlackClient,
+  view: unknown,
+  modal: Record<string, unknown>,
+  logger: unknown,
+): Promise<void> {
+  const viewId = readString(view as unknown as StringIndexed, "id");
+  if (viewId === undefined) {
+    logWarn(logger, "Could not update Salesforce PDF workflow modal without Slack view id.", {});
+    return;
+  }
+  try {
+    await client.views.update({
+      view: modal as never,
+      view_id: viewId,
+    });
+  } catch (error) {
+    logWarn(logger, "Failed to update Salesforce PDF workflow modal.", { error, viewId });
+  }
+}
+
 async function updateWorkspaceCredentialModal(
   client: SlackClient,
   view: unknown,
@@ -1521,6 +2025,167 @@ function parseWorkspaceCredentialModal(view: unknown):
   };
 }
 
+function parseSalesforcePdfWorkflowModal(view: unknown):
+  | {
+      allowedRecordTypeIds: string[];
+      allowedRecordTypeNames: string[];
+      allowedStages: string[];
+      allowedStatuses: string[];
+      attachTo: SalesforcePdfAttachTarget;
+      enabled: boolean;
+      fieldMapping: Record<string, string>;
+      requiredFields: string[];
+      requireConfirmationBeforeAttach: boolean;
+      templateId: string;
+    }
+  | { errors: Record<string, string> } {
+  const enabled = parseBooleanOption(
+    readSelectedOptionValue(
+      view,
+      SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID,
+      SALESFORCE_PDF_WORKFLOW_ENABLED_ACTION_ID,
+    ),
+  );
+  const templateId = readModalInputValue(
+    view,
+    SALESFORCE_PDF_WORKFLOW_TEMPLATE_BLOCK_ID,
+    SALESFORCE_PDF_WORKFLOW_TEMPLATE_ACTION_ID,
+  )?.trim();
+  const attachToValue = readSelectedOptionValue(
+    view,
+    SALESFORCE_PDF_WORKFLOW_ATTACH_TO_BLOCK_ID,
+    SALESFORCE_PDF_WORKFLOW_ATTACH_TO_ACTION_ID,
+  );
+  const attachTo = salesforcePdfAttachTargetSchema.safeParse(attachToValue);
+  const requireConfirmationBeforeAttach = parseBooleanOption(
+    readSelectedOptionValue(
+      view,
+      SALESFORCE_PDF_WORKFLOW_CONFIRMATION_BLOCK_ID,
+      SALESFORCE_PDF_WORKFLOW_CONFIRMATION_ACTION_ID,
+    ),
+  );
+  const fieldMapping = parseFieldMapping(
+    readModalInputValue(
+      view,
+      SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_BLOCK_ID,
+      SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_ACTION_ID,
+    ),
+  );
+  const errors: Record<string, string> = {};
+  if (enabled === undefined) {
+    errors[SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID] = "Choose whether this workflow is enabled.";
+  }
+  if (templateId === undefined || templateId === "") {
+    errors[SALESFORCE_PDF_WORKFLOW_TEMPLATE_BLOCK_ID] = "Enter a template ID.";
+  }
+  if (!attachTo.success) {
+    errors[SALESFORCE_PDF_WORKFLOW_ATTACH_TO_BLOCK_ID] = "Choose a supported attachment target.";
+  }
+  if (requireConfirmationBeforeAttach === undefined) {
+    errors[SALESFORCE_PDF_WORKFLOW_CONFIRMATION_BLOCK_ID] =
+      "Choose whether attachment confirmation is required.";
+  }
+  if ("error" in fieldMapping) {
+    errors[SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_BLOCK_ID] = fieldMapping.error;
+  }
+  if (Object.keys(errors).length > 0) {
+    return { errors };
+  }
+  const recordTypes = parseCsvList(
+    readModalInputValue(
+      view,
+      SALESFORCE_PDF_WORKFLOW_RECORD_TYPES_BLOCK_ID,
+      SALESFORCE_PDF_WORKFLOW_RECORD_TYPES_ACTION_ID,
+    ),
+  );
+  return {
+    allowedRecordTypeIds: recordTypes.filter((value) => /^012[A-Za-z0-9]{12,15}$/u.test(value)),
+    allowedRecordTypeNames: recordTypes.filter((value) => !/^012[A-Za-z0-9]{12,15}$/u.test(value)),
+    allowedStages: parseCsvList(
+      readModalInputValue(
+        view,
+        SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_BLOCK_ID,
+        SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_ACTION_ID,
+      ),
+    ),
+    allowedStatuses: parseCsvList(
+      readModalInputValue(
+        view,
+        SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_BLOCK_ID,
+        SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_ACTION_ID,
+      ),
+    ),
+    attachTo: attachTo.data as SalesforcePdfAttachTarget,
+    enabled: enabled as boolean,
+    fieldMapping: "value" in fieldMapping ? fieldMapping.value : {},
+    requiredFields: parseCsvList(
+      readModalInputValue(
+        view,
+        SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_BLOCK_ID,
+        SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_ACTION_ID,
+      ),
+    ),
+    requireConfirmationBeforeAttach: requireConfirmationBeforeAttach as boolean,
+    templateId: templateId as string,
+  };
+}
+
+function parseExistingSalesforcePdfWorkflowSetting(
+  payload: JsonObject | undefined,
+): SalesforcePdfWorkflowSettings | undefined {
+  if (payload === undefined) {
+    return undefined;
+  }
+  const parsed = salesforcePdfWorkflowSettingsSchema.safeParse(payload);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function parseFieldMapping(
+  raw: string | undefined,
+): { value: Record<string, string> } | { error: string } {
+  const text = raw?.trim();
+  if (text === undefined || text === "") {
+    return { value: {} };
+  }
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!isRecord(parsed)) {
+      return { error: "Enter a JSON object." };
+    }
+    const mapping: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value !== "string" || key.trim() === "" || value.trim() === "") {
+        return { error: "Field mapping values must be non-empty strings." };
+      }
+      mapping[key.trim()] = value.trim();
+    }
+    return { value: mapping };
+  } catch {
+    return { error: "Enter valid JSON." };
+  }
+}
+
+function parseCsvList(raw: string | undefined): string[] {
+  return [
+    ...new Set(
+      (raw ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function parseBooleanOption(value: string | undefined): boolean | undefined {
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return undefined;
+}
+
 function parseCredentialProviderKind(
   value: string | undefined,
 ): CredentialProviderKind | undefined {
@@ -1563,6 +2228,95 @@ function readSlackUserId(body: unknown): string | undefined {
     return body.user.id;
   }
   return undefined;
+}
+
+function readActionValue(body: unknown): string | undefined {
+  if (!isRecord(body) || !Array.isArray(body.actions)) {
+    return undefined;
+  }
+  const [action] = body.actions;
+  return isRecord(action) && typeof action.value === "string" ? action.value : undefined;
+}
+
+function parseSalesforcePdfWorkflowActionValue(
+  value: string | undefined,
+): { action: SalesforcePdfWorkflowAction; salesforceOrgId: string } | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) {
+      return undefined;
+    }
+    const action = parseSalesforcePdfWorkflowAction(readOptionalString(parsed.action));
+    const salesforceOrgId = readOptionalString(parsed.salesforceOrgId);
+    return action === undefined || salesforceOrgId === undefined
+      ? undefined
+      : { action, salesforceOrgId };
+  } catch {
+    return undefined;
+  }
+}
+
+function parseSalesforcePdfWorkflowModalMetadata(value: string | undefined):
+  | {
+      action: SalesforcePdfWorkflowAction;
+      salesforceOrgId: string;
+      teamId: string;
+    }
+  | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) {
+      return undefined;
+    }
+    const action = parseSalesforcePdfWorkflowAction(readOptionalString(parsed.action));
+    const salesforceOrgId = readOptionalString(parsed.salesforceOrgId);
+    const teamId = readOptionalString(parsed.teamId);
+    return action === undefined || salesforceOrgId === undefined || teamId === undefined
+      ? undefined
+      : { action, salesforceOrgId, teamId };
+  } catch {
+    return undefined;
+  }
+}
+
+function parseSalesforcePdfWorkflowAction(
+  value: string | undefined,
+): SalesforcePdfWorkflowAction | undefined {
+  return salesforcePdfWorkflowActions.find((action) => action === value);
+}
+
+function salesforcePdfWorkflowPayload(settings: SalesforcePdfWorkflowSettings): JsonObject {
+  return {
+    action: settings.action,
+    allowed_record_type_ids: settings.allowed_record_type_ids,
+    allowed_record_type_names: settings.allowed_record_type_names,
+    allowed_stages: settings.allowed_stages,
+    allowed_statuses: settings.allowed_statuses,
+    attach_to: settings.attach_to,
+    created_at: settings.created_at.toISOString(),
+    enabled: settings.enabled,
+    enabled_at: settings.enabled_at?.toISOString() ?? null,
+    enabled_by_slack_user_id: settings.enabled_by_slack_user_id ?? null,
+    field_mapping: settings.field_mapping,
+    record_type_field: settings.record_type_field ?? null,
+    required_fields: settings.required_fields,
+    require_confirmation_before_attach: settings.require_confirmation_before_attach,
+    salesforce_org_id: settings.salesforce_org_id,
+    slack_channel_allowlist: settings.slack_channel_allowlist,
+    slack_user_group_allowlist: settings.slack_user_group_allowlist,
+    status_field: settings.status_field ?? null,
+    stage_field: settings.stage_field ?? null,
+    team_id: settings.team_id,
+    template_id: settings.template_id,
+    updated_at: settings.updated_at.toISOString(),
+    updated_by_slack_user_id: settings.updated_by_slack_user_id ?? null,
+  };
 }
 
 function readModalInputValue(view: unknown, blockId: string, actionId: string): string | undefined {

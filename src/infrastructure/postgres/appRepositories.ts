@@ -99,6 +99,24 @@ export type SalesforceOAuthStateDocument = OAuthStateDocument & {
   salesforceOrgId: string;
 };
 
+export type SalesforcePdfWorkflowSettingDocument = PayloadDocument & {
+  action: string;
+  enabled: boolean;
+  salesforceOrgId: string;
+  teamId: string;
+  templateId: string;
+  updatedAt: Date;
+};
+
+export type SalesforcePdfTemplateDocument = PayloadDocument & {
+  action: string;
+  salesforceOrgId: string;
+  status: string;
+  teamId: string;
+  templateId: string;
+  updatedAt: Date;
+};
+
 export class PostgresAgentRoutingRepository {
   private readonly pool: Pool;
   private readonly agents: PostgresJsonDocumentRepository<{ agent_id: string }, JsonObject>;
@@ -502,6 +520,102 @@ export class PostgresOAuthRepository {
     stateId: string,
   ): Promise<JsonObject | undefined> {
     return this.salesforceStates.consume({ state_id: stateId, team_id: teamId });
+  }
+}
+
+export class PostgresSalesforcePdfWorkflowRepository {
+  private readonly settings: PostgresJsonDocumentRepository<
+    { action: string; salesforce_org_id: string; team_id: string },
+    JsonObject
+  >;
+  private readonly templates: PostgresJsonDocumentRepository<
+    { salesforce_org_id: string; team_id: string; template_id: string },
+    JsonObject
+  >;
+
+  constructor(pool: Pool) {
+    this.settings = new PostgresJsonDocumentRepository(
+      postgresDocumentTables.salesforcePdfWorkflowSetting,
+      { pool },
+    );
+    this.templates = new PostgresJsonDocumentRepository(
+      postgresDocumentTables.salesforcePdfTemplate,
+      {
+        pool,
+      },
+    );
+  }
+
+  async saveSalesforcePdfWorkflowSetting(
+    document: SalesforcePdfWorkflowSettingDocument,
+  ): Promise<void> {
+    await this.settings.upsert({
+      key: {
+        action: document.action,
+        salesforce_org_id: document.salesforceOrgId,
+        team_id: document.teamId,
+      },
+      payload: document.payload,
+      values: snakeValues(document),
+    });
+  }
+
+  async findSalesforcePdfWorkflowSetting(
+    teamId: string,
+    salesforceOrgId: string,
+    action: string,
+  ): Promise<JsonObject | undefined> {
+    return this.settings.find({
+      action,
+      salesforce_org_id: salesforceOrgId,
+      team_id: teamId,
+    });
+  }
+
+  async listSalesforcePdfWorkflowSettings(
+    teamId: string,
+    salesforceOrgId?: string,
+  ): Promise<JsonObject[]> {
+    return this.settings.list(
+      salesforceOrgId === undefined
+        ? { team_id: teamId }
+        : { salesforce_org_id: salesforceOrgId, team_id: teamId },
+    );
+  }
+
+  async saveSalesforcePdfTemplate(document: SalesforcePdfTemplateDocument): Promise<void> {
+    await this.templates.upsert({
+      key: {
+        salesforce_org_id: document.salesforceOrgId,
+        team_id: document.teamId,
+        template_id: document.templateId,
+      },
+      payload: document.payload,
+      values: snakeValues(document),
+    });
+  }
+
+  async findSalesforcePdfTemplate(
+    teamId: string,
+    salesforceOrgId: string,
+    templateId: string,
+  ): Promise<JsonObject | undefined> {
+    return this.templates.find({
+      salesforce_org_id: salesforceOrgId,
+      team_id: teamId,
+      template_id: templateId,
+    });
+  }
+
+  async listSalesforcePdfTemplates(
+    teamId: string,
+    salesforceOrgId?: string,
+  ): Promise<JsonObject[]> {
+    return this.templates.list(
+      salesforceOrgId === undefined
+        ? { team_id: teamId }
+        : { salesforce_org_id: salesforceOrgId, team_id: teamId },
+    );
   }
 }
 

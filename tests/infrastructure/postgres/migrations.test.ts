@@ -36,6 +36,7 @@ describe("PostgresMigrationRunner", () => {
       "20260512_0004",
       "20260512_0005",
       "20260512_0006",
+      "20260513_0007",
     ]);
     expect(postgresMigrations[0]?.upSql).toContain(
       "create table if not exists slack_installations",
@@ -55,6 +56,12 @@ describe("PostgresMigrationRunner", () => {
     );
     expect(postgresMigrations[5]?.upSql).toContain(
       "create table if not exists rss_processed_articles",
+    );
+    expect(postgresMigrations[6]?.upSql).toContain(
+      "create table if not exists salesforce_pdf_workflow_settings",
+    );
+    expect(postgresMigrations[6]?.upSql).toContain(
+      "create table if not exists salesforce_pdf_templates",
     );
   });
 

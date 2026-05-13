@@ -192,6 +192,16 @@ export const postgresDocumentTables = {
     keyColumns: ["team_id", "state_id"],
     tableName: "salesforce_oauth_states",
   },
+  salesforcePdfTemplate: {
+    columns: ["action", "status", "updated_at"],
+    keyColumns: ["team_id", "salesforce_org_id", "template_id"],
+    tableName: "salesforce_pdf_templates",
+  },
+  salesforcePdfWorkflowSetting: {
+    columns: ["enabled", "template_id", "updated_at"],
+    keyColumns: ["team_id", "salesforce_org_id", "action"],
+    tableName: "salesforce_pdf_workflow_settings",
+  },
   slackThread: {
     columns: [
       "agent_id",
