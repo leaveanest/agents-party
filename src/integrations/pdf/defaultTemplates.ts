@@ -47,6 +47,7 @@ export function createDefaultDealReviewPackTemplate(): PdfTemplateDefinition {
       opportunityName: shortTextInput,
       ownerName: shortTextInput,
       reviewNotes: longTextInput,
+      sourceRecordId: shortTextInput,
       stageName: shortTextInput,
     },
     template: dealReviewPackTemplate(),
@@ -128,7 +129,8 @@ function dealReviewPackTemplate(): Template {
         textSchema("ownerName", "Owner", 110, 74, 85, 8),
         textSchema("nextStep", "Next Step", 15, 92, 180, 18),
         textSchema("reviewNotes", "Review Notes", 15, 120, 180, 70),
-        textSchema("generatedAt", "Generated", 15, 205, 180, 8),
+        textSchema("sourceRecordId", "Source Record", 15, 198, 180, 8),
+        textSchema("generatedAt", "Generated", 15, 211, 180, 8),
       ],
     ],
   };

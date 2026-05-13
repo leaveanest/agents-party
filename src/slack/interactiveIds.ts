@@ -21,6 +21,14 @@ export const SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_ACTION_ID = "allowed_stages"
 export const SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_BLOCK_ID =
   "salesforce_pdf_workflow_allowed_statuses";
 export const SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_ACTION_ID = "allowed_statuses";
+export const SALESFORCE_PDF_WORKFLOW_APPROVAL_STATUSES_BLOCK_ID =
+  "salesforce_pdf_workflow_approval_statuses";
+export const SALESFORCE_PDF_WORKFLOW_APPROVAL_STATUSES_ACTION_ID = "allowed_approval_statuses";
+export const SALESFORCE_PDF_WORKFLOW_APPROVAL_FIELD_BLOCK_ID =
+  "salesforce_pdf_workflow_approval_field";
+export const SALESFORCE_PDF_WORKFLOW_APPROVAL_FIELD_ACTION_ID = "approval_status_field";
+export const SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_BLOCK_ID = "salesforce_pdf_workflow_ai_summary";
+export const SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_ACTION_ID = "include_ai_summary";
 export const SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_BLOCK_ID =
   "salesforce_pdf_workflow_required_fields";
 export const SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_ACTION_ID = "required_fields";

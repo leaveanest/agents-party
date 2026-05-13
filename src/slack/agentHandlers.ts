@@ -42,6 +42,12 @@ import {
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_BLOCK_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_APPROVAL_FIELD_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_APPROVAL_FIELD_BLOCK_ID,
+  SALESFORCE_PDF_WORKFLOW_APPROVAL_STATUSES_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_APPROVAL_STATUSES_BLOCK_ID,
   SALESFORCE_PDF_WORKFLOW_ATTACH_TO_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_ATTACH_TO_BLOCK_ID,
   SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
@@ -655,10 +661,12 @@ async function handleSalesforcePdfWorkflowModalSubmission(
     const existing = parseExistingSalesforcePdfWorkflowSetting(existingPayload);
     const payload = salesforcePdfWorkflowSettingsSchema.parse({
       action: metadata.action,
+      allowed_approval_statuses: parsed.allowedApprovalStatuses,
       allowed_record_type_ids: parsed.allowedRecordTypeIds,
       allowed_record_type_names: parsed.allowedRecordTypeNames,
       allowed_stages: parsed.allowedStages,
       allowed_statuses: parsed.allowedStatuses,
+      approval_status_field: parsed.approvalStatusField,
       attach_to: parsed.attachTo,
       created_at: existing?.created_at ?? now,
       enabled: parsed.enabled,
@@ -675,6 +683,7 @@ async function handleSalesforcePdfWorkflowModalSubmission(
             ? (existing.enabled_by_slack_user_id ?? slackUserId)
             : slackUserId,
       field_mapping: parsed.fieldMapping,
+      include_ai_summary: parsed.includeAiSummary,
       required_fields: parsed.requiredFields,
       require_confirmation_before_attach: parsed.requireConfirmationBeforeAttach,
       salesforce_org_id: metadata.salesforceOrgId,
@@ -1775,6 +1784,11 @@ const salesforcePdfWorkflowConfirmationOptions = [
   { text: { text: "Do not require confirmation", type: "plain_text" }, value: "false" },
 ] as const;
 
+const salesforcePdfWorkflowAiSummaryOptions = [
+  { text: { text: "AI summary off", type: "plain_text" }, value: "false" },
+  { text: { text: "AI summary on", type: "plain_text" }, value: "true" },
+] as const;
+
 function buildSalesforcePdfWorkflowModal(input: {
   action: SalesforcePdfWorkflowAction;
   salesforceOrgId: string;
@@ -1791,6 +1805,9 @@ function buildSalesforcePdfWorkflowModal(input: {
   );
   const confirmationOption = salesforcePdfWorkflowConfirmationOptions.find(
     (option) => option.value === String(settings?.require_confirmation_before_attach !== false),
+  );
+  const aiSummaryOption = salesforcePdfWorkflowAiSummaryOptions.find(
+    (option) => option.value === String(settings?.include_ai_summary === true),
   );
   return {
     callback_id: SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
@@ -1849,6 +1866,45 @@ function buildSalesforcePdfWorkflowModal(input: {
         optional: true,
         type: "input",
       },
+      ...(input.action === "deal_review_pack"
+        ? [
+            {
+              block_id: SALESFORCE_PDF_WORKFLOW_APPROVAL_FIELD_BLOCK_ID,
+              element: {
+                action_id: SALESFORCE_PDF_WORKFLOW_APPROVAL_FIELD_ACTION_ID,
+                initial_value: settings?.approval_status_field ?? undefined,
+                placeholder: { text: "Approval_Status__c", type: "plain_text" },
+                type: "plain_text_input",
+              },
+              label: { text: "Approval status field", type: "plain_text" },
+              optional: true,
+              type: "input",
+            },
+            {
+              block_id: SALESFORCE_PDF_WORKFLOW_APPROVAL_STATUSES_BLOCK_ID,
+              element: {
+                action_id: SALESFORCE_PDF_WORKFLOW_APPROVAL_STATUSES_ACTION_ID,
+                initial_value: settings?.allowed_approval_statuses.join(", "),
+                placeholder: { text: "Approved, Accepted", type: "plain_text" },
+                type: "plain_text_input",
+              },
+              label: { text: "Allowed approval statuses", type: "plain_text" },
+              optional: true,
+              type: "input",
+            },
+            {
+              block_id: SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_BLOCK_ID,
+              element: {
+                action_id: SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_ACTION_ID,
+                initial_option: aiSummaryOption ?? salesforcePdfWorkflowAiSummaryOptions[0],
+                options: salesforcePdfWorkflowAiSummaryOptions,
+                type: "static_select",
+              },
+              label: { text: "AI summary", type: "plain_text" },
+              type: "input",
+            },
+          ]
+        : []),
       {
         block_id: SALESFORCE_PDF_WORKFLOW_REQUIRED_FIELDS_BLOCK_ID,
         element: {
@@ -2029,11 +2085,14 @@ function parseSalesforcePdfWorkflowModal(view: unknown):
   | {
       allowedRecordTypeIds: string[];
       allowedRecordTypeNames: string[];
+      allowedApprovalStatuses: string[];
       allowedStages: string[];
       allowedStatuses: string[];
+      approvalStatusField: string | null;
       attachTo: SalesforcePdfAttachTarget;
       enabled: boolean;
       fieldMapping: Record<string, string>;
+      includeAiSummary: boolean;
       requiredFields: string[];
       requireConfirmationBeforeAttach: boolean;
       templateId: string;
@@ -2064,6 +2123,13 @@ function parseSalesforcePdfWorkflowModal(view: unknown):
       SALESFORCE_PDF_WORKFLOW_CONFIRMATION_ACTION_ID,
     ),
   );
+  const includeAiSummary = parseBooleanOption(
+    readSelectedOptionValue(
+      view,
+      SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_BLOCK_ID,
+      SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_ACTION_ID,
+    ) ?? "false",
+  );
   const fieldMapping = parseFieldMapping(
     readModalInputValue(
       view,
@@ -2085,6 +2151,9 @@ function parseSalesforcePdfWorkflowModal(view: unknown):
     errors[SALESFORCE_PDF_WORKFLOW_CONFIRMATION_BLOCK_ID] =
       "Choose whether attachment confirmation is required.";
   }
+  if (includeAiSummary === undefined) {
+    errors[SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_BLOCK_ID] = "Choose whether AI summary is enabled.";
+  }
   if ("error" in fieldMapping) {
     errors[SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_BLOCK_ID] = fieldMapping.error;
   }
@@ -2101,6 +2170,13 @@ function parseSalesforcePdfWorkflowModal(view: unknown):
   return {
     allowedRecordTypeIds: recordTypes.filter((value) => /^012[A-Za-z0-9]{12,15}$/u.test(value)),
     allowedRecordTypeNames: recordTypes.filter((value) => !/^012[A-Za-z0-9]{12,15}$/u.test(value)),
+    allowedApprovalStatuses: parseCsvList(
+      readModalInputValue(
+        view,
+        SALESFORCE_PDF_WORKFLOW_APPROVAL_STATUSES_BLOCK_ID,
+        SALESFORCE_PDF_WORKFLOW_APPROVAL_STATUSES_ACTION_ID,
+      ),
+    ),
     allowedStages: parseCsvList(
       readModalInputValue(
         view,
@@ -2115,9 +2191,16 @@ function parseSalesforcePdfWorkflowModal(view: unknown):
         SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_ACTION_ID,
       ),
     ),
+    approvalStatusField:
+      readModalInputValue(
+        view,
+        SALESFORCE_PDF_WORKFLOW_APPROVAL_FIELD_BLOCK_ID,
+        SALESFORCE_PDF_WORKFLOW_APPROVAL_FIELD_ACTION_ID,
+      )?.trim() || null,
     attachTo: attachTo.data as SalesforcePdfAttachTarget,
     enabled: enabled as boolean,
     fieldMapping: "value" in fieldMapping ? fieldMapping.value : {},
+    includeAiSummary: includeAiSummary as boolean,
     requiredFields: parseCsvList(
       readModalInputValue(
         view,
@@ -2294,16 +2377,19 @@ function parseSalesforcePdfWorkflowAction(
 function salesforcePdfWorkflowPayload(settings: SalesforcePdfWorkflowSettings): JsonObject {
   return {
     action: settings.action,
+    allowed_approval_statuses: settings.allowed_approval_statuses,
     allowed_record_type_ids: settings.allowed_record_type_ids,
     allowed_record_type_names: settings.allowed_record_type_names,
     allowed_stages: settings.allowed_stages,
     allowed_statuses: settings.allowed_statuses,
+    approval_status_field: settings.approval_status_field ?? null,
     attach_to: settings.attach_to,
     created_at: settings.created_at.toISOString(),
     enabled: settings.enabled,
     enabled_at: settings.enabled_at?.toISOString() ?? null,
     enabled_by_slack_user_id: settings.enabled_by_slack_user_id ?? null,
     field_mapping: settings.field_mapping,
+    include_ai_summary: settings.include_ai_summary,
     record_type_field: settings.record_type_field ?? null,
     required_fields: settings.required_fields,
     require_confirmation_before_attach: settings.require_confirmation_before_attach,
