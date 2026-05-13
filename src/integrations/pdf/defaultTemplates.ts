@@ -24,6 +24,7 @@ export function createDefaultQuotePdfTemplate(): PdfTemplateDefinition {
       opportunityName: shortTextInput,
       quoteName: shortTextInput,
       quoteNumber: shortTextInput,
+      sourceRecordId: shortTextInput,
       totalAmount: shortTextInput,
     },
     template: quoteTemplate(),
@@ -66,6 +67,7 @@ function quoteTemplate(): Template {
         textSchema("opportunityName", "Opportunity", 15, 61, 180, 8),
         textSchema("totalAmount", "Total", 15, 74, 80, 8),
         textSchema("generatedAt", "Generated", 110, 74, 85, 8),
+        textSchema("sourceRecordId", "Source Record", 15, 84, 180, 8),
         {
           bodyStyles: {
             alignment: "left",
@@ -98,7 +100,7 @@ function quoteTemplate(): Template {
           headWidthPercentages: [50, 20, 30],
           height: 90,
           name: "lineItems",
-          position: { x: 15, y: 92 },
+          position: { x: 15, y: 100 },
           showHead: true,
           tableStyles: {
             borderColor: "#D0D5DD",
