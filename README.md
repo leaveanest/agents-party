@@ -28,6 +28,11 @@ See [`docs/provider-router.md`](docs/provider-router.md) for the routing and cap
 
 Agent routing through `app_mention`, active thread follow-up auto-routing, flag-reaction translation commands, native specialist runtimes, Google/Salesforce OAuth routes, PostgreSQL-backed OAuth state, encrypted token persistence, Salesforce token refresh, and Salesforce revoke-backed disconnect are available in the TypeScript runtime. Full App Home settings and native provider adapters for Bedrock/Dify/provider-specific features remain planned work.
 
+Salesforce PDF workflows can generate Quote PDFs and Deal Review Packs from Salesforce data through
+Slack agent tools when Salesforce OAuth, PostgreSQL, and Slack-admin workflow settings are
+configured. Workflows are disabled by default and Salesforce Files attachment requires explicit
+confirmation. See [`docs/salesforce-pdf-workflows.md`](docs/salesforce-pdf-workflows.md).
+
 The Python application runtime has been removed. Repository-local Codex development helpers under `.agents/skills/` use the TypeScript toolchain and are not part of the app, tests, deploy, or package workflow.
 
 ## Data Handling / External Providers
@@ -217,6 +222,11 @@ SALESFORCE_TOKEN_ENCRYPTION_KEY=...
 ```
 
 The registered Salesforce redirect URI is `${SALESFORCE_OAUTH_REDIRECT_BASE_URL}/oauth/salesforce/callback` unless `SALESFORCE_OAUTH_CALLBACK_PATH` is overridden. Workspace-specific Salesforce client IDs, optional encrypted client secrets, My Domain hosts, and org IDs are read from the PostgreSQL `salesforce_auth_configs` table.
+Salesforce PDF workflow settings are stored per Slack workspace, Salesforce org, and action in
+`salesforce_pdf_workflow_settings`. Run `vp run migrate` before enabling the workflows, then have a
+Slack workspace admin configure `quote_pdf` and/or `deal_review_pack` from App Home. The connected
+Salesforce user still needs Salesforce object, field, sharing, and Files permissions for the
+records being read or attached.
 
 ### Google Maps
 
@@ -358,6 +368,7 @@ Architecture references:
 - [`docs/agent-routing-sequence.puml`](docs/agent-routing-sequence.puml)
 - [`docs/agent-model-routing.md`](docs/agent-model-routing.md)
 - [`docs/agent-skills.md`](docs/agent-skills.md)
+- [`docs/salesforce-pdf-workflows.md`](docs/salesforce-pdf-workflows.md)
 - [`docs/typescript-parity-validation.md`](docs/typescript-parity-validation.md)
 
 ## License

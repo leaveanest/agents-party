@@ -12,6 +12,7 @@ actor "Browser" as browser
 cloud "Slack" as slack
 cloud "Google Identity" as google_identity
 cloud "Salesforce Identity" as salesforce_identity
+cloud "Salesforce REST API\nSOQL / Files" as salesforce_rest
 cloud "Google Maps Platform" as google_maps_platform
 cloud "LLM Providers\nAI SDK / native adapters" as llm_providers
 cloud "Google GenAI Media API" as google_genai_media
@@ -36,6 +37,8 @@ package "Heroku" {
       component "Video Generation" as video_generation
       component "Google OAuth Coordinator" as google_oauth
       component "Salesforce OAuth Coordinator" as salesforce_oauth
+      component "Salesforce PDF Tools\nQuote PDF / Deal Review Pack" as salesforce_pdf_tools
+      component "pdfme Renderer" as pdfme_renderer
       component "TypeScript Migration Runner" as migration_runner
     }
   }
@@ -52,6 +55,7 @@ package "Heroku" {
     folder "google_auth_connections" as pg_google_connections
     folder "google_oauth_states" as pg_google_oauth_states
     folder "salesforce_auth_configs /\nsalesforce_connections /\nsalesforce_oauth_states" as pg_salesforce_oauth
+    folder "salesforce_pdf_workflow_settings /\nsalesforce_pdf_templates" as pg_salesforce_pdf
   }
 }
 
@@ -88,6 +92,11 @@ agent_runner --> google_maps
 agent_runner --> translation
 agent_runner --> image_generation
 agent_runner --> video_generation
+agent_runner --> salesforce_pdf_tools : preview-only tool calls
+salesforce_pdf_tools --> pg_salesforce_pdf : org/action settings and template metadata
+salesforce_pdf_tools --> salesforce_oauth : resolve / refresh connected user token
+salesforce_pdf_tools --> salesforce_rest : record reads and confirmed Files writes
+salesforce_pdf_tools --> pdfme_renderer : render PDF bytes
 
 web_research --> provider_router : web-search capable generation
 google_maps --> google_maps_platform : Places / Routes API calls
@@ -118,6 +127,7 @@ Stored data:
 - Google OAuth connection documents
 - short-lived Google OAuth state documents
 - Salesforce OAuth config, connection, and state documents
+- Salesforce PDF workflow settings and template metadata
 end note
 
 note top of heroku_app
