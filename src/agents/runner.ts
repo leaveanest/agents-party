@@ -13,7 +13,6 @@ import {
   slackAgentInvocationSchema,
   specialistTextResultSchema,
   translationResultSchema,
-  workManagerResultSchema,
 } from "./schemas.js";
 import {
   AgentSpecialistRuntimeError,
@@ -70,8 +69,6 @@ const DEFAULT_SPECIALIST_PROMPTS = {
     "You are the video-generation specialist. Describe the video generation plan or ask for missing details.",
   web_research:
     "You are the web-research specialist. Produce a source-aware concise answer and call out any freshness limits.",
-  work_manager:
-    "You are the work-manager specialist. Return JSON with action, message, and workItems when relevant.",
 } as const satisfies Record<AgentSpecialist, string>;
 
 export class AgentRunner {
@@ -140,10 +137,7 @@ export class AgentRunner {
           specialist: decision.specialist,
         },
         model,
-        tools:
-          decision.specialist === "work_manager"
-            ? this.options.toolRegistry?.definitions()
-            : undefined,
+        tools: undefined,
       };
       const maxToolRounds = this.options.maxToolRounds ?? 1;
       for (let round = 0; round <= maxToolRounds; round += 1) {
@@ -323,18 +317,6 @@ function normalizeRunnerResult(
   toolResults: AgentToolResult[],
 ): AgentRunnerResult {
   const modelSummary = modelTrace(model);
-  if (decision.specialist === "work_manager") {
-    const parsed = parseJsonObject(result.content);
-    const structured = workManagerResultSchema.parse(parsed);
-    return {
-      decision,
-      message: structured.message,
-      model: modelSummary,
-      raw: result.raw,
-      structuredResult: structured,
-      toolResults,
-    };
-  }
   if (decision.specialist === "translation") {
     const parsed = parseJsonObject(result.content);
     const structured = translationResultSchema.parse(parsed);

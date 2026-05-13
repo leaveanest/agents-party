@@ -29,7 +29,6 @@ package "Heroku" {
       component "Routing Resolver\nworkspace / channel / thread" as routing_resolver
       component "AgentRunner" as agent_runner
       component "ProviderRouter" as provider_router
-      component "Work Manager" as work_manager
       component "Web Research" as web_research
       component "Google Maps" as google_maps
       component "Translation" as translation
@@ -50,7 +49,6 @@ package "Heroku" {
     folder "channel_app_settings" as pg_channel_settings
     folder "slack_threads" as pg_threads
     folder "slack_installations / slack_bots" as pg_slack_installations
-    folder "work_items / participants /\nevents / attention_index" as pg_work_items
     folder "google_auth_connections" as pg_google_connections
     folder "google_oauth_states" as pg_google_oauth_states
     folder "salesforce_auth_configs /\nsalesforce_connections /\nsalesforce_oauth_states" as pg_salesforce_oauth
@@ -85,15 +83,11 @@ agent_runner --> provider_router : provider request with domain history
 provider_router --> llm_providers : model invocation
 provider_router --> heroku_inference : optional Heroku-hosted model calls
 
-agent_runner --> work_manager
 agent_runner --> web_research
 agent_runner --> google_maps
 agent_runner --> translation
 agent_runner --> image_generation
 agent_runner --> video_generation
-
-work_manager --> provider_router : structured task execution
-work_manager --> pg_work_items : relational task persistence
 
 web_research --> provider_router : web-search capable generation
 google_maps --> google_maps_platform : Places / Routes API calls
@@ -121,7 +115,6 @@ Stored data:
 - workspace and channel app settings
 - active thread agent/model route state
 - Slack installation store records
-- work items, participants, events, and attention index
 - Google OAuth connection documents
 - short-lived Google OAuth state documents
 - Salesforce OAuth config, connection, and state documents

@@ -28,11 +28,10 @@ describe("PostgresMigrationRunner", () => {
     expect(client.released).toBe(true);
   });
 
-  it("keeps TypeScript migration definitions aligned with the legacy Alembic sequence", () => {
+  it("keeps TypeScript migration definitions aligned with the current schema", () => {
     expect(postgresMigrations.map((migration) => migration.id)).toEqual([
       "20260330_0001",
       "20260508_0002",
-      "20260508_0003",
       "20260512_0004",
       "20260512_0005",
       "20260512_0006",
@@ -43,25 +42,22 @@ describe("PostgresMigrationRunner", () => {
     expect(postgresMigrations[1]?.upSql).toContain(
       "create table if not exists salesforce_connections",
     );
-    expect(postgresMigrations[2]?.upSql).toContain(
-      "create table if not exists work_item_calendar_links",
-    );
-    expect(postgresMigrations[3]?.upSql).toContain("add column if not exists default_model_id");
-    expect(postgresMigrations[3]?.upSql).toContain("payload ->> 'default_model_id'");
-    expect(postgresMigrations[3]?.upSql).toContain("payload ->> 'model_scope' = 'thread'");
-    expect(postgresMigrations[4]?.upSql).toContain(
+    expect(postgresMigrations[2]?.upSql).toContain("add column if not exists default_model_id");
+    expect(postgresMigrations[2]?.upSql).toContain("payload ->> 'default_model_id'");
+    expect(postgresMigrations[2]?.upSql).toContain("payload ->> 'model_scope' = 'thread'");
+    expect(postgresMigrations[3]?.upSql).toContain(
       "create table if not exists workspace_credentials",
     );
-    expect(postgresMigrations[5]?.upSql).toContain(
+    expect(postgresMigrations[4]?.upSql).toContain(
       "create table if not exists rss_feed_subscriptions",
     );
-    expect(postgresMigrations[5]?.upSql).toContain(
+    expect(postgresMigrations[4]?.upSql).toContain(
       "create table if not exists rss_processed_articles",
     );
   });
 
   it("requires explicit Alembic baseline when legacy metadata is present", async () => {
-    const client = new RecordingClient([], "20260508_0003");
+    const client = new RecordingClient([], "legacy_removed_revision");
     const pool = {
       connect: async () => client,
       end: async () => undefined,

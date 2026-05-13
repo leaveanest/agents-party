@@ -5,7 +5,7 @@ OSA-14 introduces the TypeScript agent runtime under `src/agents/`.
 The runtime is repository-owned:
 
 - `schemas.ts` defines Zod-validated Slack invocation, agent/specialist routing inputs, and structured result contracts.
-- `runner.ts` executes the selected agent runtime, dispatches native specialist runtimes when configured, builds repository domain message history, invokes the `ProviderRouter`, and validates structured work-manager/translation results.
+- `runner.ts` executes the selected agent runtime, dispatches native specialist runtimes when configured, builds repository domain message history, invokes the `ProviderRouter`, and validates structured translation results.
 - `toolContracts.ts` defines typed tool declarations and execution for model tool calls without depending on external agent-framework tool contracts.
 - `src/slack/agentHandlers.ts` connects `app_mention` events to the TypeScript `AgentRunner` and replies in the Slack thread.
 

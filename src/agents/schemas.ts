@@ -7,7 +7,6 @@ export const agentSpecialistSchema = z.enum([
   "translation",
   "video_generation",
   "web_research",
-  "work_manager",
 ]);
 
 export const slackReferenceImageSchema = z
@@ -61,34 +60,6 @@ export const agentRouterDecisionSchema = z
   })
   .strict();
 
-export const workManagerActionSchema = z.enum([
-  "clarification_needed",
-  "completed",
-  "created",
-  "listed",
-  "no_op",
-  "updated",
-]);
-
-export const workManagerResultSchema = z
-  .object({
-    action: workManagerActionSchema.default("no_op"),
-    message: z.string().min(1),
-    workItems: z
-      .array(
-        z
-          .object({
-            dueAt: z.string().optional(),
-            status: z.string().optional(),
-            title: z.string().min(1),
-            workItemId: z.string().min(1),
-          })
-          .strict(),
-      )
-      .default([]),
-  })
-  .strict();
-
 export const translationResultSchema = z
   .object({
     action: z.enum(["no_op", "translated"]).default("translated"),
@@ -109,4 +80,3 @@ export type AgentRouterDecision = z.infer<typeof agentRouterDecisionSchema>;
 export type AgentSpecialist = z.infer<typeof agentSpecialistSchema>;
 export type SlackAgentInvocation = z.infer<typeof slackAgentInvocationSchema>;
 export type TranslationResult = z.infer<typeof translationResultSchema>;
-export type WorkManagerResult = z.infer<typeof workManagerResultSchema>;
