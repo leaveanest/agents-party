@@ -30,7 +30,9 @@ Configure the default model with:
 AGENT_MODEL=google:gemini-2.5-flash
 ```
 
-If `AGENT_MODEL` is not set, the TypeScript runtime falls back to `google:gemini-2.5-flash`.
+For local/bootstrap development, `loadSettings` uses `google:gemini-2.5-flash` when `AGENT_MODEL` is not set. This default is only a developer bootstrap default for `AgentRunner`; it is not a `ProviderRouter` model-resolution default.
+
+For production-like runtime configuration, including `APP_ENV=heroku`, `APP_ENV=production`, `APP_ENV=prod`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set, `AGENT_MODEL` is required. Missing `AGENT_MODEL` fails during settings loading so production does not silently choose a provider or model.
 
 The routed Slack surfaces are `app_mention`, active thread follow-up `message` events, and flag-reaction translation commands.
 

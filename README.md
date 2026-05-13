@@ -152,6 +152,8 @@ SLACK_OAUTH_REDIRECT_PATH=/slack/oauth_redirect
 AGENT_MODEL=google:gemini-2.5-flash
 ```
 
+`AGENT_MODEL` is the application bootstrap/default model passed to the TypeScript `AgentRunner` when Slack routing has not supplied a thread, channel, or workspace model. Local development can omit it and use the bootstrap default `google:gemini-2.5-flash`. Production-like runtimes, including Heroku dynos and `APP_ENV=heroku` or `NODE_ENV=production`, require `AGENT_MODEL`; startup fails closed if it is missing.
+
 ### Specialists
 
 ```bash
