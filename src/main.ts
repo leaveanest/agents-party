@@ -8,6 +8,7 @@ import { Pool } from "pg";
 import {
   PostgresAgentRoutingRepository,
   PostgresOAuthRepository,
+  PostgresSalesforcePdfWorkflowRepository,
 } from "./infrastructure/postgres/appRepositories.js";
 import { createBullMqSlackAgentJobQueue } from "./queues/slackAgentJobs.js";
 import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
@@ -27,6 +28,10 @@ const routingRepository =
     : new PostgresAgentRoutingRepository(appRepositoryPool);
 const oauthRepository =
   appRepositoryPool === undefined ? undefined : new PostgresOAuthRepository(appRepositoryPool);
+const salesforcePdfWorkflowRepository =
+  appRepositoryPool === undefined
+    ? undefined
+    : new PostgresSalesforcePdfWorkflowRepository(appRepositoryPool);
 const agentJobQueue =
   !settings.slackAgentQueueEnabled ||
   settings.redisUrl === undefined ||
@@ -75,6 +80,10 @@ const slackGateway = settings.slackEnabled
                 },
                 repository: oauthRepository,
               }
+            : undefined,
+        salesforcePdfWorkflowHome:
+          settings.salesforceOAuthEnabled && salesforcePdfWorkflowRepository !== undefined
+            ? { repository: salesforcePdfWorkflowRepository }
             : undefined,
         workspaceCredentialSettings: workspaceCredentialResolver,
       }),

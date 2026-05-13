@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   PostgresAgentRoutingRepository,
   PostgresOAuthRepository,
+  PostgresSalesforcePdfWorkflowRepository,
 } from "../../../src/infrastructure/postgres/appRepositories.js";
 
 describe("Postgres app repositories", () => {
@@ -94,6 +95,52 @@ describe("Postgres app repositories", () => {
     });
     await expect(oauth.findSalesforceAuthConfig("T1", "org-1")).resolves.toEqual({
       org: "salesforce-org",
+    });
+  });
+
+  it("writes Salesforce PDF workflow settings and template metadata", async () => {
+    const pool = new RecordingPool();
+    const repository = new PostgresSalesforcePdfWorkflowRepository(pool as never);
+
+    await repository.saveSalesforcePdfWorkflowSetting({
+      action: "quote_pdf",
+      enabled: true,
+      payload: {
+        action: "quote_pdf",
+        enabled: true,
+        salesforce_org_id: "00DORG",
+        team_id: "T1",
+        template_id: "quote_v1",
+      },
+      salesforceOrgId: "00DORG",
+      teamId: "T1",
+      templateId: "quote_v1",
+      updatedAt: new Date("2026-05-13T00:00:00Z"),
+    });
+    await repository.saveSalesforcePdfTemplate({
+      action: "quote_pdf",
+      payload: {
+        action: "quote_pdf",
+        display_name: "Quote",
+        salesforce_org_id: "00DORG",
+        team_id: "T1",
+        template_id: "quote_v1",
+      },
+      salesforceOrgId: "00DORG",
+      status: "active",
+      teamId: "T1",
+      templateId: "quote_v1",
+      updatedAt: new Date("2026-05-13T00:00:00Z"),
+    });
+
+    expect(pool.queries.map((query) => query.text)).toEqual([
+      expect.stringContaining('insert into "salesforce_pdf_workflow_settings"'),
+      expect.stringContaining('insert into "salesforce_pdf_templates"'),
+    ]);
+    expect(JSON.parse(String(pool.queries[0]?.values?.at(-1)))).toMatchObject({
+      action: "quote_pdf",
+      enabled: true,
+      template_id: "quote_v1",
     });
   });
 

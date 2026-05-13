@@ -11,6 +11,8 @@ import type {
 import type { SlackEventDeduplicator } from "./idempotency.js";
 import { readSlackEventId } from "./idempotency.js";
 import {
+  SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
+  SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
   WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
   WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
 } from "./interactiveIds.js";
@@ -26,6 +28,12 @@ export type SlackEventFeatureHandlers = {
   ): Promise<void>;
   handleMessage(args: SlackEventArgs<"message">): Promise<void>;
   handleReactionAdded(args: SlackEventArgs<"reaction_added">): Promise<void>;
+  handleSalesforcePdfWorkflowConfigureAction(
+    args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
+  handleSalesforcePdfWorkflowModalSubmission(
+    args: SlackViewMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
 };
 
 type SlackAppRegistration = Pick<App, "action" | "event" | "use" | "view">;
@@ -62,8 +70,14 @@ export function registerSlackEventHandlers(
   app.action(WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID, async (args) =>
     handlers.handleWorkspaceCredentialConfigureAction(args),
   );
+  app.action(SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleSalesforcePdfWorkflowConfigureAction(args),
+  );
   app.view(WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleWorkspaceCredentialModalSubmission(args),
+  );
+  app.view(SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID, async (args) =>
+    handlers.handleSalesforcePdfWorkflowModalSubmission(args),
   );
 }
 
@@ -122,6 +136,12 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
       await ack();
     },
     async handleWorkspaceCredentialModalSubmission({ ack }) {
+      await ack();
+    },
+    async handleSalesforcePdfWorkflowConfigureAction({ ack }) {
+      await ack();
+    },
+    async handleSalesforcePdfWorkflowModalSubmission({ ack }) {
       await ack();
     },
   };

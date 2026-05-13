@@ -302,4 +302,35 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         on rss_processed_articles (article_url);
     `,
   },
+  {
+    id: "20260513_0007",
+    name: "salesforce_pdf_workflows",
+    upSql: `
+      create table if not exists salesforce_pdf_workflow_settings (
+        team_id text not null,
+        salesforce_org_id text not null,
+        action text not null,
+        enabled boolean not null,
+        template_id text not null,
+        updated_at timestamp with time zone not null,
+        payload json not null,
+        primary key (team_id, salesforce_org_id, action)
+      );
+      create index if not exists ix_salesforce_pdf_workflow_settings_enabled
+        on salesforce_pdf_workflow_settings (team_id, salesforce_org_id, enabled);
+
+      create table if not exists salesforce_pdf_templates (
+        team_id text not null,
+        salesforce_org_id text not null,
+        template_id text not null,
+        action text not null,
+        status text not null,
+        updated_at timestamp with time zone not null,
+        payload json not null,
+        primary key (team_id, salesforce_org_id, template_id)
+      );
+      create index if not exists ix_salesforce_pdf_templates_action
+        on salesforce_pdf_templates (team_id, salesforce_org_id, action, status);
+    `,
+  },
 ];
