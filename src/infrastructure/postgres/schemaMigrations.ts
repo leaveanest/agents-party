@@ -170,6 +170,13 @@ export const postgresMigrations: readonly PostgresMigration[] = [
     `,
   },
   {
+    id: "20260508_0003",
+    name: "removed_work_item_calendar_links",
+    upSql: `
+      select 1;
+    `,
+  },
+  {
     id: "20260512_0004",
     name: "agent_model_routing",
     upSql: `

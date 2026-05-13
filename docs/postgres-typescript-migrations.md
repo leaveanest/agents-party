@@ -22,7 +22,7 @@ This records mirrored TypeScript migrations through the detected Alembic revisio
 ## Migration Policy
 
 - New application migrations should be added to `schemaMigrations.ts`.
-- Migration ids describe the current TypeScript-owned schema. Removed features are omitted instead of kept as placeholder migrations.
+- Migration SQL describes the current TypeScript-owned schema. Removed feature tables are omitted, but legacy migration ids may remain as no-op placeholders when deployed Alembic or schema baselines need those ids for compatibility.
 - The migration SQL creates the current schema for Slack installations, routing settings, OAuth state/connections, Salesforce OAuth, workspace credentials, and RSS feed processing.
 - OAuth state consumption uses a delete-returning operation so callback state cannot be replayed after a successful consume.
 

@@ -32,6 +32,7 @@ describe("PostgresMigrationRunner", () => {
     expect(postgresMigrations.map((migration) => migration.id)).toEqual([
       "20260330_0001",
       "20260508_0002",
+      "20260508_0003",
       "20260512_0004",
       "20260512_0005",
       "20260512_0006",
@@ -42,16 +43,17 @@ describe("PostgresMigrationRunner", () => {
     expect(postgresMigrations[1]?.upSql).toContain(
       "create table if not exists salesforce_connections",
     );
-    expect(postgresMigrations[2]?.upSql).toContain("add column if not exists default_model_id");
-    expect(postgresMigrations[2]?.upSql).toContain("payload ->> 'default_model_id'");
-    expect(postgresMigrations[2]?.upSql).toContain("payload ->> 'model_scope' = 'thread'");
-    expect(postgresMigrations[3]?.upSql).toContain(
+    expect(postgresMigrations[2]?.upSql).not.toContain("work_item_calendar_links");
+    expect(postgresMigrations[3]?.upSql).toContain("add column if not exists default_model_id");
+    expect(postgresMigrations[3]?.upSql).toContain("payload ->> 'default_model_id'");
+    expect(postgresMigrations[3]?.upSql).toContain("payload ->> 'model_scope' = 'thread'");
+    expect(postgresMigrations[4]?.upSql).toContain(
       "create table if not exists workspace_credentials",
     );
-    expect(postgresMigrations[4]?.upSql).toContain(
+    expect(postgresMigrations[5]?.upSql).toContain(
       "create table if not exists rss_feed_subscriptions",
     );
-    expect(postgresMigrations[4]?.upSql).toContain(
+    expect(postgresMigrations[5]?.upSql).toContain(
       "create table if not exists rss_processed_articles",
     );
   });
@@ -71,8 +73,8 @@ describe("PostgresMigrationRunner", () => {
     expect(client.sql).toContain("rollback");
   });
 
-  it("baselines only through the detected Alembic revision and applies remaining migrations", async () => {
-    const client = new RecordingClient([], "20260330_0001");
+  it("baselines through the removed work-item Alembic revision and applies remaining migrations", async () => {
+    const client = new RecordingClient([], "20260508_0003");
     const pool = {
       connect: async () => client,
       end: async () => undefined,
@@ -86,11 +88,15 @@ describe("PostgresMigrationRunner", () => {
     const applied = await runner.migrate([
       { id: "20260330_0001", name: "initial", upSql: "select initial" },
       { id: "20260508_0002", name: "salesforce", upSql: "select salesforce" },
+      { id: "20260508_0003", name: "removed_work_items", upSql: "select removed_work_items" },
+      { id: "20260512_0004", name: "model_routing", upSql: "select model_routing" },
     ]);
 
-    expect(applied).toEqual([expect.objectContaining({ id: "20260508_0002" })]);
+    expect(applied).toEqual([expect.objectContaining({ id: "20260512_0004" })]);
     expect(client.sql).not.toContain("select initial");
-    expect(client.sql).toContain("select salesforce");
+    expect(client.sql).not.toContain("select salesforce");
+    expect(client.sql).not.toContain("select removed_work_items");
+    expect(client.sql).toContain("select model_routing");
   });
 
   it("rejects Alembic baseline when the legacy revision is not mirrored", async () => {
