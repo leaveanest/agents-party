@@ -44,3 +44,8 @@ Salesforce OAuth supports Authorization Code Flow with PKCE, encrypted access an
 refresh-token grant renewal, and revoke-backed disconnect. Refresh failures caused by revoked or
 invalid refresh tokens mark the local connection `expired` so Salesforce-dependent features can
 ask the Slack user to reconnect.
+
+Salesforce PDF workflows depend on this OAuth runtime for user-scoped Salesforce REST access. The
+OAuth scopes are `api`, `refresh_token`, and `id`; object, field, sharing, and Files permissions are
+still enforced by Salesforce for the connected user. See
+[`salesforce-pdf-workflows.md`](salesforce-pdf-workflows.md) for workflow setup and rollout.
