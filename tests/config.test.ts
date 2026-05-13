@@ -76,6 +76,21 @@ describe("loadSettings", () => {
     );
   });
 
+  it("requires AGENT_MODEL for Heroku-like runtime configuration", () => {
+    expect(() => loadSettings({ APP_ENV: "heroku" })).toThrow(
+      "AGENT_MODEL is required for production-like runtimes.",
+    );
+    expect(() => loadSettings({ DYNO: "web.1" })).toThrow(
+      "AGENT_MODEL is required for production-like runtimes.",
+    );
+  });
+
+  it("requires AGENT_MODEL when NODE_ENV is production", () => {
+    expect(() => loadSettings({ NODE_ENV: "production" })).toThrow(
+      "AGENT_MODEL is required for production-like runtimes.",
+    );
+  });
+
   it("enables static-token Slack ingress with signing secret and bot token", () => {
     const settings = loadSettings({
       SLACK_BOT_TOKEN: "xoxb-token",

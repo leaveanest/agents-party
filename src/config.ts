@@ -48,12 +48,13 @@ export type AppSettings = {
 };
 
 const DEFAULT_PORT = 8000;
-const DEFAULT_AGENT_MODEL_ID = "google:gemini-2.5-flash";
+const LOCAL_BOOTSTRAP_AGENT_MODEL_ID = "google:gemini-2.5-flash";
 const DEFAULT_IMAGE_GENERATION_MODEL_ID = "google:gemini-2.5-flash-image";
 const DEFAULT_TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES = ["en-US"];
 const DEFAULT_TRANSCRIPTION_LANGUAGE_CODE = "ja-JP";
 const DEFAULT_TRANSCRIPTION_MODEL_ID = "google:speech-to-text-latest-long";
 const DEFAULT_VIDEO_GENERATION_MODEL_ID = "google:veo-3.1-fast-generate-001";
+const APP_ENVS_REQUIRING_AGENT_MODEL = new Set(["heroku", "prod", "production", "staging"]);
 const DEFAULT_SLACK_SCOPES = [
   "app_mentions:read",
   "channels:history",
@@ -76,6 +77,8 @@ const DEFAULT_SLACK_SCOPES = [
  * @throws Error when `APP_PORT` or `PORT` is present but not a valid TCP port.
  */
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings {
+  const appEnv = readText(env.APP_ENV) ?? "local";
+  const agentModelId = readAgentModelId(env, appEnv);
   const databaseUrl = readText(env.DATABASE_URL);
   const redisUrl = readText(env.REDIS_URL);
   const googleOAuthClientId = readText(env.GOOGLE_OAUTH_CLIENT_ID);
@@ -140,8 +143,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     salesforceTokenEncryptionKey !== undefined;
 
   return {
-    agentModelId: readText(env.AGENT_MODEL) ?? DEFAULT_AGENT_MODEL_ID,
-    appEnv: env.APP_ENV ?? "local",
+    agentModelId,
+    appEnv,
     appHost: env.APP_HOST ?? "0.0.0.0",
     appName: env.APP_NAME ?? "agents-party",
     appPort: parsePort(env.PORT ?? env.APP_PORT, DEFAULT_PORT),
@@ -196,6 +199,27 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     salesforceOAuthStartPath,
     salesforceTokenEncryptionKey,
   };
+}
+
+function readAgentModelId(env: NodeJS.ProcessEnv, appEnv: string): string {
+  const agentModelId = readText(env.AGENT_MODEL);
+  if (agentModelId !== undefined) {
+    return agentModelId;
+  }
+  if (requiresExplicitAgentModel(env, appEnv)) {
+    throw new Error(
+      "AGENT_MODEL is required for production-like runtimes. Set AGENT_MODEL to a registered provider model id.",
+    );
+  }
+  return LOCAL_BOOTSTRAP_AGENT_MODEL_ID;
+}
+
+function requiresExplicitAgentModel(env: NodeJS.ProcessEnv, appEnv: string): boolean {
+  return (
+    APP_ENVS_REQUIRING_AGENT_MODEL.has(appEnv.trim().toLowerCase()) ||
+    readText(env.DYNO) !== undefined ||
+    readText(env.NODE_ENV)?.toLowerCase() === "production"
+  );
 }
 
 /**
