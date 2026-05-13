@@ -22,8 +22,8 @@ This records mirrored TypeScript migrations through the detected Alembic revisio
 ## Migration Policy
 
 - New application migrations should be added to `schemaMigrations.ts`.
-- Migration ids keep the pre-cutover Alembic sequence so TypeScript migrations can be reconciled against deployed databases.
-- The migration SQL mirrors the current Alembic schema for Slack installations, routing settings, OAuth state/connections, work items, Salesforce OAuth, and work-item calendar links.
+- Migration SQL describes the current TypeScript-owned schema. Removed feature tables are omitted, but legacy migration ids may remain as no-op placeholders when deployed Alembic or schema baselines need those ids for compatibility.
+- The migration SQL creates the current schema for Slack installations, routing settings, OAuth state/connections, Salesforce OAuth, workspace credentials, and RSS feed processing.
 - OAuth state consumption uses a delete-returning operation so callback state cannot be replayed after a successful consume.
 
 ## Rollout Notes
@@ -31,7 +31,7 @@ This records mirrored TypeScript migrations through the detected Alembic revisio
 Before production schema rollout:
 
 1. Run `vp run migrate` against a staging copy of production data.
-2. Verify Slack OAuth install/fetch, thread routing settings, OAuth state reads/writes, and work-item reads/writes against the migrated database.
+2. Verify Slack OAuth install/fetch, thread routing settings, OAuth state reads/writes, and RSS feed reads/writes against the migrated database.
 3. Take a production backup before running migrations in production.
 
 Rollback is database-backup based for destructive cutover work. These TypeScript migrations are additive/idempotent and do not drop legacy tables.

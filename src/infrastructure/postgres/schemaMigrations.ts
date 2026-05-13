@@ -121,65 +121,6 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         primary key (team_id, state_id)
       );
 
-      create table if not exists work_items (
-        team_id text not null,
-        work_item_id text not null,
-        title text not null,
-        status text not null,
-        visibility_kind text not null,
-        audience_channel_id text,
-        primary_assignee_user_id text,
-        due_at timestamp with time zone,
-        updated_at timestamp with time zone not null,
-        completed_at timestamp with time zone,
-        payload json not null,
-        primary key (team_id, work_item_id)
-      );
-      create index if not exists ix_work_items_status on work_items (status);
-      create index if not exists ix_work_items_visibility_kind on work_items (visibility_kind);
-      create index if not exists ix_work_items_channel on work_items (team_id, audience_channel_id);
-
-      create table if not exists work_item_participants (
-        team_id text not null,
-        work_item_id text not null,
-        user_id text not null,
-        role text not null,
-        attention_profile text not null,
-        next_attention_at timestamp with time zone,
-        muted_until timestamp with time zone,
-        last_seen_event_id text,
-        updated_at timestamp with time zone not null,
-        payload json not null,
-        primary key (team_id, work_item_id, user_id)
-      );
-
-      create table if not exists work_item_events (
-        team_id text not null,
-        work_item_id text not null,
-        event_id text not null,
-        type text not null,
-        occurred_at timestamp with time zone not null,
-        payload json not null,
-        primary key (team_id, work_item_id, event_id)
-      );
-
-      create table if not exists work_item_attention_index (
-        team_id text not null,
-        user_id text not null,
-        work_item_id text not null,
-        needs_attention_now boolean not null,
-        status text not null,
-        visibility_kind text not null,
-        audience_channel_id text,
-        primary_assignee_user_id text,
-        updated_at timestamp with time zone not null,
-        payload json not null,
-        primary key (team_id, user_id, work_item_id)
-      );
-      create index if not exists ix_work_item_attention_index_needs_attention_now
-        on work_item_attention_index (needs_attention_now);
-      create index if not exists ix_work_item_attention_index_viewer
-        on work_item_attention_index (team_id, user_id, needs_attention_now);
     `,
   },
   {
@@ -230,34 +171,9 @@ export const postgresMigrations: readonly PostgresMigration[] = [
   },
   {
     id: "20260508_0003",
-    name: "work_item_calendar_links",
+    name: "removed_work_item_calendar_links",
     upSql: `
-      create table if not exists work_item_calendar_links (
-        team_id text not null,
-        work_item_id text not null,
-        link_id text not null,
-        provider_kind text not null,
-        external_calendar_id text not null,
-        external_event_id text not null,
-        event_title_snapshot text,
-        starts_at timestamp with time zone,
-        ends_at timestamp with time zone,
-        is_all_day boolean not null,
-        response_status text,
-        sync_status text not null,
-        last_synced_at timestamp with time zone,
-        created_at timestamp with time zone not null,
-        updated_at timestamp with time zone not null,
-        payload json not null,
-        primary key (team_id, work_item_id, link_id),
-        constraint uq_work_item_calendar_links_external_event
-          unique (team_id, work_item_id, provider_kind, external_calendar_id, external_event_id)
-      );
-      create index if not exists ix_work_item_calendar_links_external_event
-        on work_item_calendar_links
-        (team_id, provider_kind, external_calendar_id, external_event_id);
-      create index if not exists ix_work_item_calendar_links_sync_status
-        on work_item_calendar_links (team_id, sync_status);
+      select 1;
     `,
   },
   {

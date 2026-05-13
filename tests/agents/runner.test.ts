@@ -188,35 +188,6 @@ describe("AgentRunner", () => {
     expect(router.requests[0]?.model.id).toBe(model.id);
   });
 
-  it("validates structured work-manager results without an external agent framework", async () => {
-    const runner = new AgentRunner({
-      defaultModelId: model.id,
-      providerRouter: new FakeProviderRouter({
-        content: JSON.stringify({
-          action: "listed",
-          message: "1 task needs attention.",
-          workItems: [{ title: "Follow up", workItemId: "W1" }],
-        }),
-      }),
-    });
-
-    const result = await runner.run({
-      channelId: "C1",
-      messageTs: "1.0",
-      specialist: "work_manager",
-      teamId: "T1",
-      text: "list my tasks",
-      userId: "U1",
-    });
-
-    expect(result.decision.specialist).toBe("work_manager");
-    expect(result.structuredResult).toEqual({
-      action: "listed",
-      message: "1 task needs attention.",
-      workItems: [{ title: "Follow up", workItemId: "W1" }],
-    });
-  });
-
   it("runs a final provider turn after typed tool calls", async () => {
     const registry = new AgentToolRegistry([
       {
@@ -240,7 +211,7 @@ describe("AgentRunner", () => {
         toolCalls: [{ input: { text: "ok" }, toolCallId: "call-1", toolName: "echo" }],
       },
       {
-        content: JSON.stringify({ action: "no_op", message: "final" }),
+        content: "final",
       },
     ]);
     const runner = new AgentRunner({
@@ -252,9 +223,8 @@ describe("AgentRunner", () => {
     const result = await runner.run({
       channelId: "C1",
       messageTs: "1.0",
-      specialist: "work_manager",
       teamId: "T1",
-      text: "task echo",
+      text: "echo",
       userId: "U1",
     });
 
@@ -299,7 +269,7 @@ describe("AgentRunner", () => {
     const runner = new AgentRunner({
       defaultModelId: model.id,
       providerRouter: new FakeProviderRouter({
-        content: JSON.stringify({ action: "no_op", message: "done" }),
+        content: "done",
         toolCalls: [{ input: { text: "ok" }, toolCallId: "call-1", toolName: "echo" }],
       }),
       toolRegistry: registry,
@@ -309,35 +279,11 @@ describe("AgentRunner", () => {
       runner.run({
         channelId: "C1",
         messageTs: "1.0",
-        specialist: "work_manager",
         teamId: "T1",
-        text: "task echo",
+        text: "echo",
         userId: "U1",
       }),
     ).rejects.toThrow("Invalid output from agent tool");
-  });
-
-  it("wraps structured output validation failures with specialist and model context", async () => {
-    const runner = new AgentRunner({
-      defaultModelId: model.id,
-      providerRouter: new FakeProviderRouter({
-        content: JSON.stringify({ action: "listed", workItems: [] }),
-      }),
-    });
-
-    await expect(
-      runner.run({
-        channelId: "C1",
-        messageTs: "1.0",
-        specialist: "work_manager",
-        teamId: "T1",
-        text: "list my tasks",
-        userId: "U1",
-      }),
-    ).rejects.toMatchObject({
-      model: { id: "google:gemini-2.5-flash", provider: "google" },
-      specialist: "work_manager",
-    });
   });
 
   it("wraps default model lookup failures with attempted model id", async () => {

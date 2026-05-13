@@ -38,27 +38,22 @@ describeIfPostgres("PostgreSQL TypeScript persistence integration", () => {
     await runner.migrate(postgresMigrations);
 
     const repository = new PostgresJsonDocumentRepository<
-      { team_id: string; work_item_id: string },
-      { title: string }
-    >(postgresDocumentTables.workItem, { pool });
+      { agent_id: string },
+      { agent_id: string; enabled: boolean }
+    >(postgresDocumentTables.agent, { pool });
     await repository.upsert({
-      key: { team_id: "T1", work_item_id: "W1" },
-      payload: { title: "Persist through pg" },
+      key: { agent_id: "assistant" },
+      payload: { agent_id: "assistant", enabled: true },
       values: {
-        status: "captured",
-        title: "Persist through pg",
+        enabled: true,
         updated_at: new Date("2026-05-11T00:00:00Z"),
-        visibility_kind: "private",
       },
     });
 
-    await expect(repository.find({ team_id: "T1", work_item_id: "W1" })).resolves.toEqual({
-      status: "captured",
-      team_id: "T1",
-      title: "Persist through pg",
+    await expect(repository.find({ agent_id: "assistant" })).resolves.toEqual({
+      agent_id: "assistant",
+      enabled: true,
       updated_at: "2026-05-11T00:00:00.000Z",
-      visibility_kind: "private",
-      work_item_id: "W1",
     });
   });
 });

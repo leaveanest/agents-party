@@ -46,8 +46,6 @@ Top-level Slack AI routing is moving toward explicit workspace, channel, and thr
 
 Selected agents can use these specialist runtimes internally:
 
-- `work_manager`
-  - capture and update work items backed by PostgreSQL
 - `web_research`
   - current, source-backed web research using built-in web tools
 - `google_maps`
