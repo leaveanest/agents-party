@@ -1,9 +1,10 @@
 import { loadSettings } from "./config.js";
 import { createDefaultAgentRunner } from "./agents/runner.js";
+import { createSalesforcePdfToolDependencies } from "./agents/salesforcePdf/index.js";
 import { createAppServer } from "./server.js";
-import { createOAuthHttpGateway } from "./integrations/oauth/http.js";
 import { issueSalesforceOAuthStartContext } from "./integrations/oauth/coordinators.js";
 import { FernetTextCipher } from "./integrations/oauth/fernet.js";
+import { createOAuthHttpGateway } from "./integrations/oauth/http.js";
 import { Pool } from "pg";
 import {
   PostgresAgentRoutingRepository,
@@ -45,8 +46,22 @@ const workspaceCredentialResolver =
         new PostgresWorkspaceCredentialRepository(appRepositoryPool),
         new FernetTextCipher(settings.llmApiKeyEncryptionKey),
       );
+const salesforcePdfTools =
+  settings.salesforceOAuthEnabled &&
+  settings.salesforceOAuthContextSigningSecret !== undefined &&
+  settings.salesforceTokenEncryptionKey !== undefined &&
+  oauthRepository !== undefined &&
+  salesforcePdfWorkflowRepository !== undefined
+    ? createSalesforcePdfToolDependencies({
+        contextSigningSecret: settings.salesforceOAuthContextSigningSecret,
+        oauthRepository,
+        settingsRepository: salesforcePdfWorkflowRepository,
+        tokenEncryptionKey: settings.salesforceTokenEncryptionKey,
+      })
+    : undefined;
 const agentRunner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
+  salesforcePdfTools,
 });
 const audioTranscriptionGateway = createDefaultTranscriptionGateway(settings, {
   credentialResolver: workspaceCredentialResolver,

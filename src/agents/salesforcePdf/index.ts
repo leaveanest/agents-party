@@ -14,6 +14,20 @@ export {
   type DealReviewPackWorkflowSettingsRepository,
 } from "./dealReviewPackWorkflow.js";
 export {
+  createDealReviewPackToolInputSchema,
+  createQuotePdfToolInputSchema,
+  createSalesforcePdfAgentTools,
+  type CreateDealReviewPackToolInput,
+  type CreateQuotePdfToolInput,
+  type SalesforcePdfToolContext,
+  type SalesforcePdfToolOptions,
+  type SalesforcePdfToolOutput,
+} from "./tools.js";
+export {
+  createSalesforcePdfToolDependencies,
+  type SalesforcePdfWorkflowRuntimeRepository,
+} from "./runtime.js";
+export {
   QuotePdfWorkflow,
   quotePdfWorkflowInputSchema,
   type QuotePdfRenderer,
