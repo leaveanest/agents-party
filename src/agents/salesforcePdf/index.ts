@@ -1,6 +1,23 @@
 export {
+  DealReviewPackWorkflow,
+  dealReviewPackWorkflowInputSchema,
+  type DealReviewPackAttachment,
+  type DealReviewPackFailure,
+  type DealReviewPackFailureCode,
+  type DealReviewPackNarrativeGenerator,
+  type DealReviewPackRenderer,
+  type DealReviewPackResult,
+  type DealReviewPackSalesforceGateway,
+  type DealReviewPackSuccess,
+  type DealReviewPackWorkflowInput,
+  type DealReviewPackWorkflowMode,
+  type DealReviewPackWorkflowSettingsRepository,
+} from "./dealReviewPackWorkflow.js";
+export {
   QuotePdfWorkflow,
+  quotePdfWorkflowInputSchema,
   type QuotePdfRenderer,
+  type QuotePdfWorkflowAttachment,
   type QuotePdfWorkflowFailure,
   type QuotePdfWorkflowFailureCode,
   type QuotePdfWorkflowInput,

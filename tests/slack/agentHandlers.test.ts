@@ -258,6 +258,58 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(updates[0])).toContain("Quote PDF is enabled");
   });
 
+  it("saves Deal Review Pack approval and AI summary settings from modal submissions", async () => {
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      salesforcePdfWorkflowHome: {
+        repository: {
+          async findSalesforcePdfWorkflowSetting() {
+            return undefined;
+          },
+          async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
+            return [];
+          },
+          async saveSalesforcePdfWorkflowSetting(input: unknown) {
+            saves.push(input);
+          },
+        },
+      },
+    });
+
+    await handlers.handleSalesforcePdfWorkflowModalSubmission({
+      ack: async () => undefined,
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {}, warn() {} },
+      view: validSalesforcePdfWorkflowView({
+        action: "deal_review_pack",
+        allowedApprovalStatuses: "Approved, Accepted",
+        approvalStatusField: "Approval_Status__c",
+        attachTo: "opportunity",
+        includeAiSummary: "true",
+        templateId: "deal_review_pack_v1",
+      }),
+    } as never);
+
+    expect(saves[0]).toMatchObject({
+      action: "deal_review_pack",
+      payload: expect.objectContaining({
+        allowed_approval_statuses: ["Approved", "Accepted"],
+        approval_status_field: "Approval_Status__c",
+        attach_to: "opportunity",
+        include_ai_summary: true,
+      }),
+      templateId: "deal_review_pack_v1",
+    });
+  });
+
   it("preserves Salesforce PDF workflow creation and enable audit fields on updates", async () => {
     const saves: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
@@ -2119,14 +2171,17 @@ function salesforceConnectionHomeFixture() {
 function validSalesforcePdfWorkflowSetting(): JsonObject {
   return {
     action: "quote_pdf",
+    allowed_approval_statuses: [],
     allowed_record_type_ids: ["012000000000001AAA"],
     allowed_record_type_names: [],
     allowed_stages: ["Proposal"],
     allowed_statuses: [],
+    approval_status_field: null,
     attach_to: "quote",
     created_at: "2026-05-13T00:00:00.000Z",
     enabled: true,
     field_mapping: { customerName: "Account.Name" },
+    include_ai_summary: false,
     required_fields: ["AccountId"],
     require_confirmation_before_attach: true,
     salesforce_org_id: "00DORG",
@@ -2138,11 +2193,20 @@ function validSalesforcePdfWorkflowSetting(): JsonObject {
   };
 }
 
-function validSalesforcePdfWorkflowView(): unknown {
+function validSalesforcePdfWorkflowView(
+  input: {
+    action?: string;
+    allowedApprovalStatuses?: string;
+    approvalStatusField?: string;
+    attachTo?: string;
+    includeAiSummary?: string;
+    templateId?: string;
+  } = {},
+): unknown {
   return {
     id: "VIEW1",
     private_metadata: JSON.stringify({
-      action: "quote_pdf",
+      action: input.action ?? "quote_pdf",
       salesforceOrgId: "00DORG",
       teamId: "T1",
     }),
@@ -2154,8 +2218,17 @@ function validSalesforcePdfWorkflowView(): unknown {
         salesforce_pdf_workflow_allowed_statuses: {
           allowed_statuses: { value: "" },
         },
+        salesforce_pdf_workflow_ai_summary: {
+          include_ai_summary: { selected_option: { value: input.includeAiSummary ?? "false" } },
+        },
+        salesforce_pdf_workflow_approval_field: {
+          approval_status_field: { value: input.approvalStatusField ?? "" },
+        },
+        salesforce_pdf_workflow_approval_statuses: {
+          allowed_approval_statuses: { value: input.allowedApprovalStatuses ?? "" },
+        },
         salesforce_pdf_workflow_attach_to: {
-          attach_to: { selected_option: { value: "quote" } },
+          attach_to: { selected_option: { value: input.attachTo ?? "quote" } },
         },
         salesforce_pdf_workflow_confirmation: {
           require_confirmation: { selected_option: { value: "true" } },
@@ -2173,7 +2246,7 @@ function validSalesforcePdfWorkflowView(): unknown {
           required_fields: { value: "AccountId, Amount" },
         },
         salesforce_pdf_workflow_template: {
-          template_id: { value: "quote_v1" },
+          template_id: { value: input.templateId ?? "quote_v1" },
         },
       },
     },
