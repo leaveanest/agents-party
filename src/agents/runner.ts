@@ -15,6 +15,10 @@ import {
   translationResultSchema,
 } from "./schemas.js";
 import {
+  createSalesforcePdfAgentTools,
+  type SalesforcePdfToolOptions,
+} from "./salesforcePdf/index.js";
+import {
   AgentSpecialistRuntimeError,
   createDefaultSpecialistRuntimes,
   type AgentSpecialistRuntime,
@@ -54,6 +58,7 @@ export type AgentRunnerOptions = {
   specialistRuntimes?: Partial<Record<AgentSpecialist, AgentSpecialistRuntime>>;
   specialistPrompts?: Partial<Record<AgentSpecialist, string>>;
   toolRegistry?: AgentToolRegistry;
+  toolRegistryFactory?: (invocation: SlackAgentInvocation) => AgentToolRegistry | undefined;
 };
 
 const DEFAULT_SPECIALIST_PROMPTS = {
@@ -117,6 +122,8 @@ export class AgentRunner {
     decision: AgentRouterDecision,
   ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
     const model = this.resolveModel(decision.specialist, invocation.modelId);
+    const toolRegistry =
+      this.options.toolRegistryFactory?.(invocation) ?? this.options.toolRegistry;
     const toolResults: AgentToolResult[] = [];
     try {
       let history = buildSpecialistHistory({
@@ -137,7 +144,7 @@ export class AgentRunner {
           specialist: decision.specialist,
         },
         model,
-        tools: undefined,
+        tools: toolRegistry?.definitions(),
       };
       const maxToolRounds = this.options.maxToolRounds ?? 1;
       for (let round = 0; round <= maxToolRounds; round += 1) {
@@ -145,13 +152,13 @@ export class AgentRunner {
         if ((result.toolCalls?.length ?? 0) === 0) {
           return { model, result, toolResults };
         }
-        if (this.options.toolRegistry === undefined) {
+        if (toolRegistry === undefined) {
           throw new Error("Agent returned tool calls, but no tool registry is configured.");
         }
         if (round === maxToolRounds) {
           throw new Error("Agent exceeded the configured tool-call round limit.");
         }
-        const roundToolResults = await this.options.toolRegistry.executeAll(result.toolCalls ?? []);
+        const roundToolResults = await toolRegistry.executeAll(result.toolCalls ?? []);
         toolResults.push(...roundToolResults);
         history = buildSpecialistHistory({
           invocation,
@@ -185,8 +192,12 @@ export class AgentRunner {
 
 export function createDefaultAgentRunner(
   settings: AppSettings,
-  options: { credentialResolver?: ProviderCredentialResolver } = {},
+  options: {
+    credentialResolver?: ProviderCredentialResolver;
+    salesforcePdfTools?: Omit<SalesforcePdfToolOptions, "context">;
+  } = {},
 ): AgentRunner {
+  const salesforcePdfTools = options.salesforcePdfTools;
   return new AgentRunner({
     credentialResolver: options.credentialResolver,
     defaultModelId: settings.agentModelId,
@@ -197,7 +208,20 @@ export function createDefaultAgentRunner(
     specialistRuntimes: createDefaultSpecialistRuntimes(settings, {
       credentialResolver: options.credentialResolver,
     }),
-    toolRegistry: new AgentToolRegistry(),
+    toolRegistry: salesforcePdfTools === undefined ? new AgentToolRegistry() : undefined,
+    toolRegistryFactory:
+      salesforcePdfTools === undefined
+        ? undefined
+        : (invocation) =>
+            new AgentToolRegistry(
+              createSalesforcePdfAgentTools({
+                ...salesforcePdfTools,
+                context: {
+                  slackUserId: invocation.userId,
+                  teamId: invocation.teamId,
+                },
+              }),
+            ),
   });
 }
 

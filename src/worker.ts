@@ -1,9 +1,14 @@
 import { Pool } from "pg";
 
 import { createDefaultAgentRunner } from "./agents/runner.js";
+import { createSalesforcePdfToolDependencies } from "./agents/salesforcePdf/index.js";
 import { loadSettings } from "./config.js";
 import { FernetTextCipher } from "./integrations/oauth/fernet.js";
-import { PostgresAgentRoutingRepository } from "./infrastructure/postgres/appRepositories.js";
+import {
+  PostgresAgentRoutingRepository,
+  PostgresOAuthRepository,
+  PostgresSalesforcePdfWorkflowRepository,
+} from "./infrastructure/postgres/appRepositories.js";
 import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createBullMqSlackAgentJobWorker } from "./queues/slackAgentJobs.js";
@@ -22,6 +27,8 @@ if (settings.databaseUrl === undefined) {
 
 const pool = new Pool({ connectionString: settings.databaseUrl });
 const routingRepository = new PostgresAgentRoutingRepository(pool);
+const oauthRepository = new PostgresOAuthRepository(pool);
+const salesforcePdfWorkflowRepository = new PostgresSalesforcePdfWorkflowRepository(pool);
 const workspaceCredentialResolver =
   settings.llmApiKeyEncryptionKey === undefined
     ? undefined
@@ -29,8 +36,20 @@ const workspaceCredentialResolver =
         new PostgresWorkspaceCredentialRepository(pool),
         new FernetTextCipher(settings.llmApiKeyEncryptionKey),
       );
+const salesforcePdfTools =
+  settings.salesforceOAuthEnabled &&
+  settings.salesforceOAuthContextSigningSecret !== undefined &&
+  settings.salesforceTokenEncryptionKey !== undefined
+    ? createSalesforcePdfToolDependencies({
+        contextSigningSecret: settings.salesforceOAuthContextSigningSecret,
+        oauthRepository,
+        settingsRepository: salesforcePdfWorkflowRepository,
+        tokenEncryptionKey: settings.salesforceTokenEncryptionKey,
+      })
+    : undefined;
 const runner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
+  salesforcePdfTools,
 });
 const audioTranscriptionGateway = createDefaultTranscriptionGateway(settings, {
   credentialResolver: workspaceCredentialResolver,

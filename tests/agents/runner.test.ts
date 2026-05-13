@@ -237,6 +237,11 @@ describe("AgentRunner", () => {
         toolName: "echo",
       },
     ]);
+    expect(router.requests[0]?.tools).toEqual([
+      expect.objectContaining({
+        name: "echo",
+      }),
+    ]);
     expect(router.requests).toHaveLength(2);
     expect(router.requests[1]?.history.messages.map((message) => message.role)).toContain("tool");
     expect(router.requests[1]?.history.messages).toEqual(
