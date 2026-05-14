@@ -19,6 +19,7 @@
     "dev": "tsx src/main.ts",
     "migrate": "tsx src/infrastructure/postgres/runMigrations.ts",
     "rss:batch": "tsx src/rssFeedWorker.ts",
+    "seed:bootstrap": "tsx src/infrastructure/postgres/seedBootstrap.ts",
     "start": "node dist/main.mjs",
     "test": "vp test",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -43,7 +43,6 @@ package "Heroku" {
     }
   }
 
-  rectangle "Managed Inference and Agents Add-on\nINFERENCE_KEY / INFERENCE_URL" as heroku_inference
   queue "Heroku Key-Value Store / Redis\nREDIS_URL" as redis_queue
 
   database "Heroku Postgres Add-on\nDATABASE_URL" as postgres {
@@ -85,7 +84,6 @@ routing_resolver --> slack : fetch thread history
 slack_agent_worker --> agent_runner : resolved agent, model,\nand Slack invocation
 agent_runner --> provider_router : provider request with domain history
 provider_router --> llm_providers : model invocation
-provider_router --> heroku_inference : optional Heroku-hosted model calls
 
 agent_runner --> web_research
 agent_runner --> google_maps

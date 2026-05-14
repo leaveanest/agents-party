@@ -29,12 +29,6 @@ variable "heroku_postgres_plan" {
   default     = "heroku-postgresql:essential-0"
 }
 
-variable "heroku_inference_plan" {
-  description = "Heroku Managed Inference and Agents add-on plan."
-  type        = string
-  default     = "heroku-inference:standard"
-}
-
 variable "heroku_redis_plan" {
   description = "Heroku Key-Value Store/Redis plan for Slack agent job queues."
   type        = string

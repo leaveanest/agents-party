@@ -10,7 +10,13 @@ export default defineConfig({
   pack: {
     clean: true,
     dts: false,
-    entry: ["src/main.ts", "src/worker.ts", "src/rssFeedWorker.ts"],
+    entry: [
+      "src/main.ts",
+      "src/worker.ts",
+      "src/rssFeedWorker.ts",
+      "src/infrastructure/postgres/runMigrations.ts",
+      "src/infrastructure/postgres/seedBootstrap.ts",
+    ],
     format: ["esm"],
     platform: "node",
     sourcemap: true,

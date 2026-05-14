@@ -108,10 +108,58 @@ describe("loadSettings", () => {
       APP_ENV: "production",
       DATABASE_URL: "postgres://localhost/app",
       LLM_API_KEY_ENCRYPTION_KEY: "fernet-key",
+      SLACK_CLIENT_ID: "123.456",
+      SLACK_CLIENT_SECRET: "client-secret",
+      SLACK_SIGNING_SECRET: "signing-secret",
+      SLACK_STATE_SECRET: "state-secret",
     });
 
     expect(settings.databaseUrl).toBe("postgres://localhost/app");
     expect(settings.llmApiKeyEncryptionKey).toBe("fernet-key");
+  });
+
+  it("requires Slack OAuth installation storage for production-like runtimes", () => {
+    const baseEnv = {
+      AGENT_MODEL: "google:gemini-2.5-flash",
+      APP_ENV: "production",
+      DATABASE_URL: "postgres://localhost/app",
+      LLM_API_KEY_ENCRYPTION_KEY: "fernet-key",
+    };
+
+    expect(() =>
+      loadSettings({
+        ...baseEnv,
+        SLACK_BOT_TOKEN: "xoxb-token",
+        SLACK_SIGNING_SECRET: "signing-secret",
+      }),
+    ).toThrow("SLACK_CLIENT_ID is required for production-like multi-workspace");
+    expect(() =>
+      loadSettings({
+        ...baseEnv,
+        SLACK_CLIENT_ID: "123.456",
+        SLACK_SIGNING_SECRET: "signing-secret",
+      }),
+    ).toThrow("SLACK_CLIENT_SECRET is required for production-like Slack OAuth installation");
+    expect(() =>
+      loadSettings({
+        ...baseEnv,
+        SLACK_CLIENT_ID: "123.456",
+        SLACK_CLIENT_SECRET: "client-secret",
+        SLACK_SIGNING_SECRET: "signing-secret",
+      }),
+    ).toThrow("SLACK_STATE_SECRET is required for production-like Slack OAuth installation");
+
+    const settings = loadSettings({
+      ...baseEnv,
+      SLACK_CLIENT_ID: "123.456",
+      SLACK_CLIENT_SECRET: "client-secret",
+      SLACK_SIGNING_SECRET: "signing-secret",
+      SLACK_STATE_SECRET: "state-secret",
+    });
+
+    expect(settings.slackEnabled).toBe(true);
+    expect(settings.slackInstallationStoreEnabled).toBe(true);
+    expect(settings.slackOAuthInstallEnabled).toBe(true);
   });
 
   it("enables static-token Slack ingress with signing secret and bot token", () => {

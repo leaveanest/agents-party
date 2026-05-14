@@ -40,6 +40,7 @@ export function createSlackWebClientProvider(
         if (bot !== undefined) {
           return new WebClient(bot.botToken);
         }
+        throw new Error("Slack bot token is not available from installation storage.");
       }
       if (settings.slackBotToken !== undefined) {
         return new WebClient(settings.slackBotToken);

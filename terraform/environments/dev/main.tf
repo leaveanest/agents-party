@@ -23,11 +23,6 @@ resource "heroku_addon" "postgres" {
   plan   = var.heroku_postgres_plan
 }
 
-resource "heroku_addon" "inference" {
-  app_id = heroku_app.app.id
-  plan   = var.heroku_inference_plan
-}
-
 resource "heroku_addon" "redis" {
   app_id = heroku_app.app.id
   plan   = var.heroku_redis_plan

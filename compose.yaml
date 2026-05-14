@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agents_party
+      POSTGRES_PASSWORD: agents_party
+      POSTGRES_USER: agents_party
+    healthcheck:
+      interval: 5s
+      retries: 10
+      test: ["CMD-SHELL", "pg_isready -U agents_party -d agents_party"]
+      timeout: 3s
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      interval: 5s
+      retries: 10
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 3s
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  migrate:
+    build: .
+    command: ["node", "dist/infrastructure/postgres/runMigrations.mjs"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &app_environment
+      AGENT_MODEL: ${AGENT_MODEL:-google:gemini-2.5-flash}
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql://agents_party:agents_party@postgres:5432/agents_party
+      LLM_API_KEY_ENCRYPTION_KEY: ${LLM_API_KEY_ENCRYPTION_KEY:-fFG7i2JvbhwExKzWSpQ9hCOca6nLMyDNdTlPV7sGoAs}
+      PORT: ${PORT:-8000}
+      REDIS_URL: redis://redis:6379
+      SLACK_AGENT_QUEUE_ENABLED: ${SLACK_AGENT_QUEUE_ENABLED:-true}
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-local-client-id}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-local-client-secret}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-local-signing-secret}
+      SLACK_STATE_SECRET: ${SLACK_STATE_SECRET:-local-state-secret}
+
+  seed:
+    build: .
+    command: ["node", "dist/infrastructure/postgres/seedBootstrap.mjs"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *app_environment
+      AGENTS_PARTY_BOOTSTRAP_ENABLED_CHANNEL_IDS: ${AGENTS_PARTY_BOOTSTRAP_ENABLED_CHANNEL_IDS:-}
+      AGENTS_PARTY_BOOTSTRAP_TEAM_ID: ${AGENTS_PARTY_BOOTSTRAP_TEAM_ID:-TLOCAL}
+    profiles:
+      - seed
+
+  web:
+    build: .
+    command: ["node", "dist/main.mjs"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app_environment
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: .
+    command: ["node", "dist/worker.mjs"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *app_environment
+
+volumes:
+  postgres_data:
+  redis_data:
