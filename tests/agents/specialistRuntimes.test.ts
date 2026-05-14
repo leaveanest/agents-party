@@ -264,6 +264,117 @@ describe("specialist runtimes", () => {
     });
   });
 
+  it("uses workspace credential setup messages when default specialist credentials are missing", async () => {
+    const runtimes = createDefaultSpecialistRuntimes(loadSettings({}), {
+      credentialResolver: {
+        async resolveProviderCredential() {
+          return undefined;
+        },
+      },
+    });
+    const providerRouter = new FakeProviderRouter({ content: "" });
+
+    const maps = await runtimes.google_maps?.({
+      invocation: invocation("Tokyo Station"),
+      model,
+      providerRouter,
+    });
+    const image = await runtimes.image_generation?.({
+      invocation: invocation("draw an image"),
+      model,
+      providerRouter,
+    });
+    const video = await runtimes.video_generation?.({
+      invocation: invocation("make a video"),
+      model,
+      providerRouter,
+    });
+
+    expect(maps?.message).toBe(
+      "Google Maps is not configured. Configure the workspace Google Maps API key from App Home API keys.",
+    );
+    expect(image?.structuredResult).toMatchObject({
+      action: "unconfigured",
+      message:
+        "Image generation is not configured. Configure the workspace provider API key from App Home API keys.",
+    });
+    expect(video?.structuredResult).toMatchObject({
+      action: "unconfigured",
+      message:
+        "Video generation is not configured. Configure the workspace provider API key for provider 'google' from App Home API keys.",
+    });
+    expect(`${maps?.message} ${image?.message} ${video?.message}`).not.toContain(
+      "GOOGLE_GENERATIVE_AI_API_KEY",
+    );
+    expect(`${maps?.message} ${image?.message} ${video?.message}`).not.toContain(
+      "GOOGLE_MAPS_API_KEY",
+    );
+  });
+
+  it("uses App Home guidance for missing workspace OpenAI image credentials", async () => {
+    const runtimes = createDefaultSpecialistRuntimes(
+      loadSettings({ IMAGE_GENERATION_MODEL: openAiImageModel.id }),
+      {
+        credentialResolver: {
+          async resolveProviderCredential() {
+            return undefined;
+          },
+        },
+      },
+    );
+
+    const result = await runtimes.image_generation?.({
+      invocation: invocation("draw an image with OpenAI"),
+      model,
+      providerRouter: new FakeProviderRouter({ content: "" }),
+    });
+
+    expect(result?.structuredResult).toMatchObject({
+      action: "unconfigured",
+      media: {
+        modelId: "openai:gpt-image-1.5",
+        provider: "openai",
+      },
+      message:
+        "Image generation is not configured. Configure the workspace OpenAI API key from App Home API keys.",
+    });
+  });
+
+  it("keeps local fallback setup messages when default specialist credentials are missing locally", async () => {
+    const runtimes = createDefaultSpecialistRuntimes(loadSettings({}));
+    const providerRouter = new FakeProviderRouter({ content: "" });
+
+    const maps = await runtimes.google_maps?.({
+      invocation: invocation("Tokyo Station"),
+      model,
+      providerRouter,
+    });
+    const image = await runtimes.image_generation?.({
+      invocation: invocation("draw an image"),
+      model,
+      providerRouter,
+    });
+    const video = await runtimes.video_generation?.({
+      invocation: invocation("make a video"),
+      model,
+      providerRouter,
+    });
+
+    expect(maps?.message).toBe(
+      "Google Maps is not configured. Set GOOGLE_MAPS_API_KEY for local maps lookup.",
+    );
+    expect(image?.structuredResult).toMatchObject({
+      action: "unconfigured",
+      message:
+        "Image generation is not configured. Configure a workspace provider credential or set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+    });
+    expect(video?.structuredResult).toMatchObject({
+      action: "unconfigured",
+      message:
+        "Video generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY for local video generation.",
+    });
+  });
+
   it("maps OpenAI AI SDK image results into generated media assets", async () => {
     const calls: unknown[] = [];
     const generateImageFn: GenerateImageFunction = async (input) => {

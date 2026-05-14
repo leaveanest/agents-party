@@ -39,9 +39,9 @@ The routed Slack surfaces are `app_mention`, active thread follow-up `message` e
 Native specialist runtimes cover:
 
 - web research through `ProviderRouter` with required `web_search`
-- Google Maps Places lookup through encrypted workspace credentials, with `GOOGLE_MAPS_API_KEY` only as a local fallback
+- Google Maps Places lookup through encrypted workspace credentials. When credential storage is configured, missing keys are reported as workspace API key setup issues; `GOOGLE_MAPS_API_KEY` is only a local fallback.
 - typed image generation through provider-aware media gateways with explicit `image_generation` model capability. Google image models use the Google Gen AI SDK; OpenAI image models use AI SDK `generateImage()`.
-- typed video generation operation handoff through the Google Gen AI SDK with explicit `video_generation` model capability
+- typed video generation operation handoff through the Google Gen AI SDK with explicit `video_generation` model capability. Google Gen AI process-level keys are only local fallbacks; workspace-credential mode reports missing provider keys as App Home API key setup issues.
 
 These runtimes return Zod-validated structured results and keep provider-specific behavior outside Slack handlers.
 

@@ -230,21 +230,28 @@ records being read or attached.
 
 ### Google Maps
 
+For local fallback only:
+
 ```bash
 GOOGLE_MAPS_API_KEY=...
 ```
 
-When the workspace credential resolver is configured, store the Google Maps key in `workspace_credentials` with `provider_kind='google_maps'` and `credential_name='api_key'`. `GOOGLE_MAPS_API_KEY` remains a local fallback only.
+For shared or production-like runtimes, store the Google Maps key in `workspace_credentials` with `provider_kind='google_maps'` and `credential_name='api_key'`. Slack admins can configure workspace API keys from App Home when credential storage is enabled. `GOOGLE_MAPS_API_KEY` remains a local fallback only.
 
 ### Media Specialist Models
 
 ```bash
 IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
 VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
+```
+
+For local fallback only:
+
+```bash
 GOOGLE_GENERATIVE_AI_API_KEY=...
 ```
 
-The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call the Google Gen AI SDK. In workspace-credential mode they use the encrypted `provider_kind='google'` / `credential_name='api_key'` row for the Slack team. `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` remain local fallbacks only.
+The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call provider-aware media gateways. In workspace-credential mode they use the encrypted provider credential row for the Slack team, for example `provider_kind='google'` / `credential_name='api_key'` for Google image and video models and `provider_kind='openai'` / `credential_name='api_key'` for OpenAI image models. `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` remain local fallbacks only for Google media models.
 
 ## Deployment
 
