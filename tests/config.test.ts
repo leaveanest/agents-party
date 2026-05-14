@@ -91,6 +91,29 @@ describe("loadSettings", () => {
     );
   });
 
+  it("requires workspace credential storage for production-like runtime configuration", () => {
+    expect(() =>
+      loadSettings({ AGENT_MODEL: "google:gemini-2.5-flash", APP_ENV: "heroku" }),
+    ).toThrow("DATABASE_URL is required for production-like runtimes");
+    expect(() =>
+      loadSettings({
+        AGENT_MODEL: "google:gemini-2.5-flash",
+        APP_ENV: "production",
+        DATABASE_URL: "postgres://localhost/app",
+      }),
+    ).toThrow("LLM_API_KEY_ENCRYPTION_KEY is required for production-like runtimes");
+
+    const settings = loadSettings({
+      AGENT_MODEL: "google:gemini-2.5-flash",
+      APP_ENV: "production",
+      DATABASE_URL: "postgres://localhost/app",
+      LLM_API_KEY_ENCRYPTION_KEY: "fernet-key",
+    });
+
+    expect(settings.databaseUrl).toBe("postgres://localhost/app");
+    expect(settings.llmApiKeyEncryptionKey).toBe("fernet-key");
+  });
+
   it("enables static-token Slack ingress with signing secret and bot token", () => {
     const settings = loadSettings({
       SLACK_BOT_TOKEN: "xoxb-token",

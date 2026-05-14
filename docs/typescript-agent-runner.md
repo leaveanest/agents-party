@@ -32,7 +32,7 @@ AGENT_MODEL=google:gemini-2.5-flash
 
 For local/bootstrap development, `loadSettings` uses `google:gemini-2.5-flash` when `AGENT_MODEL` is not set. This default is only a developer bootstrap default for `AgentRunner`; it is not a `ProviderRouter` model-resolution default.
 
-For production-like runtime configuration, including `APP_ENV=heroku`, `APP_ENV=production`, `APP_ENV=prod`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set, `AGENT_MODEL` is required. Missing `AGENT_MODEL` fails during settings loading so production does not silently choose a provider or model.
+For production-like runtime configuration, including `APP_ENV=heroku`, `APP_ENV=production`, `APP_ENV=prod`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set, `AGENT_MODEL`, `DATABASE_URL`, and `LLM_API_KEY_ENCRYPTION_KEY` are required. Missing `AGENT_MODEL` fails during settings loading so production does not silently choose a provider or model. Missing workspace credential storage settings also fail during settings loading so provider calls cannot silently fall back to process-level provider API keys.
 
 The routed Slack surfaces are `app_mention`, active thread follow-up `message` events, and flag-reaction translation commands.
 
@@ -53,4 +53,4 @@ IMAGE_GENERATION_MODEL=openai:gpt-image-1.5
 
 Set `workspace_credentials.provider_kind=openai` and `credential_name=api_key` for the Slack workspace. OpenAI image generation does not use process-level API keys; if the DB credential is missing, the specialist fails closed as unconfigured.
 
-Workspace-aware provider credentials are enabled when `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are set. The runner carries Slack `teamId` into `LlmRequest.context.workspaceId`, and provider adapters use that typed context for encrypted `workspace_credentials` lookup instead of inferring credentials from metadata.
+Workspace-aware provider credentials are enabled when `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are set, and production-like runtimes require both values. The runner carries Slack `teamId` into `LlmRequest.context.workspaceId`, and provider adapters use that typed context for encrypted `workspace_credentials` lookup instead of inferring credentials from metadata.

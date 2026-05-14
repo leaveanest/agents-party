@@ -23,7 +23,7 @@ The domain history remains `ConversationHistory`. AI SDK `ModelMessage[]` conver
 
 If no model is configured, resolution fails. The router does not default to OpenAI, Gemini, or any other provider.
 
-Application bootstrap defaults are outside `ProviderRouter.resolveModel`. `loadSettings` may supply `AgentRunner` with a local/bootstrap `agentModelId` so a developer can run the app before workspace, channel, or thread routing records exist. Production-like runtimes must set `AGENT_MODEL`; missing production configuration fails during settings loading instead of silently choosing a provider.
+Application bootstrap defaults are outside `ProviderRouter.resolveModel`. `loadSettings` may supply `AgentRunner` with a local/bootstrap `agentModelId` so a developer can run the app before workspace, channel, or thread routing records exist. Production-like runtimes must set `AGENT_MODEL`, `DATABASE_URL`, and `LLM_API_KEY_ENCRYPTION_KEY`; missing production configuration fails during settings loading instead of silently choosing a provider or falling back to process-level provider API keys.
 
 Legacy Slack Timeline-style model ids can be registered as aliases, for example `azure.gpt-4o` or `groq.llama-3.1-70b-versatile`, but aliases resolve to explicit registry records. Unknown model names fail until a registry entry is added.
 
