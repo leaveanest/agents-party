@@ -55,6 +55,6 @@ The in-memory deduplicator is process-local. Queued agent jobs also use Redis TT
 - `app_home_opened`: registered in TypeScript and publishes a minimal home view.
 - `app_mention`: registered in TypeScript and routed through the TypeScript `AgentRunner`, either in-process or through the Redis worker path when configured.
 - `message`: registered and acknowledged in TypeScript; active thread follow-ups route through AgentRunner when PostgreSQL thread policy allows auto-reply, either in-process or through the Redis worker path when configured.
-- `reaction_added`: registered and acknowledged in TypeScript; country flag reactions route the target message through the AgentRunner translation specialist.
+- `reaction_added`: registered and acknowledged in TypeScript; country flag reactions route the target message through the resolved AgentRunner path with a translation instruction.
 
 These gaps are explicit product/runtime boundaries, not fallback paths.

@@ -237,11 +237,11 @@ describe("loadSettings", () => {
     );
   });
 
-  it("reads the Google Maps API key for the TypeScript maps specialist", () => {
+  it("reads the Google Maps API key for TypeScript maps tools", () => {
     expect(loadSettings({ GOOGLE_MAPS_API_KEY: "maps-key" }).googleMapsApiKey).toBe("maps-key");
   });
 
-  it("reads the Google GenAI API key and media specialist model overrides", () => {
+  it("reads the Google GenAI API key and media model overrides", () => {
     const settings = loadSettings({
       GEMINI_API_KEY: "gemini-key",
       IMAGE_GENERATION_MODEL: "google:image-model",

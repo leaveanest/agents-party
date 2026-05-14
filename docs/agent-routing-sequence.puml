@@ -18,14 +18,13 @@ box "Heroku"
   participant "Routing Resolver" as routing_resolver
   participant "AgentRunner" as agent_runner
   participant "Selected Agent Runtime" as agent_runtime
-  participant "Specialist Runtime\n(optional)" as specialist_runtime
+  participant "Tool Registry" as tool_registry
   participant "ProviderRouter" as provider_router
   database "PostgreSQL\nworkspace/channel/thread settings\nagents" as pg_routes
 end box
 
 participant "LLM Provider" as llm_provider
-participant "Google Maps Platform" as google_maps
-participant "Google GenAI Media API" as media_api
+participant "External Tool APIs\nMaps / Media / SORACOM / SaaS" as tool_apis
 
 slack_user -> slack : Post in channel or thread
 
@@ -59,28 +58,24 @@ routing_resolver -> slack_api : Fetch thread history when needed
 slack_api --> routing_resolver : Thread transcript and attachment context
 routing_resolver -> agent_runner : Run resolved agent with resolved model
 
-agent_runner -> agent_runtime : Execute selected agent
+agent_runner -> agent_runtime : Execute resolved agent
+agent_runtime -> tool_registry : Attach allowed tools
+agent_runtime -> provider_router : Generate with resolved model and tools
+provider_router -> llm_provider : Invoke provider adapter
+llm_provider --> provider_router : Text or tool calls
 
-alt Generic text agent
-  agent_runtime -> provider_router : Generate with resolved model
+alt Tool calls requested
+  provider_router --> agent_runtime : Tool calls
+  agent_runtime -> tool_registry : Execute typed tools
+  tool_registry -> tool_apis : Read or confirmed write
+  tool_apis --> tool_registry : Structured tool output
+  tool_registry --> agent_runtime : Tool results
+  agent_runtime -> provider_router : Generate final answer with tool results
   provider_router -> llm_provider : Invoke provider adapter
-  llm_provider --> provider_router : LLM result
-  provider_router --> agent_runtime : Normalized result
-else Agent uses internal specialist
-  agent_runtime -> specialist_runtime : Call specialist
-  alt Web research
-    specialist_runtime -> provider_router : Generate with web_search capability
-    provider_router -> llm_provider : Native/search-capable invocation
-    llm_provider --> provider_router : Answer with sources
-  else Maps
-    specialist_runtime -> google_maps : Places / Routes lookup
-    google_maps --> specialist_runtime : Structured maps data
-  else Image or video
-    specialist_runtime -> media_api : Generate media or operation
-    media_api --> specialist_runtime : Bytes, URI, or operation name
-  end
-  specialist_runtime --> agent_runtime : Structured specialist result
+  llm_provider --> provider_router : Final result
 end
+
+provider_router --> agent_runtime : Normalized result
 
 agent_runtime --> agent_runner : Slack-ready result
 agent_runner --> routing_resolver : Text or generated media

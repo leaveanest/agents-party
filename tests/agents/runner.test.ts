@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { AgentRunner, selectSpecialist } from "../../src/agents/runner.js";
+import { AgentRunner, selectAgentAction } from "../../src/agents/runner.js";
 import { AgentToolRegistry } from "../../src/agents/toolContracts.js";
 import type { JsonValue } from "../../src/domain/messageHistory.js";
 import type { LlmRequest, LlmResult, ModelInfo } from "../../src/providers/contracts.js";
@@ -21,62 +21,14 @@ const explicitModel: ModelInfo = {
 };
 
 describe("AgentRunner", () => {
-  it("does not infer specialists from Slack invocation text", () => {
-    expect(
-      selectSpecialist({
-        channelId: "C1",
-        messageTs: "1.0",
-        referenceImages: [],
-        teamId: "T1",
-        text: "please translate this",
-        threadMessages: [],
-        transientAttachments: [],
-        userId: "U1",
-        viewerContextChannelIds: [],
-      }),
-    ).toMatchObject({
-      reason: "unrouted_invocation",
-      specialist: "assistant",
-    });
-    expect(
-      selectSpecialist({
-        channelId: "C1",
-        messageTs: "1.0",
-        referenceImages: [],
-        teamId: "T1",
-        text: "画像を生成して",
-        threadMessages: [],
-        transientAttachments: [],
-        userId: "U1",
-        viewerContextChannelIds: [],
-      }),
-    ).toMatchObject({
-      reason: "unrouted_invocation",
-      specialist: "assistant",
+  it("uses a single agent action instead of specialist routing", () => {
+    expect(selectAgentAction()).toEqual({
+      action: "respond",
+      reason: "agent_invocation",
     });
   });
 
-  it("uses an explicitly routed specialist from the invocation", () => {
-    expect(
-      selectSpecialist({
-        channelId: "C1",
-        messageTs: "1.0",
-        referenceImages: [],
-        specialist: "image_generation",
-        teamId: "T1",
-        text: "画像を生成して",
-        threadMessages: [],
-        transientAttachments: [],
-        userId: "U1",
-        viewerContextChannelIds: [],
-      }),
-    ).toMatchObject({
-      reason: "forced_invocation",
-      specialist: "image_generation",
-    });
-  });
-
-  it("routes primary Slack mentions through provider-backed specialist runners", async () => {
+  it("routes primary Slack mentions through the provider-backed agent runner", async () => {
     const router = new FakeProviderRouter({
       content: "Hello from TypeScript AgentRunner",
     });
@@ -94,7 +46,7 @@ describe("AgentRunner", () => {
     });
 
     expect(result).toMatchObject({
-      decision: { specialist: "assistant" },
+      decision: { action: "respond" },
       message: "Hello from TypeScript AgentRunner",
       model: { id: "google:gemini-2.5-flash", provider: "google" },
     });
@@ -307,7 +259,6 @@ describe("AgentRunner", () => {
       }),
     ).rejects.toMatchObject({
       model: { id: "missing:default-model" },
-      specialist: "assistant",
     });
   });
 });

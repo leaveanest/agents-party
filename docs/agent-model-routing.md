@@ -4,7 +4,7 @@ This document describes the target routing policy for Slack AI execution.
 
 ## Status
 
-This is the implemented product direction. Slack routing decisions come from explicit workspace, channel, and thread configuration; the TypeScript runner does not infer specialists from prompt keywords.
+This is the implemented product direction. Slack routing decisions come from explicit workspace, channel, and thread configuration; the TypeScript runner does not infer specialists or tools from prompt keywords before model invocation.
 
 ## Policy
 
@@ -25,9 +25,9 @@ Channel defaults are used for new conversations in that channel. Workspace defau
 
 - Slack handlers validate the event, enforce channel/thread policy, fetch needed Slack context, and call the routing layer.
 - The routing layer resolves the effective agent, effective model, auto-reply policy, and thread state.
-- `AgentRunner` executes an already-resolved agent with an already-resolved model.
+- `AgentRunner` executes an already-resolved agent with an already-resolved model and the tools enabled for that agent.
 - `ProviderRouter` enforces model registry and capability checks before provider invocation.
-- Specialist runtimes are implementation details of an agent, not a global keyword router.
+- The model selects tools during normal tool calling; Slack routing does not select a second specialist lane.
 
 ## Non-Goals
 
@@ -36,11 +36,9 @@ Channel defaults are used for new conversations in that channel. Workspace defau
 - Do not let Slack handlers call provider SDKs directly.
 - Do not silently fall back to a different model when the configured model lacks required capabilities.
 
-## Specialist Behavior
+## Tool Behavior
 
-Agents may still use specialists internally. For example, a configured travel assistant may call a maps runtime, or a configured media agent may call image generation.
-
-Those choices are scoped to the selected agent. They should not replace the top-level workspace/channel/thread agent selection policy.
+Agents may expose typed tools such as maps, web research, media generation, Salesforce, or SORACOM. These choices are scoped to the selected agent and selected by the model during normal tool calling.
 
 ## Thread Persistence
 

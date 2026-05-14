@@ -70,4 +70,4 @@
 
 - `skills/` 配下の `SKILL.md` が実体です。
 - Python runtime は削除済みです。新しい skill 連携を追加する場合は TypeScript runtime に明示的な読み込み・実行経路を追加します。
-- `skills/` の文書は runtime から自動的に読み込まれるとは限りません。対象 specialist に組み込むまで参照資産として扱います。
+- `skills/` の文書は runtime から自動的に読み込まれるとは限りません。TypeScript runtime の agent/tool 経路に明示的に組み込むまで参照資産として扱います。

@@ -21,7 +21,7 @@ The current automated suite covers these parity boundaries:
 - Slack message and attachment normalization: `tests/slack/messageHistory.test.ts`
 - AI SDK message conversion for text, image, file, audio transcript degradation, tool calls, and unsupported attachments: `tests/providers/aiSdkMessageConverter.test.ts`
 - Provider routing, capability checks, adapter selection, native provider lanes, and model registry coverage: `tests/providers/*.test.ts`
-- AgentRunner specialist dispatch, tool rounds, structured result validation, native web/maps/media runtimes: `tests/agents/*.test.ts`
+- AgentRunner tool rounds, structured result validation, and provider-backed generation: `tests/agents/*.test.ts`
 - OAuth coordinators, encrypted context/token handling, OAuth HTTP routes, and one-time state consumption: `tests/integrations/oauth/*.test.ts`
 - PostgreSQL migrations and repository behavior for Slack installations, routing, OAuth, workspace credentials, and RSS feed persistence: `tests/infrastructure/postgres/*.test.ts`
 
@@ -32,7 +32,7 @@ Set `TEST_DATABASE_URL` to run the gated PostgreSQL integration test against a r
 The TypeScript runtime emits structured logs for the highest-risk Slack and provider paths:
 
 - Duplicate Slack Events API deliveries log `eventId`, `retryNum`, and `retryReason` before feature handlers run.
-- Successful AgentRunner Slack executions log `eventType`, `teamId`, `channelId`, `threadTs`, `messageTs`, selected `specialist`, selected `provider`, selected `modelId`, structured-result presence, media kind, and tool result count.
+- Successful AgentRunner Slack executions log `eventType`, `teamId`, `channelId`, `threadTs`, `messageTs`, selected `provider`, selected `modelId`, structured-result presence, media kind, and tool result count.
 - AgentRunner failures in app mentions, follow-up messages, and reaction translations log the error with Slack team/thread context.
 - Thread routing persistence failures log team and thread context while still returning the Slack response.
 - Generated media delivery logs whether Slack received a file upload, provider URI, or long-running operation handoff.
@@ -44,7 +44,7 @@ These logs are intentionally emitted at Slack handler boundaries so production s
 Perform this checklist in a staging Slack workspace before major runtime or deployment changes:
 
 - `GET /healthz` returns a healthy response from the TypeScript process.
-- A fresh `app_mention` produces one threaded reply and logs the selected specialist/model/provider.
+- A fresh `app_mention` produces one threaded reply and logs the selected model/provider.
 - Re-delivering the same Slack event id is suppressed and logs Slack retry metadata.
 - A normal thread follow-up in an active routed thread auto-replies only when the channel and thread policies allow it.
 - A follow-up in a disabled channel or with thread auto-reply disabled does not call AgentRunner.

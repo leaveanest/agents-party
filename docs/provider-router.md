@@ -71,7 +71,7 @@ AWS Bedrock and Dify are intentionally left for native adapter lanes because the
 
 The first concrete native path is Gemini web search through AI SDK's Google native search tool. It is used when a request requires `web_search`, so web research does not fall back to the common text-only lane.
 
-Unsupported native paths still return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added. Media generation specialists use separate media gateways under `src/providers/`; OpenAI image generation is implemented there with AI SDK `generateImage()` instead of the common text-generation adapter.
+Unsupported native paths still return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added. Media generation tools can use separate media gateways under `src/providers/`; OpenAI image generation is implemented there with AI SDK `generateImage()` instead of the common text-generation adapter.
 
 Native stubs currently cover:
 
