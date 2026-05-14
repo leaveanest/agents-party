@@ -16,6 +16,7 @@ import {
   createSalesforcePdfAgentTools,
   type SalesforcePdfToolOptions,
 } from "./salesforcePdf/index.js";
+import { createSoracomAgentTools } from "./soracom/index.js";
 import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 
 export type AgentRunnerResult = {
@@ -49,11 +50,14 @@ export type AgentRunnerOptions = {
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
   systemPrompt?: string;
   toolRegistry?: AgentToolRegistry;
-  toolRegistryFactory?: (invocation: SlackAgentInvocation) => AgentToolRegistry | undefined;
+  toolRegistryFactory?: (
+    invocation: SlackAgentInvocation,
+    model: ModelInfo,
+  ) => AgentToolRegistry | undefined;
 };
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are the general Party on Slack assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.";
+  "You are the general Agents Party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.";
 
 export class AgentRunner {
   constructor(private readonly options: AgentRunnerOptions) {}
@@ -75,7 +79,7 @@ export class AgentRunner {
   ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
     const model = this.resolveModel(invocation.modelId);
     const toolRegistry =
-      this.options.toolRegistryFactory?.(invocation) ?? this.options.toolRegistry;
+      this.options.toolRegistryFactory?.(invocation, model) ?? this.options.toolRegistry;
     const toolResults: AgentToolResult[] = [];
     try {
       let history = buildAgentHistory({
@@ -156,20 +160,31 @@ export function createDefaultAgentRunner(
       ...createNativeProviderAdapters({ credentialResolver: options.credentialResolver }),
       ...createAiSdkAdapters({}, { credentialResolver: options.credentialResolver }),
     ]),
-    toolRegistry: salesforcePdfTools === undefined ? new AgentToolRegistry() : undefined,
-    toolRegistryFactory:
-      salesforcePdfTools === undefined
-        ? undefined
-        : (invocation) =>
-            new AgentToolRegistry(
-              createSalesforcePdfAgentTools({
-                ...salesforcePdfTools,
-                context: {
-                  slackUserId: invocation.userId,
-                  teamId: invocation.teamId,
-                },
-              }),
-            ),
+    toolRegistryFactory: (invocation, model) => {
+      if (!model.capabilities.includes("tool_calling")) {
+        return new AgentToolRegistry();
+      }
+      const tools = [
+        ...(salesforcePdfTools === undefined
+          ? []
+          : createSalesforcePdfAgentTools({
+              ...salesforcePdfTools,
+              context: {
+                slackUserId: invocation.userId,
+                teamId: invocation.teamId,
+              },
+            })),
+        ...(options.credentialResolver === undefined
+          ? []
+          : createSoracomAgentTools({
+              context: {
+                teamId: invocation.teamId,
+              },
+              credentialResolver: options.credentialResolver,
+            })),
+      ];
+      return new AgentToolRegistry(tools);
+    },
   });
 }
 

@@ -38,6 +38,9 @@ The routed Slack surfaces are `app_mention`, active thread follow-up `message` e
 
 External capabilities should be exposed as typed tools. The route chooses the agent, model, and allowed tool set; the AI chooses whether to call web, maps, media, Salesforce, SORACOM, or other tools from the conversation context.
 
+SORACOM tools are documented in [`soracom-integration.md`](soracom-integration.md). They are
+read-only in the MVP and use workspace-scoped encrypted AuthKey credentials.
+
 OpenAI image generation can be selected with:
 
 ```bash

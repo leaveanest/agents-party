@@ -546,6 +546,70 @@ describe("createAgentSlackHandlers", () => {
     expect(updates[0]).not.toHaveProperty("hash");
   });
 
+  it("saves SORACOM AuthKey credentials from modal submissions", async () => {
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey(input: unknown) {
+          saves.push(input);
+        },
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialModalSubmission({
+      ack: async () => {},
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {}, warn() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: "T1",
+        state: {
+          values: {
+            workspace_credential_provider: {
+              provider_kind: { selected_option: { value: "soracom" } },
+            },
+            workspace_credential_secret: {
+              api_key: { value: "secret-test" },
+            },
+            workspace_credential_soracom_auth_key_id: {
+              auth_key_id: { value: "keyId-test" },
+            },
+            workspace_credential_soracom_coverage: {
+              coverage_type: { selected_option: { value: "japan" } },
+            },
+            workspace_credential_soracom_operator: {
+              operator_id: { value: "OP0012345678" },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(saves).toEqual([
+      {
+        createdByUserId: "UADMIN",
+        credentialName: "auth_key",
+        payload: {
+          auth_key_id: "keyId-test",
+          coverage_type: "japan",
+          operator_id: "OP0012345678",
+          source: "slack_app_home",
+        },
+        providerKind: "soracom",
+        secret: "secret-test",
+        teamId: "T1",
+      },
+    ]);
+  });
+
   it("returns modal field errors for invalid workspace API key input", async () => {
     const acks: unknown[] = [];
     const saves: unknown[] = [];

@@ -120,6 +120,7 @@ export class EncryptedWorkspaceCredentialService implements ProviderCredentialRe
     return {
       apiKey: this.cipher.decrypt(document.secretEncrypted),
       baseURL: stringPayloadField(document.payload, "base_url"),
+      payload: document.payload,
     };
   }
 }

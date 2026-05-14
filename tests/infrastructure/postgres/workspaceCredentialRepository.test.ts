@@ -72,6 +72,7 @@ describe("workspace credential repository", () => {
     ).resolves.toEqual({
       apiKey: "workspace-api-key",
       baseURL: "https://proxy.example",
+      payload: { base_url: "https://proxy.example" },
     });
   });
 

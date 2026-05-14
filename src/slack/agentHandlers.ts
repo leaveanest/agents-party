@@ -69,6 +69,12 @@ import {
   WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
   WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
   WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
+  WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_ACTION_ID,
+  WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID,
+  WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID,
+  WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID,
+  WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID,
+  WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID,
   WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
   WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
 } from "./interactiveIds.js";
@@ -104,6 +110,7 @@ const workspaceCredentialProviderKinds = [
   "plamo",
   "nvidia",
   "litellm",
+  "soracom",
 ] as const satisfies readonly CredentialProviderKind[];
 
 const workspaceCredentialProviderOptions = [
@@ -117,6 +124,7 @@ const workspaceCredentialProviderOptions = [
   { text: { text: "PLaMo", type: "plain_text" }, value: "plamo" },
   { text: { text: "NVIDIA", type: "plain_text" }, value: "nvidia" },
   { text: { text: "LiteLLM", type: "plain_text" }, value: "litellm" },
+  { text: { text: "SORACOM", type: "plain_text" }, value: "soracom" },
 ] as const satisfies readonly {
   text: { text: string; type: "plain_text" };
   value: CredentialProviderKind;
@@ -197,6 +205,7 @@ export type SalesforcePdfWorkflowHome = {
 export type WorkspaceCredentialSettingsHome = {
   saveProviderApiKey(input: {
     createdByUserId?: string;
+    credentialName?: string;
     payload?: JsonObject;
     providerKind: CredentialProviderKind;
     secret: string;
@@ -276,7 +285,7 @@ async function buildAppHomeBlocks(input: {
 }): Promise<Record<string, unknown>[]> {
   const blocks: Record<string, unknown>[] = [
     {
-      text: { text: "Party on Slack", type: "plain_text" },
+      text: { text: "Agents Party", type: "plain_text" },
       type: "header",
     },
     {
@@ -505,10 +514,8 @@ async function handleWorkspaceCredentialModalSubmission(
     }
     await options.workspaceCredentialSettings.saveProviderApiKey({
       createdByUserId: slackUserId,
-      payload: {
-        ...(parsed.baseURL === undefined ? {} : { base_url: parsed.baseURL }),
-        source: "slack_app_home",
-      },
+      ...(parsed.credentialName === undefined ? {} : { credentialName: parsed.credentialName }),
+      payload: parsed.payload,
       providerKind: parsed.providerKind,
       secret: parsed.apiKey,
       teamId,
@@ -1698,7 +1705,7 @@ function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> 
     callback_id: WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
     private_metadata: teamId,
     submit: { text: "Save", type: "plain_text" },
-    title: { text: "API key", type: "plain_text" },
+    title: { text: "Credentials", type: "plain_text" },
     type: "modal",
     blocks: [
       {
@@ -1718,7 +1725,44 @@ function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> 
           action_id: WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
           type: "plain_text_input",
         },
-        label: { text: "API key", type: "plain_text" },
+        label: { text: "API key or AuthKey Secret", type: "plain_text" },
+        type: "input",
+      },
+      {
+        block_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID,
+        element: {
+          action_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_ACTION_ID,
+          placeholder: { text: "keyId-xxxxxxxxxx", type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "SORACOM AuthKey ID", type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
+      {
+        block_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID,
+        element: {
+          action_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID,
+          initial_option: { text: { text: "Global", type: "plain_text" }, value: "global" },
+          options: [
+            { text: { text: "Global", type: "plain_text" }, value: "global" },
+            { text: { text: "Japan", type: "plain_text" }, value: "japan" },
+          ],
+          type: "static_select",
+        },
+        label: { text: "SORACOM coverage", type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
+      {
+        block_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID,
+        element: {
+          action_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID,
+          placeholder: { text: "OP0012345678", type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: "SORACOM Operator ID", type: "plain_text" },
+        optional: true,
         type: "input",
       },
       {
@@ -2049,6 +2093,8 @@ function parseWorkspaceCredentialModal(view: unknown):
   | {
       apiKey: string;
       baseURL?: string;
+      credentialName?: string;
+      payload: JsonObject;
       providerKind: CredentialProviderKind;
     }
   | { errors: Record<string, string> } {
@@ -2068,22 +2114,70 @@ function parseWorkspaceCredentialModal(view: unknown):
     WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID,
     WORKSPACE_CREDENTIAL_BASE_URL_ACTION_ID,
   )?.trim();
+  const soracomAuthKeyId = readModalInputValue(
+    view,
+    WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID,
+    WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_ACTION_ID,
+  )?.trim();
+  const soracomCoverage = readSelectedOptionValue(
+    view,
+    WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID,
+    WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID,
+  );
+  const soracomOperatorId = readModalInputValue(
+    view,
+    WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID,
+    WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID,
+  )?.trim();
   const errors: Record<string, string> = {};
   if (providerKind === undefined) {
     errors[WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID] = "Choose a supported provider.";
   }
   if (apiKey === undefined || apiKey === "") {
-    errors[WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID] = "Enter an API key.";
+    errors[WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID] =
+      providerKind === "soracom" ? "Enter an AuthKey Secret." : "Enter an API key.";
   }
-  if (baseURL !== undefined && baseURL !== "" && !isHttpUrl(baseURL)) {
+  if (providerKind === "soracom") {
+    if (soracomAuthKeyId === undefined || soracomAuthKeyId === "") {
+      errors[WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID] = "Enter an AuthKey ID.";
+    }
+    if (soracomCoverage !== "global" && soracomCoverage !== "japan") {
+      errors[WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID] = "Choose Global or Japan coverage.";
+    }
+  }
+  if (
+    providerKind !== "soracom" &&
+    baseURL !== undefined &&
+    baseURL !== "" &&
+    !isHttpUrl(baseURL)
+  ) {
     errors[WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID] = "Enter a valid http or https URL.";
   }
   if (Object.keys(errors).length > 0) {
     return { errors };
   }
+  if (providerKind === "soracom") {
+    return {
+      apiKey: apiKey as string,
+      credentialName: "auth_key",
+      payload: {
+        auth_key_id: soracomAuthKeyId as string,
+        coverage_type: soracomCoverage as "global" | "japan",
+        ...(soracomOperatorId === undefined || soracomOperatorId === ""
+          ? {}
+          : { operator_id: soracomOperatorId }),
+        source: "slack_app_home",
+      },
+      providerKind,
+    };
+  }
   return {
     apiKey: apiKey as string,
     baseURL: baseURL === undefined || baseURL === "" ? undefined : baseURL,
+    payload: {
+      ...(baseURL === undefined || baseURL === "" ? {} : { base_url: baseURL }),
+      source: "slack_app_home",
+    },
     providerKind: providerKind as CredentialProviderKind,
   };
 }
