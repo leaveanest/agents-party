@@ -159,17 +159,24 @@ export const videoGenerationResultSchema = z
 
 export type GoogleMapsPlace = z.infer<typeof googleMapsPlaceSchema>;
 export type GoogleMapsRoute = NonNullable<z.infer<typeof googleMapsResultSchema>["route"]>;
+type ProviderCredentialMode = "local_fallback" | "workspace";
 
 export function createDefaultSpecialistRuntimes(
   settings: AppSettings,
   options: { credentialResolver?: ProviderCredentialResolver } = {},
 ): Partial<Record<AgentSpecialist, AgentSpecialistRuntime>> {
+  const credentialMode: ProviderCredentialMode =
+    options.credentialResolver === undefined ? "local_fallback" : "workspace";
   const googleMapsGateway = createGoogleMapsGatewaySource(settings, options.credentialResolver);
   const mediaGateway = createMediaGatewaySource(settings, options.credentialResolver);
   return {
-    google_maps: createGoogleMapsRuntime(googleMapsGateway),
-    image_generation: createImageGenerationRuntime(settings.imageGenerationModelId, mediaGateway),
-    video_generation: createVideoGenerationRuntime(settings.videoGenerationModelId, mediaGateway),
+    google_maps: createGoogleMapsRuntime(googleMapsGateway, { credentialMode }),
+    image_generation: createImageGenerationRuntime(settings.imageGenerationModelId, mediaGateway, {
+      credentialMode,
+    }),
+    video_generation: createVideoGenerationRuntime(settings.videoGenerationModelId, mediaGateway, {
+      credentialMode,
+    }),
     web_research: createWebResearchRuntime(),
   };
 }
@@ -286,13 +293,14 @@ export function createWebResearchRuntime(): AgentSpecialistRuntime {
 
 export function createGoogleMapsRuntime(
   gateway: GoogleMapsGateway | GoogleMapsGatewayFactory | undefined,
+  options: { credentialMode?: ProviderCredentialMode } = {},
 ): AgentSpecialistRuntime {
   return async ({ invocation }) => {
     const resolvedGateway = await resolveGoogleMapsGateway(gateway, invocation.teamId);
     if (resolvedGateway === undefined) {
       const structured = googleMapsResultSchema.parse({
         action: "unconfigured",
-        answer: "Google Maps is not configured. Set GOOGLE_MAPS_API_KEY to enable maps lookup.",
+        answer: googleMapsUnconfiguredMessage(options.credentialMode ?? "local_fallback"),
       });
       return {
         message: structured.answer,
@@ -334,6 +342,7 @@ export function createGoogleMapsRuntime(
 export function createImageGenerationRuntime(
   modelId: string,
   gateway?: MediaGenerationGateway | MediaGenerationGatewayFactory,
+  options: { credentialMode?: ProviderCredentialMode } = {},
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
     const resolvedModelId = invocation.modelId ?? modelId;
@@ -359,7 +368,10 @@ export function createImageGenerationRuntime(
             provider: model.provider,
             status: "generated",
           },
-          message: imageGenerationUnconfiguredMessage(model),
+          message: imageGenerationUnconfiguredMessage(
+            model,
+            options.credentialMode ?? "local_fallback",
+          ),
         });
         return {
           message: structured.message,
@@ -378,7 +390,10 @@ export function createImageGenerationRuntime(
             provider: model.provider,
             status: "generated",
           },
-          message: imageGenerationUnconfiguredMessage(model),
+          message: imageGenerationUnconfiguredMessage(
+            model,
+            options.credentialMode ?? "local_fallback",
+          ),
         });
         return {
           message: structured.message,
@@ -413,6 +428,7 @@ export function createImageGenerationRuntime(
 export function createVideoGenerationRuntime(
   modelId: string,
   gateway?: MediaGenerationGateway | MediaGenerationGatewayFactory,
+  options: { credentialMode?: ProviderCredentialMode } = {},
 ): AgentSpecialistRuntime {
   return async ({ invocation, providerRouter }) => {
     const resolvedModelId = invocation.modelId ?? modelId;
@@ -448,8 +464,10 @@ export function createVideoGenerationRuntime(
             provider: model.provider,
             status: "in_progress",
           },
-          message:
-            "Video generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.",
+          message: videoGenerationUnconfiguredMessage(
+            model,
+            options.credentialMode ?? "local_fallback",
+          ),
         });
         return {
           message: structured.message,
@@ -514,14 +532,40 @@ function modelTrace(model: ModelInfo): AgentSpecialistRuntimeModelTrace {
   };
 }
 
-function imageGenerationUnconfiguredMessage(model: ModelInfo): string {
+function googleMapsUnconfiguredMessage(credentialMode: ProviderCredentialMode): string {
+  if (credentialMode === "workspace") {
+    return "Google Maps is not configured. Configure the workspace Google Maps API key from App Home API keys.";
+  }
+  return "Google Maps is not configured. Set GOOGLE_MAPS_API_KEY for local maps lookup.";
+}
+
+function imageGenerationUnconfiguredMessage(
+  model: ModelInfo,
+  credentialMode: ProviderCredentialMode,
+): string {
   if (model.provider === "google") {
+    if (credentialMode === "workspace") {
+      return "Image generation is not configured. Configure the workspace provider API key from App Home API keys.";
+    }
     return "Image generation is not configured. Configure a workspace provider credential or set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY.";
   }
   if (model.provider === "openai") {
+    if (credentialMode === "workspace") {
+      return "Image generation is not configured. Configure the workspace OpenAI API key from App Home API keys.";
+    }
     return "Image generation is not configured. Configure workspace_credentials.provider_kind=openai with credential_name=api_key.";
   }
   return `Image generation is not configured for provider '${model.provider}'.`;
+}
+
+function videoGenerationUnconfiguredMessage(
+  model: ModelInfo,
+  credentialMode: ProviderCredentialMode,
+): string {
+  if (credentialMode === "workspace") {
+    return `Video generation is not configured. Configure the workspace provider API key for provider '${model.provider}' from App Home API keys.`;
+  }
+  return "Video generation is not configured. Set GOOGLE_GENERATIVE_AI_API_KEY or GEMINI_API_KEY for local video generation.";
 }
 
 export class FetchGoogleMapsGateway implements GoogleMapsGateway {
