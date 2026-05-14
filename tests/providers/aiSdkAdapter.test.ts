@@ -309,6 +309,114 @@ describe("AiSdkLlmAdapter", () => {
     ]);
   });
 
+  it("does not read OpenAI-compatible provider settings from process environment", async () => {
+    const previousApiKey = process.env.XAI_API_KEY;
+    const previousBaseUrl = process.env.XAI_BASE_URL;
+    process.env.XAI_API_KEY = "env-key";
+    process.env.XAI_BASE_URL = "https://env.example/v1";
+    const requests: Array<{ authorization: string | null; url: string }> = [];
+    try {
+      const adapter = createAiSdkAdapters({
+        openAICompatible: {
+          xai: {
+            fetch: async (input, init) => {
+              const headers = new Headers(init?.headers);
+              requests.push({
+                authorization: headers.get("authorization"),
+                url: String(input),
+              });
+              return openAICompatibleChatResponse("configured path");
+            },
+          },
+        },
+      }).find((candidate) => candidate.provider === "xai");
+      if (adapter === undefined) {
+        throw new Error("xAI adapter was not registered.");
+      }
+
+      await expect(
+        adapter.generate({
+          history,
+          model: {
+            capabilities: ["text"],
+            id: "xai:grok-2-latest",
+            provider: "xai",
+            providerModelId: "grok-2-latest",
+          },
+        }),
+      ).resolves.toMatchObject({ content: "configured path" });
+
+      expect(requests).toEqual([
+        {
+          authorization: null,
+          url: "https://api.x.ai/v1/chat/completions",
+        },
+      ]);
+    } finally {
+      restoreEnv("XAI_API_KEY", previousApiKey);
+      restoreEnv("XAI_BASE_URL", previousBaseUrl);
+    }
+  });
+
+  it("uses workspace credential base URLs for OpenAI-compatible providers", async () => {
+    const requests: Array<{ authorization: string | null; url: string }> = [];
+    const adapter = createAiSdkAdapters(
+      {
+        openAICompatible: {
+          xai: {
+            baseURL: "https://configured.example/v1",
+            fetch: async (input, init) => {
+              const headers = new Headers(init?.headers);
+              requests.push({
+                authorization: headers.get("authorization"),
+                url: String(input),
+              });
+              return openAICompatibleChatResponse("workspace credential path");
+            },
+          },
+        },
+      },
+      {
+        credentialResolver: {
+          async resolveProviderCredential(input) {
+            expect(input).toEqual({
+              credentialName: "api_key",
+              provider: "xai",
+              workspaceId: "T1",
+            });
+            return {
+              apiKey: "workspace-key",
+              baseURL: "https://workspace.example/v1",
+            };
+          },
+        },
+      },
+    ).find((candidate) => candidate.provider === "xai");
+    if (adapter === undefined) {
+      throw new Error("xAI adapter was not registered.");
+    }
+
+    await expect(
+      adapter.generate({
+        context: { workspaceId: "T1" },
+        history,
+        model: {
+          capabilities: ["text"],
+          id: "xai:grok-2-latest",
+          provider: "xai",
+          providerModelId: "grok-2-latest",
+        },
+      }),
+    ).resolves.toMatchObject({ content: "workspace credential path" });
+
+    expect(requests).toEqual([
+      {
+        authorization: "Bearer workspace-key",
+        url: "https://workspace.example/v1/chat/completions",
+      },
+    ]);
+  });
+
   it("declines capabilities reserved for native provider lanes", () => {
     const adapter = new AiSdkLlmAdapter("openai", () => {
       throw new Error("not used");
@@ -347,4 +455,31 @@ function usage(inputTokens: number, outputTokens: number) {
       total: outputTokens,
     },
   };
+}
+
+function openAICompatibleChatResponse(content: string): Response {
+  return Response.json({
+    choices: [
+      {
+        finish_reason: "stop",
+        message: {
+          content,
+          role: "assistant",
+        },
+      },
+    ],
+    usage: {
+      completion_tokens: 1,
+      prompt_tokens: 1,
+      total_tokens: 2,
+    },
+  });
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+    return;
+  }
+  process.env[name] = value;
 }

@@ -244,6 +244,13 @@ const nativeOnlyCapabilities = new Set<LlmCapability>([
 
 const googleNativeOnlyCapabilities = new Set<LlmCapability>(["file_input"]);
 
+const OPENAI_COMPATIBLE_DEFAULT_BASE_URLS = {
+  litellm: "http://localhost:4000/v1",
+  nvidia: "https://integrate.api.nvidia.com/v1",
+  plamo: "https://api.platform.preferredai.jp/v1",
+  xai: "https://api.x.ai/v1",
+} as const satisfies Record<OpenAICompatibleProvider, string>;
+
 function assertSupportedResponseFormat(request: LlmRequest): void {
   if (request.responseFormat !== undefined && request.responseFormat.type !== "text") {
     throw new LlmProviderError(
@@ -385,36 +392,10 @@ function openAICompatibleSettings(
 ): OpenAICompatibleProviderSettings {
   return {
     ...config,
-    apiKey: config.apiKey ?? defaultOpenAICompatibleApiKey(provider),
-    baseURL: config.baseURL ?? defaultOpenAICompatibleBaseUrl(provider),
+    apiKey: config.apiKey,
+    baseURL: config.baseURL ?? OPENAI_COMPATIBLE_DEFAULT_BASE_URLS[provider],
     name: config.name ?? provider,
   };
-}
-
-function defaultOpenAICompatibleApiKey(provider: OpenAICompatibleProvider): string | undefined {
-  switch (provider) {
-    case "xai":
-      return process.env.XAI_API_KEY;
-    case "plamo":
-      return process.env.PLAMO_API_KEY;
-    case "nvidia":
-      return process.env.NVIDIA_API_KEY;
-    case "litellm":
-      return process.env.LITELLM_API_KEY;
-  }
-}
-
-function defaultOpenAICompatibleBaseUrl(provider: OpenAICompatibleProvider): string {
-  switch (provider) {
-    case "xai":
-      return process.env.XAI_BASE_URL ?? "https://api.x.ai/v1";
-    case "plamo":
-      return process.env.PLAMO_API_BASE_URL ?? "https://api.platform.preferredai.jp/v1";
-    case "nvidia":
-      return process.env.NVIDIA_BASE_URL ?? "https://integrate.api.nvidia.com/v1";
-    case "litellm":
-      return process.env.LITELLM_BASE_URL ?? "http://localhost:4000/v1";
-  }
 }
 
 function toAiSdkTools(tools: LlmRequest["tools"]): ToolSet | undefined {

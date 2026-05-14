@@ -61,6 +61,8 @@ The adapter converts repository `ConversationHistory` to AI SDK `ModelMessage[]`
 
 When a `ProviderCredentialResolver` is configured and the request has `context.workspaceId`, the adapter looks up `provider_kind=<model provider>` and `credential_name=api_key` before constructing the provider model. Missing workspace credentials fail before falling back to process-level provider keys.
 
+OpenAI-compatible providers use repository-owned defaults only for non-secret base URLs. API keys must come from workspace credentials or explicit local adapter settings; `src/providers/aiSdkAdapter.ts` does not read provider API keys directly from `process.env`.
+
 AWS Bedrock and Dify are intentionally left for native adapter lanes because their production integrations need provider-specific configuration and behavior outside this common path.
 
 ## Native Provider Escape Hatches
