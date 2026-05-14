@@ -7,6 +7,15 @@ export const WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID = "workspace_credential_secret
 export const WORKSPACE_CREDENTIAL_SECRET_ACTION_ID = "api_key";
 export const WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID = "workspace_credential_base_url";
 export const WORKSPACE_CREDENTIAL_BASE_URL_ACTION_ID = "base_url";
+export const WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID =
+  "workspace_credential_soracom_auth_key_id";
+export const WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_ACTION_ID = "auth_key_id";
+export const WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID =
+  "workspace_credential_soracom_coverage";
+export const WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID = "coverage_type";
+export const WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID =
+  "workspace_credential_soracom_operator";
+export const WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID = "operator_id";
 
 export const SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID = "salesforce_pdf_workflow_configure";
 export const SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID = "salesforce_pdf_workflow_modal";

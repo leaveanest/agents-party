@@ -1,11 +1,12 @@
 import type { JsonValue } from "../domain/messageHistory.js";
 import type { LlmProvider, LlmRequest } from "./contracts.js";
 
-export type CredentialProviderKind = LlmProvider | "google_maps";
+export type CredentialProviderKind = LlmProvider | "google_maps" | "soracom";
 
 export type ProviderCredential = {
   apiKey: string;
   baseURL?: string;
+  payload?: Record<string, JsonValue>;
 };
 
 export type ProviderCredentialLookup = {

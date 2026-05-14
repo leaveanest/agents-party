@@ -19,6 +19,12 @@ const explicitModel: ModelInfo = {
   provider: "anthropic",
   providerModelId: "claude-3-5-sonnet-latest",
 };
+const textOnlyModel: ModelInfo = {
+  capabilities: ["text"],
+  id: "plamo:plamo-2.0-mini",
+  provider: "plamo",
+  providerModelId: "plamo-2.0-mini",
+};
 
 describe("AgentRunner", () => {
   it("uses a single agent action instead of specialist routing", () => {
@@ -212,6 +218,40 @@ describe("AgentRunner", () => {
     );
   });
 
+  it("lets tool registry factories gate tools by resolved model capability", async () => {
+    const router = new FakeProviderRouter({
+      content: "text only",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+      toolRegistryFactory: (_invocation, resolvedModel) =>
+        resolvedModel.capabilities.includes("tool_calling")
+          ? new AgentToolRegistry([
+              {
+                description: "Echo a string.",
+                execute: async (input) => ({ echoed: readText(input) }),
+                name: "echo",
+                outputSchema: z.object({ echoed: z.string() }) as never,
+                parameters: { type: "object" },
+                schema: z.object({ text: z.string() }) as never,
+              },
+            ])
+          : new AgentToolRegistry(),
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      modelId: textOnlyModel.id,
+      teamId: "T1",
+      text: "hello",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.tools).toEqual([]);
+  });
+
   it("rejects invalid tool output", async () => {
     const registry = new AgentToolRegistry([
       {
@@ -264,7 +304,7 @@ describe("AgentRunner", () => {
 });
 
 class FakeProviderRouter {
-  readonly registry = new ModelRegistry([model, explicitModel]);
+  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly result: LlmResult) {}
@@ -276,7 +316,7 @@ class FakeProviderRouter {
 }
 
 class SequencedProviderRouter {
-  readonly registry = new ModelRegistry([model, explicitModel]);
+  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly results: LlmResult[]) {}
