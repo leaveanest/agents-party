@@ -1,19 +1,16 @@
 import { Pool } from "pg";
 
-import { agentSpecialistSchema } from "../../agents/schemas.js";
 import { createDefaultModelRegistry } from "../../providers/modelRegistry.js";
 import { PostgresAgentRoutingRepository } from "./appRepositories.js";
 
 const databaseUrl = readRequiredEnv("DATABASE_URL");
 const teamId = readRequiredEnv("AGENTS_PARTY_BOOTSTRAP_TEAM_ID");
 const agentId = readText(process.env.AGENTS_PARTY_BOOTSTRAP_AGENT_ID) ?? "assistant";
-const specialistInput = readText(process.env.AGENTS_PARTY_BOOTSTRAP_SPECIALIST) ?? "assistant";
 const modelId =
   readText(process.env.AGENTS_PARTY_BOOTSTRAP_MODEL_ID) ?? readRequiredEnv("AGENT_MODEL");
 const threadAutoReply = parseBoolean(process.env.AGENTS_PARTY_BOOTSTRAP_THREAD_AUTO_REPLY, true);
 const enabledChannelIds = parseList(process.env.AGENTS_PARTY_BOOTSTRAP_ENABLED_CHANNEL_IDS);
 
-const specialist = agentSpecialistSchema.parse(specialistInput);
 const model = createDefaultModelRegistry().get(modelId);
 const pool = new Pool({ connectionString: databaseUrl });
 const repository = new PostgresAgentRoutingRepository(pool);
@@ -26,7 +23,7 @@ try {
     payload: {
       agent_id: agentId,
       description: "Bootstrap general Slack assistant.",
-      specialist,
+      name: "Bootstrap general Slack assistant",
     },
     updatedAt: now,
   });
@@ -45,7 +42,6 @@ try {
     agentId,
     enabledChannelIds,
     modelId: model.id,
-    specialist,
     teamId,
     threadAutoReply,
   });

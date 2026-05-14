@@ -4,8 +4,8 @@ OSA-14 introduces the TypeScript agent runtime under `src/agents/`.
 
 The runtime is repository-owned:
 
-- `schemas.ts` defines Zod-validated Slack invocation, agent/specialist routing inputs, and structured result contracts.
-- `runner.ts` executes the selected agent runtime, dispatches native specialist runtimes when configured, builds repository domain message history, invokes the `ProviderRouter`, and validates structured translation results.
+- `schemas.ts` defines Zod-validated Slack invocation, agent execution decisions, and structured result contracts.
+- `runner.ts` executes the resolved agent, builds repository domain message history, invokes the `ProviderRouter`, and runs typed model-selected tools.
 - `toolContracts.ts` defines typed tool declarations and execution for model tool calls without depending on external agent-framework tool contracts.
 - `src/slack/agentHandlers.ts` connects `app_mention` events to the TypeScript `AgentRunner` and replies in the Slack thread.
 
@@ -22,7 +22,7 @@ The target policy is:
 
 See [`agent-model-routing.md`](agent-model-routing.md) for the routing policy.
 
-Slack event handling resolves an agent/model before calling `AgentRunner`. If no specialist is supplied in the invocation, the runner uses the general assistant instead of guessing from prompt keywords.
+Slack event handling resolves an agent/model before calling `AgentRunner`. The runner does not accept a separate specialist route; the selected model chooses from the tools attached to the resolved agent.
 
 Configure the default model with:
 
@@ -36,14 +36,7 @@ For production-like runtime configuration, including `APP_ENV=heroku`, `APP_ENV=
 
 The routed Slack surfaces are `app_mention`, active thread follow-up `message` events, and flag-reaction translation commands.
 
-Native specialist runtimes cover:
-
-- web research through `ProviderRouter` with required `web_search`
-- Google Maps Places lookup through encrypted workspace credentials. When credential storage is configured, missing keys are reported as workspace API key setup issues; `GOOGLE_MAPS_API_KEY` is only a local fallback.
-- typed image generation through provider-aware media gateways with explicit `image_generation` model capability. Google image models use the Google Gen AI SDK; OpenAI image models use AI SDK `generateImage()`.
-- typed video generation operation handoff through the Google Gen AI SDK with explicit `video_generation` model capability. Google Gen AI process-level keys are only local fallbacks; workspace-credential mode reports missing provider keys as App Home API key setup issues.
-
-These runtimes return Zod-validated structured results and keep provider-specific behavior outside Slack handlers.
+External capabilities should be exposed as typed tools. The route chooses the agent, model, and allowed tool set; the AI chooses whether to call web, maps, media, Salesforce, SORACOM, or other tools from the conversation context.
 
 OpenAI image generation can be selected with:
 
@@ -51,6 +44,6 @@ OpenAI image generation can be selected with:
 IMAGE_GENERATION_MODEL=openai:gpt-image-1.5
 ```
 
-Set `workspace_credentials.provider_kind=openai` and `credential_name=api_key` for the Slack workspace. OpenAI image generation does not use process-level API keys; if the DB credential is missing, the specialist fails closed as unconfigured.
+Set `workspace_credentials.provider_kind=openai` and `credential_name=api_key` for the Slack workspace. Provider-specific tools should fail closed as unconfigured when the required workspace credential is missing.
 
 Workspace-aware provider credentials are enabled when `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are set, and production-like runtimes require both values. The runner carries Slack `teamId` into `LlmRequest.context.workspaceId`, and provider adapters use that typed context for encrypted `workspace_credentials` lookup instead of inferring credentials from metadata.

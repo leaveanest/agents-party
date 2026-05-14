@@ -7,22 +7,15 @@ import { createNativeProviderAdapters } from "../providers/nativeProviderAdapter
 import { ProviderRouter } from "../providers/providerRouter.js";
 import {
   type AgentRouterDecision,
-  type AgentSpecialist,
   type SlackAgentInvocation,
+  agentTextResultSchema,
   agentRouterDecisionSchema,
   slackAgentInvocationSchema,
-  specialistTextResultSchema,
-  translationResultSchema,
 } from "./schemas.js";
 import {
   createSalesforcePdfAgentTools,
   type SalesforcePdfToolOptions,
 } from "./salesforcePdf/index.js";
-import {
-  AgentSpecialistRuntimeError,
-  createDefaultSpecialistRuntimes,
-  type AgentSpecialistRuntime,
-} from "./specialistRuntimes.js";
 import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 
 export type AgentRunnerResult = {
@@ -41,11 +34,10 @@ export type AgentRunnerModelTrace = {
 
 export class AgentRunnerExecutionError extends Error {
   constructor(
-    readonly specialist: AgentSpecialist,
     readonly model: AgentRunnerModelTrace | undefined,
     cause: unknown,
   ) {
-    super(`TypeScript AgentRunner failed for ${specialist}: ${errorMessage(cause)}`, { cause });
+    super(`TypeScript AgentRunner failed: ${errorMessage(cause)}`, { cause });
     this.name = "AgentRunnerExecutionError";
   }
 }
@@ -55,81 +47,41 @@ export type AgentRunnerOptions = {
   defaultModelId: string;
   maxToolRounds?: number;
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
-  specialistRuntimes?: Partial<Record<AgentSpecialist, AgentSpecialistRuntime>>;
-  specialistPrompts?: Partial<Record<AgentSpecialist, string>>;
+  systemPrompt?: string;
   toolRegistry?: AgentToolRegistry;
   toolRegistryFactory?: (invocation: SlackAgentInvocation) => AgentToolRegistry | undefined;
 };
 
-const DEFAULT_SPECIALIST_PROMPTS = {
-  assistant:
-    "You are the general Party on Slack assistant. Reply directly and concisely for Slack.",
-  google_maps:
-    "You are the Google Maps specialist. Return a concise Slack-ready answer with place, route, or map context.",
-  image_generation:
-    "You are the image-generation specialist. Describe the image generation outcome or ask for missing details.",
-  translation:
-    "You are the translation specialist. Return JSON with action, translatedText, sourceLanguage, targetLanguage, and optional message.",
-  video_generation:
-    "You are the video-generation specialist. Describe the video generation plan or ask for missing details.",
-  web_research:
-    "You are the web-research specialist. Produce a source-aware concise answer and call out any freshness limits.",
-} as const satisfies Record<AgentSpecialist, string>;
+const DEFAULT_SYSTEM_PROMPT =
+  "You are the general Party on Slack assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.";
 
 export class AgentRunner {
   constructor(private readonly options: AgentRunnerOptions) {}
 
   async run(invocationInput: unknown): Promise<AgentRunnerResult> {
     const invocation = slackAgentInvocationSchema.parse(invocationInput);
-    const decision = selectSpecialist(invocation);
-    const nativeRuntime = this.options.specialistRuntimes?.[decision.specialist];
-    if (nativeRuntime !== undefined) {
-      const model = this.resolveModel(decision.specialist, invocation.modelId);
-      let result;
-      try {
-        result = await nativeRuntime({
-          invocation,
-          model,
-          providerRouter: this.options.providerRouter,
-        });
-      } catch (error) {
-        throw new AgentRunnerExecutionError(
-          decision.specialist,
-          modelTraceFromRuntimeError(error),
-          error,
-        );
-      }
-      return {
-        decision,
-        message: result.message,
-        model: result.model,
-        raw: result.raw,
-        structuredResult: result.structuredResult,
-        toolResults: [],
-      };
-    }
-    const { model, result, toolResults } = await this.runSpecialist(invocation, decision);
+    const decision = selectAgentAction();
+    const { model, result, toolResults } = await this.runAgent(invocation);
 
     try {
       return normalizeRunnerResult(decision, model, result, toolResults);
     } catch (error) {
-      throw new AgentRunnerExecutionError(decision.specialist, modelTrace(model), error);
+      throw new AgentRunnerExecutionError(modelTrace(model), error);
     }
   }
 
-  private async runSpecialist(
+  private async runAgent(
     invocation: SlackAgentInvocation,
-    decision: AgentRouterDecision,
   ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
-    const model = this.resolveModel(decision.specialist, invocation.modelId);
+    const model = this.resolveModel(invocation.modelId);
     const toolRegistry =
       this.options.toolRegistryFactory?.(invocation) ?? this.options.toolRegistry;
     const toolResults: AgentToolResult[] = [];
     try {
-      let history = buildSpecialistHistory({
+      let history = buildAgentHistory({
         invocation,
         model,
-        prompt: this.promptFor(decision.specialist),
+        prompt: this.systemPrompt(),
         toolResults,
       });
       const requestBase: Omit<LlmRequest, "history"> = {
@@ -141,7 +93,6 @@ export class AgentRunner {
           slack_channel_id: invocation.channelId,
           slack_team_id: invocation.teamId,
           slack_user_id: invocation.userId,
-          specialist: decision.specialist,
         },
         model,
         tools: toolRegistry?.definitions(),
@@ -160,10 +111,10 @@ export class AgentRunner {
         }
         const roundToolResults = await toolRegistry.executeAll(result.toolCalls ?? []);
         toolResults.push(...roundToolResults);
-        history = buildSpecialistHistory({
+        history = buildAgentHistory({
           invocation,
           model,
-          prompt: this.promptFor(decision.specialist),
+          prompt: this.systemPrompt(),
           toolResults,
         });
       }
@@ -172,20 +123,20 @@ export class AgentRunner {
       if (error instanceof AgentRunnerExecutionError) {
         throw error;
       }
-      throw new AgentRunnerExecutionError(decision.specialist, modelTrace(model), error);
+      throw new AgentRunnerExecutionError(modelTrace(model), error);
     }
   }
 
-  private promptFor(specialist: AgentSpecialist): string {
-    return this.options.specialistPrompts?.[specialist] ?? DEFAULT_SPECIALIST_PROMPTS[specialist];
+  private systemPrompt(): string {
+    return this.options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
   }
 
-  private resolveModel(specialist: AgentSpecialist, modelId?: string): ModelInfo {
+  private resolveModel(modelId?: string): ModelInfo {
     const resolvedModelId = modelId ?? this.options.defaultModelId;
     try {
       return this.options.providerRouter.registry.get(resolvedModelId);
     } catch (error) {
-      throw new AgentRunnerExecutionError(specialist, { id: resolvedModelId }, error);
+      throw new AgentRunnerExecutionError({ id: resolvedModelId }, error);
     }
   }
 }
@@ -205,9 +156,6 @@ export function createDefaultAgentRunner(
       ...createNativeProviderAdapters({ credentialResolver: options.credentialResolver }),
       ...createAiSdkAdapters({}, { credentialResolver: options.credentialResolver }),
     ]),
-    specialistRuntimes: createDefaultSpecialistRuntimes(settings, {
-      credentialResolver: options.credentialResolver,
-    }),
     toolRegistry: salesforcePdfTools === undefined ? new AgentToolRegistry() : undefined,
     toolRegistryFactory:
       salesforcePdfTools === undefined
@@ -225,23 +173,14 @@ export function createDefaultAgentRunner(
   });
 }
 
-export function selectSpecialist(invocation: SlackAgentInvocation): AgentRouterDecision {
-  if (invocation.specialist !== undefined) {
-    return agentRouterDecisionSchema.parse({
-      confidence: 1,
-      reason: "forced_invocation",
-      specialist: invocation.specialist,
-    });
-  }
-
+export function selectAgentAction(): AgentRouterDecision {
   return agentRouterDecisionSchema.parse({
-    confidence: 0.5,
-    reason: "unrouted_invocation",
-    specialist: "assistant",
+    action: "respond",
+    reason: "agent_invocation",
   });
 }
 
-function buildSpecialistHistory(input: {
+function buildAgentHistory(input: {
   invocation: SlackAgentInvocation;
   model: ModelInfo;
   prompt: string;
@@ -341,21 +280,9 @@ function normalizeRunnerResult(
   toolResults: AgentToolResult[],
 ): AgentRunnerResult {
   const modelSummary = modelTrace(model);
-  if (decision.specialist === "translation") {
-    const parsed = parseJsonObject(result.content);
-    const structured = translationResultSchema.parse(parsed);
-    return {
-      decision,
-      message: structured.translatedText ?? structured.message ?? "Translation completed.",
-      model: modelSummary,
-      raw: result.raw,
-      structuredResult: structured,
-      toolResults,
-    };
-  }
   return {
     decision,
-    message: specialistTextResultSchema.parse({ message: result.content }).message,
+    message: agentTextResultSchema.parse({ message: result.content }).message,
     model: modelSummary,
     raw: result.raw,
     toolResults,
@@ -369,20 +296,6 @@ function modelTrace(model: ModelInfo): AgentRunnerModelTrace {
   };
 }
 
-function modelTraceFromRuntimeError(error: unknown): AgentRunnerModelTrace | undefined {
-  return error instanceof AgentSpecialistRuntimeError ? error.model : undefined;
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
-}
-
-function parseJsonObject(content: string): JsonValue {
-  const trimmed = content.trim();
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) {
-    throw new Error("Agent response did not contain a JSON object.");
-  }
-  return JSON.parse(trimmed.slice(start, end + 1)) as JsonValue;
 }

@@ -30,11 +30,7 @@ package "Heroku" {
       component "Routing Resolver\nworkspace / channel / thread" as routing_resolver
       component "AgentRunner" as agent_runner
       component "ProviderRouter" as provider_router
-      component "Web Research" as web_research
-      component "Google Maps" as google_maps
-      component "Translation" as translation
-      component "Image Generation" as image_generation
-      component "Video Generation" as video_generation
+      component "Agent Tool Registry\nmodel-selected tools" as agent_tools
       component "Google OAuth Coordinator" as google_oauth
       component "Salesforce OAuth Coordinator" as salesforce_oauth
       component "Salesforce PDF Tools\nQuote PDF / Deal Review Pack" as salesforce_pdf_tools
@@ -82,26 +78,19 @@ routing_resolver --> pg_agents : configured agents
 routing_resolver --> slack : fetch thread history
 
 slack_agent_worker --> agent_runner : resolved agent, model,\nand Slack invocation
-agent_runner --> provider_router : provider request with domain history
+agent_runner --> provider_router : provider request with domain history\nand allowed tools
 provider_router --> llm_providers : model invocation
 
-agent_runner --> web_research
-agent_runner --> google_maps
-agent_runner --> translation
-agent_runner --> image_generation
-agent_runner --> video_generation
-agent_runner --> salesforce_pdf_tools : preview-only tool calls
+agent_runner --> agent_tools : execute model-selected tool calls
+agent_tools --> provider_router : web-search or summarization tools
+agent_tools --> google_maps_platform : Places / Routes API calls
+agent_tools --> google_genai_media : Gemini image/video generation
+agent_tools --> llm_providers : provider-native media or tool APIs
+agent_tools --> salesforce_pdf_tools : preview-only tool calls
 salesforce_pdf_tools --> pg_salesforce_pdf : org/action settings and template metadata
 salesforce_pdf_tools --> salesforce_oauth : resolve / refresh connected user token
 salesforce_pdf_tools --> salesforce_rest : record reads and confirmed Files writes
 salesforce_pdf_tools --> pdfme_renderer : render PDF bytes
-
-web_research --> provider_router : web-search capable generation
-google_maps --> google_maps_platform : Places / Routes API calls
-translation --> provider_router : request-driven translation
-image_generation --> google_genai_media : Gemini image generation
-image_generation --> llm_providers : OpenAI image generation via AI SDK
-video_generation --> google_genai_media : Veo rendering or operation handoff
 
 browser --> google_oauth_router : open signed OAuth start URL
 google_oauth_router --> google_oauth

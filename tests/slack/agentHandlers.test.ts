@@ -681,7 +681,7 @@ describe("createAgentSlackHandlers", () => {
     const runner = {
       async run(invocation: unknown) {
         return {
-          decision: { confidence: 0.5, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: `handled ${JSON.stringify(invocation)}`,
           toolResults: [],
         };
@@ -725,7 +725,7 @@ describe("createAgentSlackHandlers", () => {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.5, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: "handled",
           toolResults: [],
         };
@@ -782,7 +782,7 @@ describe("createAgentSlackHandlers", () => {
       async run(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { confidence: 1, reason: "forced_invocation", specialist: "translation" },
+          decision: { action: "respond", reason: "forced_invocation" },
           message: "configured route",
           model: { id: "anthropic:claude-3-5-sonnet-latest", provider: "anthropic" },
           toolResults: [],
@@ -792,7 +792,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "translation" },
+        agent: { name: "translation-agent" },
         agentId: "configured-translator",
         modelId: "anthropic:claude-3-5-sonnet-latest",
         modelScope: "channel",
@@ -826,7 +826,6 @@ describe("createAgentSlackHandlers", () => {
     expect(invocations).toEqual([
       expect.objectContaining({
         modelId: "anthropic:claude-3-5-sonnet-latest",
-        specialist: "translation",
       }),
     ]);
     expect(repository.activations).toEqual([
@@ -844,7 +843,7 @@ describe("createAgentSlackHandlers", () => {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.5, reason: "unrouted_invocation", specialist: "assistant" },
+          decision: { action: "respond", reason: "unrouted_invocation" },
           message: "unexpected fallback",
           toolResults: [],
         };
@@ -885,14 +884,14 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
-  it("does not run a misconfigured resolved agent", async () => {
+  it("runs resolved agents without validating legacy specialist metadata", async () => {
     let runs = 0;
     const runner = {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 1, reason: "forced_invocation", specialist: "assistant" },
-          message: "should not run",
+          decision: { action: "respond", reason: "forced_invocation" },
+          message: "configured route",
           toolResults: [],
         };
       },
@@ -901,7 +900,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "not_a_specialist" },
+        agent: { name: "legacy-agent" },
         agentId: "configured-but-invalid",
         scope: "channel",
       },
@@ -929,19 +928,15 @@ describe("createAgentSlackHandlers", () => {
       logger: { warn() {} },
     } as never);
 
-    expect(runs).toBe(0);
-    expect(posts).toEqual([
-      expect.objectContaining({
-        text: "The configured agent is not runnable. Please check the agent settings.",
-      }),
-    ]);
+    expect(runs).toBe(1);
+    expect(posts).toEqual([expect.objectContaining({ text: "configured route" })]);
   });
 
-  it("logs successful AgentRunner execution with provider and specialist context", async () => {
+  it("logs successful AgentRunner execution with provider context", async () => {
     const runner = {
       async run() {
         return {
-          decision: { confidence: 0.5, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: "handled",
           model: { id: "google:gemini-2.5-flash", provider: "google" },
           toolResults: [],
@@ -979,7 +974,6 @@ describe("createAgentSlackHandlers", () => {
           eventType: "app_mention",
           modelId: "google:gemini-2.5-flash",
           provider: "google",
-          specialist: "assistant",
           teamId: "T1",
         }),
       ],
@@ -990,7 +984,7 @@ describe("createAgentSlackHandlers", () => {
     const runner = {
       async run(invocation: unknown) {
         return {
-          decision: { confidence: 0.5, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: JSON.stringify(invocation),
           toolResults: [],
         };
@@ -1030,7 +1024,6 @@ describe("createAgentSlackHandlers", () => {
     const runner = {
       async run() {
         throw new AgentRunnerExecutionError(
-          "image_generation",
           { id: "google:gemini-2.5-flash-image", provider: "google" },
           new Error("provider failed"),
         );
@@ -1071,7 +1064,6 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         modelId: "google:gemini-2.5-flash-image",
         provider: "google",
-        specialist: "image_generation",
       }),
     ]);
     expect(posts).toEqual([
@@ -1083,11 +1075,11 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
-  it("uploads generated image media from native specialist results", async () => {
+  it("uploads generated image media from generated media results", async () => {
     const runner = {
       async run() {
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "image_generation" },
+          decision: { action: "respond", reason: "test" },
           message: "Image generated by the native provider path.",
           structuredResult: {
             action: "generated",
@@ -1165,7 +1157,7 @@ describe("createAgentSlackHandlers", () => {
       } as never,
       logger: { info() {} },
       result: {
-        decision: { confidence: 0.8, reason: "test", specialist: "image_generation" },
+        decision: { action: "respond", reason: "test" },
         message: "Image generated by the native provider path.",
         structuredResult: {
           action: "generated",
@@ -1197,7 +1189,7 @@ describe("createAgentSlackHandlers", () => {
     const runner = {
       async run() {
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "video_generation" },
+          decision: { action: "respond", reason: "test" },
           message: "Video generation started by the native provider path.",
           structuredResult: {
             action: "in_progress",
@@ -1255,7 +1247,7 @@ describe("createAgentSlackHandlers", () => {
       async run(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: "thread reply",
           toolResults: [],
         };
@@ -1264,7 +1256,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "assistant" },
+        agent: { name: "assistant-agent" },
         agentId: "assistant",
         scope: "thread",
       },
@@ -1306,7 +1298,6 @@ describe("createAgentSlackHandlers", () => {
     expect(invocations).toEqual([
       expect.objectContaining({
         channelId: "C1",
-        specialist: "assistant",
         teamId: "T1",
         text: "follow-up",
         threadMessages: ["root text", "follow-up"],
@@ -1335,7 +1326,7 @@ describe("createAgentSlackHandlers", () => {
       async run(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: "thread reply",
           toolResults: [],
         };
@@ -1344,7 +1335,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "assistant" },
+        agent: { name: "assistant-agent" },
         agentId: "assistant",
         scope: "thread",
       },
@@ -1451,7 +1442,7 @@ describe("createAgentSlackHandlers", () => {
       async run(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: "thread reply",
           toolResults: [],
         };
@@ -1460,7 +1451,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "assistant" },
+        agent: { name: "assistant-agent" },
         agentId: "assistant",
         scope: "thread",
       },
@@ -1692,14 +1683,14 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
-  it("does not set Slack assistant thread status for queued follow-ups without a runnable route", async () => {
+  it("does not set Slack assistant thread status for queued follow-ups without a resolved route", async () => {
     const statuses: unknown[] = [];
     let runs = 0;
     const runner = {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: "thread reply",
           toolResults: [],
         };
@@ -1707,11 +1698,6 @@ describe("createAgentSlackHandlers", () => {
     };
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
-      route: {
-        agent: { specialist: "not_a_specialist" },
-        agentId: "not_a_specialist",
-        scope: "thread",
-      },
       thread: {
         agent_id: "assistant",
         root_message_ts: "1712345678.000100",
@@ -1842,7 +1828,7 @@ describe("createAgentSlackHandlers", () => {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: "thread reply",
           toolResults: [],
         };
@@ -1877,7 +1863,7 @@ describe("createAgentSlackHandlers", () => {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          decision: { action: "respond", reason: "test" },
           message: "thread reply",
           toolResults: [],
         };
@@ -1912,7 +1898,7 @@ describe("createAgentSlackHandlers", () => {
       async run(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { confidence: 1, reason: "forced_invocation", specialist: "translation" },
+          decision: { action: "respond", reason: "forced_invocation" },
           message: "translated follow-up",
           toolResults: [],
         };
@@ -1921,7 +1907,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "translation" },
+        agent: { name: "translation-agent" },
         agentId: "translation",
         scope: "thread",
       },
@@ -1950,7 +1936,7 @@ describe("createAgentSlackHandlers", () => {
       logger: { error() {}, warn() {} },
     } as never);
 
-    expect(invocations).toEqual([expect.objectContaining({ specialist: "translation" })]);
+    expect(invocations).toHaveLength(1);
   });
 
   it("prefers resolved thread route and model for follow-up routing", async () => {
@@ -1959,7 +1945,7 @@ describe("createAgentSlackHandlers", () => {
       async run(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { confidence: 1, reason: "forced_invocation", specialist: "web_research" },
+          decision: { action: "respond", reason: "forced_invocation" },
           message: "researched follow-up",
           toolResults: [],
         };
@@ -1968,7 +1954,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "web_research" },
+        agent: { name: "research-agent" },
         agentId: "research-agent",
         modelId: "google:gemini-2.5-flash",
         modelScope: "thread",
@@ -2002,7 +1988,6 @@ describe("createAgentSlackHandlers", () => {
     expect(invocations).toEqual([
       expect.objectContaining({
         modelId: "google:gemini-2.5-flash",
-        specialist: "web_research",
       }),
     ]);
     expect(repository.activations).toEqual([
@@ -2019,7 +2004,7 @@ describe("createAgentSlackHandlers", () => {
       async run(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { confidence: 1, reason: "forced_invocation", specialist: "assistant" },
+          decision: { action: "respond", reason: "forced_invocation" },
           message: "follow-up",
           toolResults: [],
         };
@@ -2028,7 +2013,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "assistant" },
+        agent: { name: "assistant-agent" },
         agentId: "assistant",
         scope: "thread",
       },
@@ -2070,7 +2055,7 @@ describe("createAgentSlackHandlers", () => {
       async run(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          decision: { action: "respond", reason: "test" },
           message: "こんにちは",
           toolResults: [],
         };
@@ -2080,7 +2065,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "translation" },
+        agent: { name: "translation-agent" },
         agentId: "translation",
         modelId: "anthropic:claude-3-5-sonnet-latest",
         modelScope: "channel",
@@ -2123,7 +2108,6 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         channelId: "C1",
         modelId: "anthropic:claude-3-5-sonnet-latest",
-        specialist: "translation",
         teamId: "T1",
         text: "Translate the following Slack message to ja:\n\nhello",
         threadTs: "1712345678.000100",
@@ -2145,7 +2129,7 @@ describe("createAgentSlackHandlers", () => {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          decision: { action: "respond", reason: "test" },
           message: "こんにちは",
           toolResults: [],
         };
@@ -2174,13 +2158,13 @@ describe("createAgentSlackHandlers", () => {
     expect(runs).toBe(0);
   });
 
-  it("does not translate reactions through a misconfigured resolved agent", async () => {
+  it("translates reactions through resolved agents without specialist validation", async () => {
     let runs = 0;
     const runner = {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          decision: { action: "respond", reason: "test" },
           message: "こんにちは",
           toolResults: [],
         };
@@ -2189,7 +2173,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "not_a_specialist" },
+        agent: { name: "legacy-agent" },
         agentId: "bad-agent",
         modelId: "anthropic:claude-3-5-sonnet-latest",
         modelScope: "channel",
@@ -2213,10 +2197,10 @@ describe("createAgentSlackHandlers", () => {
       logger: { error() {}, warn() {} },
     } as never);
 
-    expect(runs).toBe(0);
+    expect(runs).toBe(1);
   });
 
-  it("does not post source-text errors before rejecting misconfigured reaction routes", async () => {
+  it("posts source-text errors for reaction routes before invoking the runner", async () => {
     const posts: unknown[] = [];
     const runner = {
       async run() {
@@ -2226,7 +2210,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "not_a_specialist" },
+        agent: { name: "legacy-agent" },
         agentId: "bad-agent",
         scope: "channel",
       },
@@ -2253,16 +2237,20 @@ describe("createAgentSlackHandlers", () => {
       logger: { error() {}, warn() {} },
     } as never);
 
-    expect(posts).toEqual([]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        text: "I couldn't read text from the reacted message.",
+      }),
+    ]);
   });
 
-  it("does not translate reactions through a non-translation resolved agent", async () => {
+  it("translates reactions through any resolved agent route", async () => {
     let runs = 0;
     const runner = {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          decision: { action: "respond", reason: "test" },
           message: "こんにちは",
           toolResults: [],
         };
@@ -2271,7 +2259,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
-        agent: { specialist: "assistant" },
+        agent: { name: "assistant-agent" },
         agentId: "assistant",
         modelId: "anthropic:claude-3-5-sonnet-latest",
         modelScope: "channel",
@@ -2295,7 +2283,7 @@ describe("createAgentSlackHandlers", () => {
       logger: { error() {}, warn() {} },
     } as never);
 
-    expect(runs).toBe(0);
+    expect(runs).toBe(1);
   });
 
   it("does not translate reactions without repository-backed channel policy", async () => {
@@ -2304,7 +2292,7 @@ describe("createAgentSlackHandlers", () => {
       async run() {
         runs += 1;
         return {
-          decision: { confidence: 0.8, reason: "test", specialist: "translation" },
+          decision: { action: "respond", reason: "test" },
           message: "こんにちは",
           toolResults: [],
         };

@@ -1,14 +1,5 @@
 import { z } from "zod";
 
-export const agentSpecialistSchema = z.enum([
-  "assistant",
-  "google_maps",
-  "image_generation",
-  "translation",
-  "video_generation",
-  "web_research",
-]);
-
 export const slackReferenceImageSchema = z
   .object({
     data: z.instanceof(Uint8Array).optional(),
@@ -41,7 +32,6 @@ export const slackAgentInvocationSchema = z
       )
       .optional(),
     referenceImages: z.array(slackReferenceImageSchema).default([]),
-    specialist: agentSpecialistSchema.optional(),
     teamId: z.string().min(1),
     text: z.string().default(""),
     threadMessages: z.array(z.string()).default([]),
@@ -54,29 +44,16 @@ export const slackAgentInvocationSchema = z
 
 export const agentRouterDecisionSchema = z
   .object({
-    confidence: z.number().min(0).max(1).default(1),
-    reason: z.string().default("unrouted_invocation"),
-    specialist: agentSpecialistSchema,
+    action: z.literal("respond").default("respond"),
+    reason: z.string().default("agent_invocation"),
   })
   .strict();
 
-export const translationResultSchema = z
-  .object({
-    action: z.enum(["no_op", "translated"]).default("translated"),
-    message: z.string().optional(),
-    sourceLanguage: z.string().optional(),
-    targetLanguage: z.string().optional(),
-    translatedText: z.string().optional(),
-  })
-  .strict();
-
-export const specialistTextResultSchema = z
+export const agentTextResultSchema = z
   .object({
     message: z.string().min(1),
   })
   .strict();
 
 export type AgentRouterDecision = z.infer<typeof agentRouterDecisionSchema>;
-export type AgentSpecialist = z.infer<typeof agentSpecialistSchema>;
 export type SlackAgentInvocation = z.infer<typeof slackAgentInvocationSchema>;
-export type TranslationResult = z.infer<typeof translationResultSchema>;
