@@ -81,6 +81,11 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
   const agentModelId = readAgentModelId(env, appEnv);
   const databaseUrl = readText(env.DATABASE_URL);
   const redisUrl = readText(env.REDIS_URL);
+  const llmApiKeyEncryptionKey = readText(env.LLM_API_KEY_ENCRYPTION_KEY);
+  assertProductionProviderCredentialSettings(env, appEnv, {
+    databaseUrl,
+    llmApiKeyEncryptionKey,
+  });
   const googleOAuthClientId = readText(env.GOOGLE_OAUTH_CLIENT_ID);
   const googleOAuthClientSecret = readText(env.GOOGLE_OAUTH_CLIENT_SECRET);
   const googleOAuthContextSigningSecret = readText(env.GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET);
@@ -89,7 +94,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     "GOOGLE_OAUTH_REDIRECT_BASE_URL",
   );
   const googleTokenEncryptionKey = readText(env.GOOGLE_TOKEN_ENCRYPTION_KEY);
-  const llmApiKeyEncryptionKey = readText(env.LLM_API_KEY_ENCRYPTION_KEY);
   const googleMapsApiKey = readText(env.GOOGLE_MAPS_API_KEY);
   const googleGenerativeAiApiKey =
     readText(env.GOOGLE_GENERATIVE_AI_API_KEY) ?? readText(env.GEMINI_API_KEY);
@@ -215,6 +219,33 @@ function readAgentModelId(env: NodeJS.ProcessEnv, appEnv: string): string {
 }
 
 function requiresExplicitAgentModel(env: NodeJS.ProcessEnv, appEnv: string): boolean {
+  return isProductionLikeRuntime(env, appEnv);
+}
+
+function assertProductionProviderCredentialSettings(
+  env: NodeJS.ProcessEnv,
+  appEnv: string,
+  settings: {
+    databaseUrl: string | undefined;
+    llmApiKeyEncryptionKey: string | undefined;
+  },
+): void {
+  if (!isProductionLikeRuntime(env, appEnv)) {
+    return;
+  }
+  if (settings.databaseUrl === undefined) {
+    throw new Error(
+      "DATABASE_URL is required for production-like runtimes so provider API keys resolve from workspace credentials.",
+    );
+  }
+  if (settings.llmApiKeyEncryptionKey === undefined) {
+    throw new Error(
+      "LLM_API_KEY_ENCRYPTION_KEY is required for production-like runtimes so provider API keys resolve from workspace credentials.",
+    );
+  }
+}
+
+function isProductionLikeRuntime(env: NodeJS.ProcessEnv, appEnv: string): boolean {
   return (
     APP_ENVS_REQUIRING_AGENT_MODEL.has(appEnv.trim().toLowerCase()) ||
     readText(env.DYNO) !== undefined ||

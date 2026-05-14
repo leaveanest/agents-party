@@ -175,7 +175,7 @@ VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 LLM_API_KEY_ENCRYPTION_KEY=...
 ```
 
-When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Without that resolver, local development can still use process-level provider environment variables supported by the AI SDK provider packages. Do not rely on process-level API keys for multi-workspace production traffic.
+When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Production-like runtimes (`APP_ENV=heroku`, `APP_ENV=prod`, `APP_ENV=production`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set) require both values at startup so provider calls cannot silently fall back to process-level provider keys. Without that resolver, local development can still use process-level provider environment variables supported by the AI SDK provider packages.
 
 ### Local database
 
