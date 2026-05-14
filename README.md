@@ -86,45 +86,103 @@ Repository-local Codex skills for development live under [`.agents/skills/`](.ag
 
 ## Local Setup
 
-Install TypeScript dependencies:
+`agents-party` can run in three local modes:
+
+- health-check only, with no Slack credentials
+- single-workspace Slack development, using a static bot token
+- production-like development, using PostgreSQL-backed Slack OAuth installation storage
+
+### Prerequisites
+
+- Node.js 22.x
+- `vp` for all JavaScript/TypeScript workflows in this repository
+- Docker Compose, when using local PostgreSQL or Redis
+- A Slack workspace where you can create or install an app, when testing Slack events
+
+If `vp` is not available, install or fix `vp` before continuing. Do not switch to `npm`, `pnpm`,
+`yarn`, or `bun` for normal repository workflows.
+
+### 1. Install Dependencies
 
 ```bash
 vp install
 ```
 
-Run the TypeScript app locally:
+### 2. Start The App Without Slack
+
+This is the fastest smoke test. Without Slack settings the server still starts and exposes
+`GET /healthz`.
 
 ```bash
 vp run dev
 ```
 
-The TypeScript runtime exposes:
+In another shell:
+
+```bash
+curl http://localhost:8000/healthz
+```
+
+### 3. Add Local PostgreSQL
+
+PostgreSQL is required for migrations, workspace routing, OAuth state, Slack installation storage,
+and encrypted workspace credentials.
+
+```bash
+docker compose up -d postgres
+export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
+vp run migrate
+```
+
+See [`docs/postgres-typescript-migrations.md`](docs/postgres-typescript-migrations.md) for migration
+policy and rollout notes.
+
+### 4. Configure Slack Locally
+
+Use the Slack App Manifest template at [`slack-app-manifest.yaml`](slack-app-manifest.yaml).
+Replace `agents-party.example.com` with a public HTTPS tunnel URL that forwards to
+`http://localhost:8000` before importing the manifest into Slack.
+
+For local single-workspace development, set a static bot token and signing secret:
+
+```bash
+export SLACK_SIGNING_SECRET=...
+export SLACK_BOT_TOKEN=xoxb-...
+export GOOGLE_GENERATIVE_AI_API_KEY=...
+vp run dev
+```
+
+The default local bootstrap model is `google:gemini-2.5-flash`. Set `AGENT_MODEL` to another
+registered provider model id when testing a different provider. Keep provider API keys in your
+shell or local `.env`; never commit them.
+
+For production-like Slack OAuth install testing, use PostgreSQL plus Slack OAuth settings instead
+of `SLACK_BOT_TOKEN`:
+
+```bash
+export SLACK_SIGNING_SECRET=...
+export SLACK_CLIENT_ID=...
+export SLACK_CLIENT_SECRET=...
+export SLACK_STATE_SECRET=...
+export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
+vp run migrate
+vp run dev
+```
+
+The TypeScript runtime exposes these local routes:
 
 - `GET /healthz`
 - `POST /slack/events`
 - `GET /slack/install` when Slack OAuth install settings are present
 - `GET /slack/oauth_redirect` when Slack OAuth install settings are present
 
-Validate the TypeScript workspace:
+### 5. Seed A Workspace Route
+
+After migrations, seed a first Slack workspace route so app mentions can resolve the default agent
+and model. Use the Slack workspace team id for `AGENTS_PARTY_BOOTSTRAP_TEAM_ID`.
 
 ```bash
-vp check
-vp test
-vp pack
-```
-
-Run TypeScript-managed PostgreSQL migrations:
-
-```bash
-vp run migrate
-```
-
-See [`docs/postgres-typescript-migrations.md`](docs/postgres-typescript-migrations.md) for migration policy and rollout notes.
-
-Seed a first Slack workspace route after migrations:
-
-```bash
-DATABASE_URL=postgresql://user:password@localhost:5432/agents_party \
+DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
 AGENT_MODEL=google:gemini-2.5-flash \
 AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
 vp run seed:bootstrap
@@ -133,6 +191,41 @@ vp run seed:bootstrap
 The bootstrap seed creates an enabled `assistant` agent and sets the workspace default agent/model.
 Use `AGENTS_PARTY_BOOTSTRAP_ENABLED_CHANNEL_IDS=C123,C456` to restrict the first enabled channels;
 omitting it enables all channels until workspace settings are tightened.
+
+### 6. Validate Changes
+
+Run the normal validation set before opening a pull request:
+
+```bash
+vp check
+vp run typecheck
+vp test
+vp pack
+```
+
+Use [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution expectations and project boundaries.
+Use [`.env.example`](.env.example) as a local environment reference. Docker Compose reads `.env`
+automatically; `vp run ...` commands use variables exported in the current shell.
+
+### Local Worker Queue
+
+Slack AI chat handling can run in-process for local development. To test Redis-backed handoff,
+start Redis and run the web and worker processes separately:
+
+```bash
+docker compose up -d redis
+SLACK_AGENT_QUEUE_ENABLED=true REDIS_URL=redis://localhost:6379 vp run dev
+REDIS_URL=redis://localhost:6379 \
+DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
+vp run worker
+```
+
+### Terraform Deployment
+
+Terraform applies the Heroku dev environment under
+[`terraform/environments/dev/`](terraform/environments/dev/). Use it for Heroku app, Postgres,
+Redis/KVS, buildpack, non-secret config vars, and optional dyno formation. Keep local development on
+Docker Compose until you are ready to test against Heroku.
 
 ## Local Container
 
