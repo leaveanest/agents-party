@@ -110,6 +110,14 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
   const slackEnabled =
     slackSigningSecret !== undefined &&
     (slackBotToken !== undefined || slackInstallationStoreEnabled);
+  assertProductionSlackInstallationStoreSettings(env, appEnv, {
+    databaseUrl,
+    slackClientId,
+    slackClientSecret,
+    slackOAuthInstallEnabled,
+    slackSigningSecret,
+    slackStateSecret,
+  });
   const googleOAuthStartPath = readRoutePath(env.GOOGLE_OAUTH_START_PATH, "/oauth/google/start");
   const googleOAuthCallbackPath = readRoutePath(
     env.GOOGLE_OAUTH_CALLBACK_PATH,
@@ -242,6 +250,49 @@ function assertProductionProviderCredentialSettings(
     throw new Error(
       "LLM_API_KEY_ENCRYPTION_KEY is required for production-like runtimes so provider API keys resolve from workspace credentials.",
     );
+  }
+}
+
+function assertProductionSlackInstallationStoreSettings(
+  env: NodeJS.ProcessEnv,
+  appEnv: string,
+  settings: {
+    databaseUrl: string | undefined;
+    slackClientId: string | undefined;
+    slackClientSecret: string | undefined;
+    slackOAuthInstallEnabled: boolean;
+    slackSigningSecret: string | undefined;
+    slackStateSecret: string | undefined;
+  },
+): void {
+  if (!isProductionLikeRuntime(env, appEnv)) {
+    return;
+  }
+  if (settings.slackSigningSecret === undefined) {
+    throw new Error(
+      "SLACK_SIGNING_SECRET is required for production-like multi-workspace Slack runtimes.",
+    );
+  }
+  if (settings.databaseUrl === undefined) {
+    throw new Error(
+      "DATABASE_URL is required for production-like multi-workspace Slack installation storage.",
+    );
+  }
+  if (settings.slackClientId === undefined) {
+    throw new Error(
+      "SLACK_CLIENT_ID is required for production-like multi-workspace Slack installation storage.",
+    );
+  }
+  if (settings.slackClientSecret === undefined) {
+    throw new Error(
+      "SLACK_CLIENT_SECRET is required for production-like Slack OAuth installation.",
+    );
+  }
+  if (settings.slackStateSecret === undefined) {
+    throw new Error("SLACK_STATE_SECRET is required for production-like Slack OAuth installation.");
+  }
+  if (!settings.slackOAuthInstallEnabled) {
+    throw new Error("Slack OAuth installation must be enabled for production-like runtimes.");
   }
 }
 

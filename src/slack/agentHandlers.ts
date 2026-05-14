@@ -81,7 +81,18 @@ type SlackClient = SlackEventArgs<"app_mention">["client"];
 export type SlackAgentClient = Pick<
   SlackClient,
   "chat" | "conversations" | "filesUploadV2" | "token"
->;
+> & {
+  assistant?: {
+    threads?: {
+      setStatus(input: {
+        channel_id: string;
+        loading_messages?: string[];
+        status: string;
+        thread_ts: string;
+      }): Promise<unknown>;
+    };
+  };
+};
 
 const workspaceCredentialProviderKinds = [
   "openai",
@@ -1071,6 +1082,12 @@ async function processAppMentionJob(
   ) {
     return;
   }
+  await setSlackAssistantThreadStatus({
+    channelId: job.channelId,
+    client: input.client,
+    logger: input.logger,
+    threadTs: job.threadTs,
+  });
 
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
@@ -1206,6 +1223,12 @@ async function processFollowUpMessageJob(
     if (route !== undefined && routedSpecialist === undefined) {
       return;
     }
+    await setSlackAssistantThreadStatus({
+      channelId: job.channelId,
+      client: input.client,
+      logger: input.logger,
+      threadTs: job.threadTs,
+    });
     const specialist = routedSpecialist ?? stringField(thread, "agent_id");
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
     const threadMessages = await readThreadMessages(input.client, job.channelId, job.threadTs);
@@ -1279,6 +1302,31 @@ async function processFollowUpMessageJob(
     text,
     threadTs: job.threadTs,
   });
+}
+
+async function setSlackAssistantThreadStatus(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  logger: unknown;
+  threadTs: string;
+}): Promise<void> {
+  const setStatus = input.client.assistant?.threads?.setStatus;
+  if (setStatus === undefined) {
+    return;
+  }
+  try {
+    await setStatus({
+      channel_id: input.channelId,
+      status: "is working on your request...",
+      thread_ts: input.threadTs,
+    });
+  } catch (error) {
+    logWarn(input.logger, "Failed to set Slack assistant thread status.", {
+      channelId: input.channelId,
+      error,
+      threadTs: input.threadTs,
+    });
+  }
 }
 
 async function enqueueSlackAgentJob(input: {

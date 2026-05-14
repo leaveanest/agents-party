@@ -164,16 +164,7 @@ function buildAuthorize(
       };
     }
 
-    if (settings.slackBotToken !== undefined) {
-      return {
-        botToken: settings.slackBotToken,
-        enterpriseId: source.enterpriseId,
-        teamId: source.teamId,
-        userId: source.userId,
-      };
-    }
-
-    throw new Error("Slack authorization failed: no installation or fallback bot token found.");
+    throw new Error("Slack authorization failed: no stored installation bot token found.");
   };
 }
 

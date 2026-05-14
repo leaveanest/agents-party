@@ -121,6 +121,19 @@ vp run migrate
 
 See [`docs/postgres-typescript-migrations.md`](docs/postgres-typescript-migrations.md) for migration policy and rollout notes.
 
+Seed a first Slack workspace route after migrations:
+
+```bash
+DATABASE_URL=postgresql://user:password@localhost:5432/agents_party \
+AGENT_MODEL=google:gemini-2.5-flash \
+AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
+vp run seed:bootstrap
+```
+
+The bootstrap seed creates an enabled `assistant` agent and sets the workspace default agent/model.
+Use `AGENTS_PARTY_BOOTSTRAP_ENABLED_CHANNEL_IDS=C123,C456` to restrict the first enabled channels;
+omitting it enables all channels until workspace settings are tightened.
+
 ## Local Container
 
 This repository includes a root `Dockerfile` for local container checks only.
@@ -131,6 +144,21 @@ Build locally if needed:
 ```bash
 docker build -t agents-party .
 ```
+
+Run a production-like local stack with PostgreSQL, Redis, web, worker, and migrations:
+
+```bash
+docker compose up --build web worker
+```
+
+Seed a local bootstrap Slack workspace route in the same stack:
+
+```bash
+docker compose --profile seed run --rm seed
+```
+
+The compose defaults are local-only placeholder values. Override Slack/OAuth/provider settings from
+your shell or a local `.env` file when testing real Slack requests.
 
 ## Configuration
 
@@ -149,15 +177,15 @@ APP_PORT=8000
 The Slack App Manifest template is [`slack-app-manifest.yaml`](slack-app-manifest.yaml).
 Replace `agents-party.example.com` with the public HTTPS host before importing it into Slack.
 
-Use a static bot token locally, or provide `SLACK_CLIENT_ID` together with database settings when using the installation store:
+Use a static bot token for local single-workspace development only. Production-like runtimes are
+multi-workspace and require the database-backed Slack installation store:
 
 ```bash
-SLACK_BOT_TOKEN=...
 SLACK_SIGNING_SECRET=...
 SLACK_CLIENT_ID=...
 SLACK_CLIENT_SECRET=...
 SLACK_STATE_SECRET=...
-SLACK_SCOPES=app_mentions:read,channels:history,chat:write,files:write,groups:history,im:history,mpim:history,reactions:read,users:read,views:write
+SLACK_SCOPES=app_mentions:read,channels:history,chat:write,files:read,files:write,groups:history,im:history,mpim:history,reactions:read,users:read,views:write
 SLACK_USER_SCOPES=
 SLACK_EVENTS_PATH=/slack/events
 SLACK_INSTALL_PATH=/slack/install
@@ -165,7 +193,14 @@ SLACK_OAUTH_REDIRECT_PATH=/slack/oauth_redirect
 AGENT_MODEL=google:gemini-2.5-flash
 ```
 
-`AGENT_MODEL` is the application bootstrap/default model passed to the TypeScript `AgentRunner` when Slack routing has not supplied a thread, channel, or workspace model. Local development can omit it and use the bootstrap default `google:gemini-2.5-flash`. Production-like runtimes, including Heroku dynos and `APP_ENV=heroku` or `NODE_ENV=production`, require `AGENT_MODEL`; startup fails closed if it is missing.
+For local single-workspace development without the installation store, set `SLACK_BOT_TOKEN` and
+`SLACK_SIGNING_SECRET` instead of the Slack OAuth client settings.
+
+`AGENT_MODEL` is the application bootstrap/fallback model passed to the TypeScript `AgentRunner`
+when Slack routing has not supplied a thread, channel, or workspace model. Local development can
+omit it and use the bootstrap default `google:gemini-2.5-flash`. Production-like runtimes,
+including Heroku dynos and `APP_ENV=heroku` or `NODE_ENV=production`, require `AGENT_MODEL`;
+startup fails closed if it is missing.
 
 ### Specialists
 
@@ -264,7 +299,6 @@ Heroku production deploys use:
 - `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` for the TypeScript runtime
 - Heroku Postgres add-on for `DATABASE_URL`
 - Heroku Key-Value Store/Redis add-on for `REDIS_URL`
-- Heroku Managed Inference and Agents add-on for `INFERENCE_KEY` and `INFERENCE_URL`
 
 Terraform for the Heroku app, add-ons, buildpack, non-secret config vars, and optional web formation lives under `terraform/environments/dev/`.
 
@@ -286,9 +320,13 @@ The Heroku Terraform provider reads credentials from `HEROKU_API_KEY` or an auth
 
 ```bash
 heroku config:set \
-  SLACK_BOT_TOKEN=... \
   SLACK_SIGNING_SECRET=... \
+  SLACK_CLIENT_ID=... \
+  SLACK_CLIENT_SECRET=... \
+  SLACK_STATE_SECRET=... \
+  LLM_API_KEY_ENCRYPTION_KEY=... \
   GOOGLE_OAUTH_REDIRECT_BASE_URL=https://... \
+  GOOGLE_OAUTH_CLIENT_ID=... \
   GOOGLE_OAUTH_CLIENT_SECRET=... \
   GOOGLE_OAUTH_CONTEXT_SIGNING_SECRET=... \
   GOOGLE_TOKEN_ENCRYPTION_KEY=... \

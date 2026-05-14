@@ -1565,6 +1565,195 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("sets Slack assistant thread status when queued app mention processing starts", async () => {
+    const statuses: unknown[] = [];
+    const runner = {
+      async run() {
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000100",
+        teamId: "T1",
+        text: "hello",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: {
+            threads: {
+              setStatus: async (payload: unknown) => {
+                statuses.push(payload);
+                return { ok: true };
+              },
+            },
+          },
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: { replies: async () => ({ messages: [] }) },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        runner: runner as never,
+      },
+    );
+
+    expect(statuses).toEqual([
+      {
+        channel_id: "C1",
+        status: "is working on your request...",
+        thread_ts: "1712345678.000100",
+      },
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "thread reply",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("continues queued jobs when Slack assistant thread status fails", async () => {
+    const warnings: unknown[] = [];
+    const runner = {
+      async run() {
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000100",
+        teamId: "T1",
+        text: "hello",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: {
+            threads: {
+              setStatus: async () => {
+                throw new Error("status failed");
+              },
+            },
+          },
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: { replies: async () => ({ messages: [] }) },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: {
+          error() {},
+          info() {},
+          warn(message: unknown, metadata: unknown) {
+            warnings.push({ message, metadata });
+          },
+        },
+        runner: runner as never,
+      },
+    );
+
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        message: "Failed to set Slack assistant thread status.",
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        text: "thread reply",
+      }),
+    ]);
+  });
+
+  it("does not set Slack assistant thread status for queued follow-ups without a runnable route", async () => {
+    const statuses: unknown[] = [];
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { confidence: 0.8, reason: "test", specialist: "assistant" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { specialist: "not_a_specialist" },
+        agentId: "not_a_specialist",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "follow-up",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: {
+            threads: {
+              setStatus: async (payload: unknown) => {
+                statuses.push(payload);
+                return { ok: true };
+              },
+            },
+          },
+          chat: { postMessage: async () => ({}) },
+          conversations: { replies: async () => ({ messages: [] }) },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(statuses).toEqual([]);
+    expect(runs).toBe(0);
+  });
+
   it("rethrows queued AgentRunner failures before the final worker attempt", async () => {
     const runner = {
       async run() {
