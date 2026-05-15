@@ -487,8 +487,10 @@ async function handleWorkspaceCredentialProviderSelectAction(
   const view = isRecord(body) ? body.view : undefined;
   const slackUserId = readSlackUserId(body);
   const translator = await resolveHandlerTranslator(client, slackUserId, options, logger);
-  const teamId =
-    (isRecord(view) ? readString(view, "private_metadata") : undefined) ?? readTeamId(body, {});
+  const metadata = parseWorkspaceCredentialModalMetadata(
+    isRecord(view) ? readString(view, "private_metadata") : undefined,
+  );
+  const teamId = metadata?.teamId ?? readTeamId(body, {});
   const providerValue = readSelectedOptionValue(
     view,
     WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
@@ -511,16 +513,20 @@ async function handleWorkspaceCredentialModalSubmission(
   { ack, body, client, logger, view }: SlackViewArgs,
   options: AgentSlackHandlerOptions,
 ): Promise<void> {
-  const metadataTeamId = readString(view as unknown as StringIndexed, "private_metadata");
+  const metadata = parseWorkspaceCredentialModalMetadata(
+    readString(view as unknown as StringIndexed, "private_metadata"),
+  );
+  const metadataTeamId = metadata?.teamId;
   const bodyTeamId = readTeamId(body, {});
   const teamId = bodyTeamId ?? metadataTeamId;
   const slackUserId = readSlackUserId(body);
-  const userContext = await resolveSlackUserContext(client, slackUserId, options, logger);
-  const { translator } = userContext;
+  const ackTranslator = createTranslator(
+    metadata?.locale ?? options.defaultLocale ?? FALLBACK_LOCALE,
+  );
   if (options.workspaceCredentialSettings === undefined) {
     await ack({
       errors: {
-        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: translator.t("credential.error.notConfigured"),
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: ackTranslator.t("credential.error.notConfigured"),
       },
       response_action: "errors",
     });
@@ -529,7 +535,7 @@ async function handleWorkspaceCredentialModalSubmission(
   if (metadataTeamId !== undefined && bodyTeamId !== undefined && metadataTeamId !== bodyTeamId) {
     await ack({
       errors: {
-        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: translator.t("credential.error.contextMismatch"),
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: ackTranslator.t("credential.error.contextMismatch"),
       },
       response_action: "errors",
     });
@@ -538,13 +544,13 @@ async function handleWorkspaceCredentialModalSubmission(
   if (teamId === undefined || slackUserId === undefined) {
     await ack({
       errors: {
-        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: translator.t("credential.error.contextMissing"),
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: ackTranslator.t("credential.error.contextMissing"),
       },
       response_action: "errors",
     });
     return;
   }
-  const parsed = parseWorkspaceCredentialModal(view, translator);
+  const parsed = parseWorkspaceCredentialModal(view, ackTranslator);
   if ("errors" in parsed) {
     await ack({
       errors: parsed.errors,
@@ -555,10 +561,19 @@ async function handleWorkspaceCredentialModalSubmission(
 
   await ack({
     response_action: "update",
-    view: buildWorkspaceCredentialSavingModal(translator) as never,
+    view: buildWorkspaceCredentialSavingModal(ackTranslator) as never,
   });
 
+  let resultTranslator = ackTranslator;
   try {
+    const userContext = await resolveSlackUserContext(
+      client,
+      slackUserId,
+      { defaultLocale: ackTranslator.locale },
+      logger,
+    );
+    const { translator } = userContext;
+    resultTranslator = translator;
     if (!userContext.isWorkspaceAdmin) {
       await updateWorkspaceCredentialModal(
         client,
@@ -604,9 +619,9 @@ async function handleWorkspaceCredentialModalSubmission(
       client,
       view,
       buildWorkspaceCredentialResultModal(
-        translator.t("credential.title.apiKey"),
-        translator.t("credential.error.saveFailed"),
-        translator,
+        resultTranslator.t("credential.title.apiKey"),
+        resultTranslator.t("credential.error.saveFailed"),
+        resultTranslator,
       ),
       logger,
     );
@@ -685,12 +700,13 @@ async function handleSalesforcePdfWorkflowModalSubmission(
   );
   const bodyTeamId = readTeamId(body, {});
   const slackUserId = readSlackUserId(body);
-  const userContext = await resolveSlackUserContext(client, slackUserId, options, logger);
-  const { translator } = userContext;
+  const ackTranslator = createTranslator(
+    metadata?.locale ?? options.defaultLocale ?? FALLBACK_LOCALE,
+  );
   if (options.salesforcePdfWorkflowHome === undefined) {
     await ack({
       errors: {
-        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]: translator.t(
+        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]: ackTranslator.t(
           "salesforcePdf.error.notConfigured",
         ),
       },
@@ -705,7 +721,7 @@ async function handleSalesforcePdfWorkflowModalSubmission(
   ) {
     await ack({
       errors: {
-        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]: translator.t(
+        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]: ackTranslator.t(
           "salesforcePdf.error.contextMissing",
         ),
       },
@@ -713,7 +729,7 @@ async function handleSalesforcePdfWorkflowModalSubmission(
     });
     return;
   }
-  const parsed = parseSalesforcePdfWorkflowModal(view, translator);
+  const parsed = parseSalesforcePdfWorkflowModal(view, ackTranslator);
   if ("errors" in parsed) {
     await ack({
       errors: parsed.errors,
@@ -725,13 +741,22 @@ async function handleSalesforcePdfWorkflowModalSubmission(
   await ack({
     response_action: "update",
     view: buildSalesforcePdfWorkflowResultModal(
-      translator.t("salesforcePdf.title"),
-      translator.t("salesforcePdf.result.saving"),
-      translator,
+      ackTranslator.t("salesforcePdf.title"),
+      ackTranslator.t("salesforcePdf.result.saving"),
+      ackTranslator,
     ) as never,
   });
 
+  let resultTranslator = ackTranslator;
   try {
+    const userContext = await resolveSlackUserContext(
+      client,
+      slackUserId,
+      { defaultLocale: ackTranslator.locale },
+      logger,
+    );
+    const { translator } = userContext;
+    resultTranslator = translator;
     if (!userContext.isWorkspaceAdmin) {
       await updateSalesforcePdfWorkflowModal(
         client,
@@ -825,9 +850,9 @@ async function handleSalesforcePdfWorkflowModalSubmission(
       client,
       view,
       buildSalesforcePdfWorkflowResultModal(
-        translator.t("salesforcePdf.title"),
-        translator.t("salesforcePdf.error.saveFailed"),
-        translator,
+        resultTranslator.t("salesforcePdf.title"),
+        resultTranslator.t("salesforcePdf.error.saveFailed"),
+        resultTranslator,
       ),
       logger,
     );
@@ -997,7 +1022,6 @@ async function handleMessage(
     logger.warn("Ignoring message without a team id.");
     return;
   }
-  const translator = await resolveHandlerTranslator(client, event.user, options, logger);
   const threadTs = readString(event, "thread_ts");
   if (!isSupportedFollowUpMessage(event, threadTs) || options.routingRepository === undefined) {
     return;
@@ -1015,6 +1039,7 @@ async function handleMessage(
     return;
   }
 
+  const translator = await resolveHandlerTranslator(client, event.user, options, logger);
   if (options.agentJobQueue !== undefined) {
     await enqueueSlackAgentJob({
       body,
@@ -1856,7 +1881,7 @@ function buildWorkspaceCredentialModal(
   const providerKind = providerKindForCredentialSelection(providerSelection);
   return {
     callback_id: WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
-    private_metadata: teamId,
+    private_metadata: workspaceCredentialPrivateMetadata(teamId, translator),
     submit: { text: translator.t("common.save"), type: "plain_text" },
     title: { text: translator.t("credential.title"), type: "plain_text" },
     type: "modal",
@@ -1983,7 +2008,6 @@ function workspaceCredentialProviderOptionsFor(translator: Translator): {
   value: WorkspaceCredentialProviderSelection;
 }[] {
   return workspaceCredentialProviderOptions.map((option) => ({
-    ...option,
     text: {
       text:
         option.value === "google_service_account_json"
@@ -1991,6 +2015,7 @@ function workspaceCredentialProviderOptionsFor(translator: Translator): {
           : option.label,
       type: "plain_text",
     },
+    value: option.value,
   }));
 }
 
@@ -1998,6 +2023,10 @@ function providerKindForCredentialSelection(
   providerSelection: WorkspaceCredentialProviderSelection,
 ): CredentialProviderKind {
   return providerSelection === "google_service_account_json" ? "google" : providerSelection;
+}
+
+function workspaceCredentialPrivateMetadata(teamId: string, translator: Translator): string {
+  return JSON.stringify({ locale: translator.locale, teamId });
 }
 
 function buildWorkspaceCredentialSavingModal(
@@ -2147,6 +2176,7 @@ function buildSalesforcePdfWorkflowModal(input: {
     callback_id: SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
     private_metadata: JSON.stringify({
       action: input.action,
+      locale: translator.locale,
       salesforceOrgId: input.salesforceOrgId,
       teamId: input.teamId,
     }),
@@ -2729,6 +2759,29 @@ function parseWorkspaceCredentialProviderSelection(
   return workspaceCredentialProviderOptions.find((option) => option.value === value)?.value;
 }
 
+function parseWorkspaceCredentialModalMetadata(
+  value: string | undefined,
+): { locale?: Locale; teamId: string } | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) {
+      return value.trim() === "" ? undefined : { teamId: value };
+    }
+    const teamId = readOptionalString(parsed.teamId);
+    return teamId === undefined
+      ? undefined
+      : {
+          locale: normalizeLocale(readOptionalString(parsed.locale)),
+          teamId,
+        };
+  } catch {
+    return value.trim() === "" ? undefined : { teamId: value };
+  }
+}
+
 function parseGoogleServiceAccountCredentialJson(
   value: string | undefined,
 ): { project_id?: string } | undefined {
@@ -2797,6 +2850,7 @@ function parseSalesforcePdfWorkflowActionValue(
 function parseSalesforcePdfWorkflowModalMetadata(value: string | undefined):
   | {
       action: SalesforcePdfWorkflowAction;
+      locale?: Locale;
       salesforceOrgId: string;
       teamId: string;
     }
@@ -2810,11 +2864,12 @@ function parseSalesforcePdfWorkflowModalMetadata(value: string | undefined):
       return undefined;
     }
     const action = parseSalesforcePdfWorkflowAction(readOptionalString(parsed.action));
+    const locale = normalizeLocale(readOptionalString(parsed.locale));
     const salesforceOrgId = readOptionalString(parsed.salesforceOrgId);
     const teamId = readOptionalString(parsed.teamId);
     return action === undefined || salesforceOrgId === undefined || teamId === undefined
       ? undefined
-      : { action, salesforceOrgId, teamId };
+      : { action, locale, salesforceOrgId, teamId };
   } catch {
     return undefined;
   }

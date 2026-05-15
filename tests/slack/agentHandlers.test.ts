@@ -182,11 +182,7 @@ describe("createAgentSlackHandlers", () => {
         trigger_id: "TRIGGER1",
         view: expect.objectContaining({
           callback_id: "salesforce_pdf_workflow_modal",
-          private_metadata: JSON.stringify({
-            action: "quote_pdf",
-            salesforceOrgId: "00DORG",
-            teamId: "T1",
-          }),
+          private_metadata: expect.stringContaining('"teamId":"T1"'),
         }),
       }),
     ]);
@@ -199,6 +195,7 @@ describe("createAgentSlackHandlers", () => {
     const saves: unknown[] = [];
     const updates: unknown[] = [];
     let userInfoCalls = 0;
+    let acked = false;
     const handlers = createAgentSlackHandlers({} as never, {
       salesforcePdfWorkflowHome: {
         repository: {
@@ -218,11 +215,13 @@ describe("createAgentSlackHandlers", () => {
     await handlers.handleSalesforcePdfWorkflowModalSubmission({
       ack: async (payload?: unknown) => {
         acks.push(payload);
+        acked = true;
       },
       body: { team: { id: "T1" }, user: { id: "UADMIN" } },
       client: {
         users: {
           info: async () => {
+            expect(acked).toBe(true);
             userInfoCalls += 1;
             return { user: { is_owner: true } };
           },
@@ -465,7 +464,7 @@ describe("createAgentSlackHandlers", () => {
         trigger_id: "TRIGGER1",
         view: expect.objectContaining({
           callback_id: "workspace_credential_modal",
-          private_metadata: "T1",
+          private_metadata: expect.stringContaining('"teamId":"T1"'),
         }),
       }),
     ]);
@@ -569,7 +568,7 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         view_id: "VIEW1",
         view: expect.objectContaining({
-          private_metadata: "T1",
+          private_metadata: expect.stringContaining('"teamId":"T1"'),
         }),
       }),
     ]);
@@ -582,6 +581,7 @@ describe("createAgentSlackHandlers", () => {
     const saves: unknown[] = [];
     const updates: unknown[] = [];
     let userInfoCalls = 0;
+    let acked = false;
     const handlers = createAgentSlackHandlers({} as never, {
       workspaceCredentialSettings: {
         async saveProviderApiKey(input: unknown) {
@@ -593,11 +593,13 @@ describe("createAgentSlackHandlers", () => {
     await handlers.handleWorkspaceCredentialModalSubmission({
       ack: async (payload?: unknown) => {
         acks.push(payload);
+        acked = true;
       },
       body: { team: { id: "T1" }, user: { id: "UADMIN" } },
       client: {
         users: {
           info: async () => {
+            expect(acked).toBe(true);
             userInfoCalls += 1;
             return { user: { is_owner: true } };
           },
@@ -2062,6 +2064,7 @@ describe("createAgentSlackHandlers", () => {
 
   it("does not route follow-up messages when thread auto-reply is disabled", async () => {
     let runs = 0;
+    let userInfoCalls = 0;
     const runner = {
       async run() {
         runs += 1;
@@ -2081,7 +2084,15 @@ describe("createAgentSlackHandlers", () => {
 
     await handlers.handleMessage({
       body: { team_id: "T1" },
-      client: { chat: { postMessage: async () => ({}) } },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        users: {
+          info: async () => {
+            userInfoCalls += 1;
+            return { user: { locale: "en-US" } };
+          },
+        },
+      },
       event: {
         channel: "C1",
         text: "follow-up",
@@ -2093,6 +2104,7 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(runs).toBe(0);
+    expect(userInfoCalls).toBe(0);
   });
 
   it("does not route follow-up messages when configured thread route is unavailable", async () => {
