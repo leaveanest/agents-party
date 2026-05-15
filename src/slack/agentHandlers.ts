@@ -229,6 +229,11 @@ type SlackAgentJobRetryContext = {
   attemptsMade: number;
 };
 
+type SlackUserSettingsScope = {
+  enterpriseId?: string;
+  teamId?: string;
+};
+
 export function createAgentSlackHandlers(
   runner: AgentRunner,
   options: AgentSlackHandlerOptions = {},
@@ -240,7 +245,13 @@ export function createAgentSlackHandlers(
         return;
       }
       const teamId = readTeamId(body, event);
-      const translator = await resolveHandlerTranslator(teamId, event.user, options, logger);
+      const enterpriseId = readSlackEnterpriseId(body);
+      const translator = await resolveHandlerTranslator(
+        { enterpriseId, teamId },
+        event.user,
+        options,
+        logger,
+      );
       const blocks = await buildAppHomeBlocks({
         logger,
         options,
@@ -461,6 +472,7 @@ async function handleWorkspaceCredentialConfigureAction(
 ): Promise<void> {
   await ack();
   const teamId = readTeamId(body, {});
+  const enterpriseId = readSlackEnterpriseId(body);
   const slackUserId = readSlackUserId(body);
   const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
   if (teamId === undefined || slackUserId === undefined || triggerId === undefined) {
@@ -478,6 +490,7 @@ async function handleWorkspaceCredentialConfigureAction(
       logger,
       response,
       slackUserId,
+      enterpriseId,
       teamId,
       translator,
       userSettingsRepository: options.userSettingsRepository,
@@ -487,18 +500,19 @@ async function handleWorkspaceCredentialConfigureAction(
   }
   const response = await client.views.open({
     trigger_id: triggerId,
-    view: buildWorkspaceCredentialModal(teamId, "openai", translator) as never,
+    view: buildWorkspaceCredentialModal({ enterpriseId, teamId }, "openai", translator) as never,
   });
   await updateOpenedWorkspaceCredentialModalLocale({
     client,
     logger,
     response,
     slackUserId,
+    enterpriseId,
     teamId,
     translator,
     userSettingsRepository: options.userSettingsRepository,
     view: (localizedTranslator) =>
-      buildWorkspaceCredentialModal(teamId, "openai", localizedTranslator),
+      buildWorkspaceCredentialModal({ enterpriseId, teamId }, "openai", localizedTranslator),
   });
 }
 
@@ -506,6 +520,7 @@ async function updateOpenedWorkspaceCredentialModalLocale(input: {
   client: SlackClient;
   logger: unknown;
   response: unknown;
+  enterpriseId: string | undefined;
   slackUserId: string;
   teamId: string;
   translator: Translator;
@@ -513,7 +528,7 @@ async function updateOpenedWorkspaceCredentialModalLocale(input: {
   view(translator: Translator): Record<string, unknown>;
 }): Promise<void> {
   const translator = await resolveHandlerTranslator(
-    input.teamId,
+    { enterpriseId: input.enterpriseId, teamId: input.teamId },
     input.slackUserId,
     {
       defaultLocale: input.translator.locale,
@@ -543,9 +558,10 @@ async function handleWorkspaceCredentialProviderSelectAction(
     isRecord(view) ? readString(view, "private_metadata") : undefined,
   );
   const slackUserId = readSlackUserId(body);
+  const enterpriseId = metadata?.enterpriseId ?? readSlackEnterpriseId(body);
   const teamId = metadata?.teamId ?? readTeamId(body, {});
   const translator = await resolveHandlerTranslator(
-    teamId,
+    { enterpriseId, teamId },
     slackUserId,
     {
       defaultLocale: metadata?.locale ?? options.defaultLocale,
@@ -566,7 +582,11 @@ async function handleWorkspaceCredentialProviderSelectAction(
   await updateWorkspaceCredentialModal(
     client,
     view,
-    buildWorkspaceCredentialModal(teamId ?? "", providerSelection, translator),
+    buildWorkspaceCredentialModal(
+      { enterpriseId, teamId: teamId ?? "" },
+      providerSelection,
+      translator,
+    ),
     logger,
   );
 }
@@ -691,6 +711,7 @@ async function handleSalesforcePdfWorkflowConfigureAction(
 ): Promise<void> {
   await ack();
   const teamId = readTeamId(body, {});
+  const enterpriseId = readSlackEnterpriseId(body);
   const slackUserId = readSlackUserId(body);
   const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
   const actionValue = parseSalesforcePdfWorkflowActionValue(readActionValue(body));
@@ -719,6 +740,7 @@ async function handleSalesforcePdfWorkflowConfigureAction(
       logger,
       response,
       slackUserId,
+      enterpriseId,
       teamId,
       translator,
       userSettingsRepository: options.userSettingsRepository,
@@ -745,6 +767,7 @@ async function handleSalesforcePdfWorkflowConfigureAction(
       logger,
       response,
       slackUserId,
+      enterpriseId,
       teamId,
       translator,
       userSettingsRepository: options.userSettingsRepository,
@@ -772,6 +795,7 @@ async function handleSalesforcePdfWorkflowConfigureAction(
       action: actionValue.action,
       salesforceOrgId: actionValue.salesforceOrgId,
       settings: parsedCurrent?.success === true ? parsedCurrent.data : undefined,
+      enterpriseId,
       teamId,
       translator,
     }) as never,
@@ -781,6 +805,7 @@ async function handleSalesforcePdfWorkflowConfigureAction(
     logger,
     response,
     slackUserId,
+    enterpriseId,
     teamId,
     translator,
     userSettingsRepository: options.userSettingsRepository,
@@ -789,6 +814,7 @@ async function handleSalesforcePdfWorkflowConfigureAction(
         action: actionValue.action,
         salesforceOrgId: actionValue.salesforceOrgId,
         settings: parsedCurrent?.success === true ? parsedCurrent.data : undefined,
+        enterpriseId,
         teamId,
         translator: localizedTranslator,
       }),
@@ -799,6 +825,7 @@ async function updateOpenedSalesforcePdfWorkflowModalLocale(input: {
   client: SlackClient;
   logger: unknown;
   response: unknown;
+  enterpriseId: string | undefined;
   slackUserId: string;
   teamId: string;
   translator: Translator;
@@ -806,7 +833,7 @@ async function updateOpenedSalesforcePdfWorkflowModalLocale(input: {
   view(translator: Translator): Record<string, unknown>;
 }): Promise<void> {
   const translator = await resolveHandlerTranslator(
-    input.teamId,
+    { enterpriseId: input.enterpriseId, teamId: input.teamId },
     input.slackUserId,
     {
       defaultLocale: input.translator.locale,
@@ -1008,7 +1035,13 @@ async function handleMention(
     return;
   }
 
-  const translator = await resolveHandlerTranslator(teamId, event.user, options, logger);
+  const enterpriseId = readSlackEnterpriseId(body);
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId, teamId },
+    event.user,
+    options,
+    logger,
+  );
   const threadTs = readString(event, "thread_ts") ?? event.ts;
   if (options.agentJobQueue !== undefined) {
     if (
@@ -1169,7 +1202,13 @@ async function handleMessage(
     return;
   }
 
-  const translator = await resolveHandlerTranslator(teamId, event.user, options, logger);
+  const enterpriseId = readSlackEnterpriseId(body);
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId, teamId },
+    event.user,
+    options,
+    logger,
+  );
   if (options.agentJobQueue !== undefined) {
     await enqueueSlackAgentJob({
       body,
@@ -1316,7 +1355,12 @@ async function processAppMentionJob(
   ) {
     return;
   }
-  const translator = await resolveHandlerTranslator(job.teamId, job.userId, input, input.logger);
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: job.enterpriseId, teamId: job.teamId },
+    job.userId,
+    input,
+    input.logger,
+  );
   await setSlackAssistantThreadStatus({
     channelId: job.channelId,
     client: input.client,
@@ -1436,7 +1480,12 @@ async function processFollowUpMessageJob(
     return;
   }
 
-  const translator = await resolveHandlerTranslator(job.teamId, job.userId, input, input.logger);
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: job.enterpriseId, teamId: job.teamId },
+    job.userId,
+    input,
+    input.logger,
+  );
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
@@ -1616,7 +1665,7 @@ async function handleReactionAdded(
     return;
   }
   const translator = await resolveHandlerTranslator(
-    teamId,
+    { enterpriseId: readSlackEnterpriseId(body), teamId },
     readString(event, "user"),
     options,
     logger,
@@ -1703,6 +1752,10 @@ function readTeamId(body: unknown, event: StringIndexed): string | undefined {
     }
     if (isRecord(body.user) && typeof body.user.team_id === "string") {
       return body.user.team_id;
+    }
+    const authorizationTeamId = readFirstAuthorizationString(body, "team_id");
+    if (authorizationTeamId !== undefined) {
+      return authorizationTeamId;
     }
   }
   return readString(event, "team");
@@ -1877,16 +1930,17 @@ function logError(logger: unknown, message: string, metadata: Record<string, unk
 }
 
 async function resolveHandlerTranslator(
-  teamId: string | undefined,
+  scope: SlackUserSettingsScope,
   userId: string | undefined,
   options: { defaultLocale?: Locale; userSettingsRepository?: UserSettingsRepository },
   logger: unknown,
 ): Promise<Translator> {
   return resolveUserSettingsTranslator({
     defaultLocale: options.defaultLocale ?? FALLBACK_LOCALE,
+    enterpriseId: scope.enterpriseId,
     logger,
     repository: options.userSettingsRepository,
-    teamId,
+    teamId: scope.teamId,
     userId,
   });
 }
@@ -2003,14 +2057,14 @@ async function fetchSingleMessage(
 }
 
 function buildWorkspaceCredentialModal(
-  teamId: string,
+  scope: SlackUserSettingsScope & { teamId: string },
   providerSelection: WorkspaceCredentialProviderSelection,
   translator: Translator = defaultTranslator,
 ): Record<string, unknown> {
   const providerKind = providerKindForCredentialSelection(providerSelection);
   return {
     callback_id: WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
-    private_metadata: workspaceCredentialPrivateMetadata(teamId, translator),
+    private_metadata: workspaceCredentialPrivateMetadata(scope, translator),
     submit: { text: translator.t("common.save"), type: "plain_text" },
     title: { text: translator.t("credential.title"), type: "plain_text" },
     type: "modal",
@@ -2154,8 +2208,15 @@ function providerKindForCredentialSelection(
   return providerSelection === "google_service_account_json" ? "google" : providerSelection;
 }
 
-function workspaceCredentialPrivateMetadata(teamId: string, translator: Translator): string {
-  return JSON.stringify({ locale: translator.locale, teamId });
+function workspaceCredentialPrivateMetadata(
+  scope: SlackUserSettingsScope & { teamId: string },
+  translator: Translator,
+): string {
+  return JSON.stringify({
+    enterpriseId: scope.enterpriseId,
+    locale: translator.locale,
+    teamId: scope.teamId,
+  });
 }
 
 function buildWorkspaceCredentialSavingModal(
@@ -2279,6 +2340,7 @@ function salesforcePdfWorkflowAiSummaryOptionsFor(translator: Translator): {
 
 function buildSalesforcePdfWorkflowModal(input: {
   action: SalesforcePdfWorkflowAction;
+  enterpriseId?: string;
   salesforceOrgId: string;
   settings?: SalesforcePdfWorkflowSettings;
   teamId: string;
@@ -2305,6 +2367,7 @@ function buildSalesforcePdfWorkflowModal(input: {
     callback_id: SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
     private_metadata: JSON.stringify({
       action: input.action,
+      enterpriseId: input.enterpriseId,
       locale: translator.locale,
       salesforceOrgId: input.salesforceOrgId,
       teamId: input.teamId,
@@ -2890,7 +2953,7 @@ function parseWorkspaceCredentialProviderSelection(
 
 function parseWorkspaceCredentialModalMetadata(
   value: string | undefined,
-): { locale?: Locale; teamId: string } | undefined {
+): { enterpriseId?: string; locale?: Locale; teamId: string } | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -2900,9 +2963,11 @@ function parseWorkspaceCredentialModalMetadata(
       return value.trim() === "" ? undefined : { teamId: value };
     }
     const teamId = readOptionalString(parsed.teamId);
+    const enterpriseId = readOptionalString(parsed.enterpriseId);
     return teamId === undefined
       ? undefined
       : {
+          enterpriseId,
           locale: normalizeLocale(readOptionalString(parsed.locale)),
           teamId,
         };
@@ -2979,6 +3044,7 @@ function parseSalesforcePdfWorkflowActionValue(
 function parseSalesforcePdfWorkflowModalMetadata(value: string | undefined):
   | {
       action: SalesforcePdfWorkflowAction;
+      enterpriseId?: string;
       locale?: Locale;
       salesforceOrgId: string;
       teamId: string;
@@ -2993,12 +3059,13 @@ function parseSalesforcePdfWorkflowModalMetadata(value: string | undefined):
       return undefined;
     }
     const action = parseSalesforcePdfWorkflowAction(readOptionalString(parsed.action));
+    const enterpriseId = readOptionalString(parsed.enterpriseId);
     const locale = normalizeLocale(readOptionalString(parsed.locale));
     const salesforceOrgId = readOptionalString(parsed.salesforceOrgId);
     const teamId = readOptionalString(parsed.teamId);
     return action === undefined || salesforceOrgId === undefined || teamId === undefined
       ? undefined
-      : { action, locale, salesforceOrgId, teamId };
+      : { action, enterpriseId, locale, salesforceOrgId, teamId };
   } catch {
     return undefined;
   }

@@ -65,7 +65,10 @@ describe("PostgresMigrationRunner", () => {
       "create table if not exists salesforce_pdf_templates",
     );
     expect(postgresMigrations[7]?.upSql).toContain("create table if not exists app_user_settings");
-    expect(postgresMigrations[7]?.upSql).toContain("primary key (team_id, slack_user_id)");
+    expect(postgresMigrations[7]?.upSql).toContain(
+      "primary key (scope_kind, scope_id, slack_user_id)",
+    );
+    expect(postgresMigrations[7]?.upSql).toContain("scope_kind in ('enterprise', 'team')");
     expect(postgresMigrations[7]?.upSql).toContain("locale in ('ja', 'en')");
   });
 

@@ -274,9 +274,9 @@ The Slack App Manifest template is [`slack-app-manifest.yaml`](slack-app-manifes
 Replace `agents-party.example.com` with the public HTTPS host before importing it into Slack.
 
 Slack runtime authorization uses the database-backed Slack installation store. Per-user display
-preferences such as locale are stored in `app_user_settings` keyed by `(team_id, slack_user_id)`;
-Slack `users.info` is reserved for permission checks such as workspace admin detection, not for
-routine locale resolution.
+preferences such as locale are stored in `app_user_settings`; the settings scope uses
+`enterprise_id` when present, otherwise `team_id`. Slack `users.info` is reserved for permission
+checks such as workspace admin detection, not for routine locale resolution.
 
 ```bash
 SLACK_SIGNING_SECRET=...

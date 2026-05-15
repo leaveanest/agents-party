@@ -18,8 +18,11 @@ describe("user settings repository", () => {
 
     const [query] = pool.queries;
     expect(query?.text).toContain("insert into app_user_settings");
-    expect(query?.text).toContain("on conflict (team_id, slack_user_id)");
+    expect(query?.text).toContain("on conflict (scope_kind, scope_id, slack_user_id)");
     expect(query?.values).toEqual([
+      "team",
+      "T1",
+      null,
       "T1",
       "U1",
       "en",
@@ -30,13 +33,32 @@ describe("user settings repository", () => {
     ]);
   });
 
+  it("uses enterprise scope when enterprise id is present", async () => {
+    const pool = new RecordingPool();
+    const repository = new PostgresUserSettingsRepository(pool as never);
+
+    await repository.saveUserSettings({
+      enterpriseId: "E1",
+      locale: "ja",
+      slackUserId: "U1",
+      teamId: "T1",
+      updatedAt: new Date("2026-05-15T00:00:00Z"),
+    });
+
+    const [query] = pool.queries;
+    expect(query?.values?.slice(0, 5)).toEqual(["enterprise", "E1", "E1", "T1", "U1"]);
+  });
+
   it("maps persisted settings documents", async () => {
     const repository = new PostgresUserSettingsRepository(
       new RecordingPool([
         {
           created_at: new Date("2026-05-15T00:00:00Z"),
+          enterprise_id: null,
           locale: "ja",
           payload: { theme: "compact" },
+          scope_id: "T1",
+          scope_kind: "team",
           slack_user_id: "U1",
           team_id: "T1",
           updated_at: new Date("2026-05-15T01:00:00Z"),
@@ -50,6 +72,8 @@ describe("user settings repository", () => {
         createdAt: new Date("2026-05-15T00:00:00Z"),
         locale: "ja",
         payload: { theme: "compact" },
+        scopeId: "T1",
+        scopeKind: "team",
         slackUserId: "U1",
         teamId: "T1",
         updatedAt: new Date("2026-05-15T01:00:00Z"),
