@@ -40,7 +40,7 @@ services:
       APP_HOST: 0.0.0.0
       DATABASE_URL: postgresql://agents_party:agents_party@postgres:5432/agents_party
       LLM_API_KEY_ENCRYPTION_KEY: ${LLM_API_KEY_ENCRYPTION_KEY:-}
-      PORT: ${PORT:-8000}
+      APP_PORT: ${APP_PORT:-8000}
       REDIS_URL: redis://redis:6379
       SLACK_AGENT_QUEUE_ENABLED: ${SLACK_AGENT_QUEUE_ENABLED:-true}
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
