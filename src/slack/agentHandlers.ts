@@ -285,7 +285,7 @@ async function buildAppHomeBlocks(input: {
 }): Promise<Record<string, unknown>[]> {
   const blocks: Record<string, unknown>[] = [
     {
-      text: { text: "Agents Party", type: "plain_text" },
+      text: { text: "Agents party", type: "plain_text" },
       type: "header",
     },
     {

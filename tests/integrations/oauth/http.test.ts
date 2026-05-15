@@ -12,7 +12,7 @@ const settings: AppSettings = {
   agentModelId: "google:gemini-2.5-flash",
   appEnv: "test",
   appHost: "127.0.0.1",
-  appName: "agents-party",
+  appName: "Agents party",
   appPort: 0,
   databaseUrl: undefined,
   imageGenerationModelId: "google:gemini-2.5-flash-image",

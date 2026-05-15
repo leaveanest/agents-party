@@ -57,7 +57,7 @@ export type AgentRunnerOptions = {
 };
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are the general Agents Party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.";
+  "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.";
 
 export class AgentRunner {
   constructor(private readonly options: AgentRunnerOptions) {}

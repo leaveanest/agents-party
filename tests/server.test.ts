@@ -9,7 +9,7 @@ const settings: AppSettings = {
   agentModelId: "google:gemini-2.5-flash",
   appEnv: "test",
   appHost: "127.0.0.1",
-  appName: "agents-party",
+  appName: "Agents party",
   appPort: 0,
   databaseUrl: undefined,
   imageGenerationModelId: "google:gemini-2.5-flash-image",
@@ -81,7 +81,7 @@ describe("createAppServer", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      service: "agents-party",
+      service: "Agents party",
       status: "ok",
     });
   });
