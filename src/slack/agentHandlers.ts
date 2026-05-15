@@ -465,18 +465,61 @@ async function handleWorkspaceCredentialConfigureAction(
     logger.warn("Ignoring API key configuration action with missing Slack context.");
     return;
   }
-  const translator = await resolveHandlerTranslator(client, slackUserId, options, logger);
+  const translator = createTranslator(options.defaultLocale ?? FALLBACK_LOCALE);
   if (options.workspaceCredentialSettings === undefined) {
-    await client.views.open({
+    const response = await client.views.open({
       trigger_id: triggerId,
       view: buildWorkspaceCredentialUnavailableModal(translator) as never,
     });
+    await updateOpenedWorkspaceCredentialModalLocale({
+      client,
+      logger,
+      response,
+      slackUserId,
+      translator,
+      view: buildWorkspaceCredentialUnavailableModal,
+    });
     return;
   }
-  await client.views.open({
+  const response = await client.views.open({
     trigger_id: triggerId,
     view: buildWorkspaceCredentialModal(teamId, "openai", translator) as never,
   });
+  await updateOpenedWorkspaceCredentialModalLocale({
+    client,
+    logger,
+    response,
+    slackUserId,
+    translator,
+    view: (localizedTranslator) =>
+      buildWorkspaceCredentialModal(teamId, "openai", localizedTranslator),
+  });
+}
+
+async function updateOpenedWorkspaceCredentialModalLocale(input: {
+  client: SlackClient;
+  logger: unknown;
+  response: unknown;
+  slackUserId: string;
+  translator: Translator;
+  view(translator: Translator): Record<string, unknown>;
+}): Promise<void> {
+  const translator = await resolveHandlerTranslator(
+    input.client,
+    input.slackUserId,
+    { defaultLocale: input.translator.locale },
+    input.logger,
+  );
+  if (translator.locale === input.translator.locale) {
+    return;
+  }
+  const openedView = isRecord(input.response) ? input.response.view : undefined;
+  await updateWorkspaceCredentialModal(
+    input.client,
+    openedView,
+    input.view(translator),
+    input.logger,
+  );
 }
 
 async function handleWorkspaceCredentialProviderSelectAction(
@@ -485,10 +528,15 @@ async function handleWorkspaceCredentialProviderSelectAction(
 ): Promise<void> {
   await ack();
   const view = isRecord(body) ? body.view : undefined;
-  const slackUserId = readSlackUserId(body);
-  const translator = await resolveHandlerTranslator(client, slackUserId, options, logger);
   const metadata = parseWorkspaceCredentialModalMetadata(
     isRecord(view) ? readString(view, "private_metadata") : undefined,
+  );
+  const slackUserId = readSlackUserId(body);
+  const translator = await resolveHandlerTranslator(
+    client,
+    slackUserId,
+    { defaultLocale: metadata?.locale ?? options.defaultLocale },
+    logger,
   );
   const teamId = metadata?.teamId ?? readTeamId(body, {});
   const providerValue = readSelectedOptionValue(
