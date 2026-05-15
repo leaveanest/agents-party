@@ -1,6 +1,7 @@
 import { Pool, type QueryResult, type QueryResultRow } from "pg";
 
 import type {
+  SlackInstalledWorkspace,
   SlackBotRow,
   SlackInstallationLookup,
   SlackInstallationRepository,
@@ -91,6 +92,48 @@ export class PostgresSlackInstallationRepository implements SlackInstallationRep
     );
     const [row] = result.rows;
     return row === undefined ? undefined : botRecordToRow(row);
+  }
+
+  async listInstalledWorkspaces(input: {
+    enterpriseId?: string;
+  }): Promise<SlackInstalledWorkspace[]> {
+    const result = await this.pool.query<InstalledWorkspaceRecord>(
+      `with latest_bots as (
+         select distinct on (team_id)
+                enterprise_id, team_id, team_name, installed_at
+           from slack_bots
+          where client_id = $1
+            and ($2::text is null or enterprise_id is not distinct from $2)
+            and team_id is not null
+            and bot_token is not null
+          order by team_id, installed_at desc
+       ),
+       latest_names as (
+         select distinct on (team_id)
+                team_id, team_name
+           from slack_installations
+          where client_id = $1
+            and ($2::text is null or enterprise_id is not distinct from $2)
+            and team_id is not null
+            and team_name is not null
+          order by team_id, installed_at desc
+       )
+       select latest_bots.enterprise_id,
+              latest_bots.team_id,
+              coalesce(latest_bots.team_name, latest_names.team_name) as team_name,
+              latest_bots.installed_at
+         from latest_bots
+         left join latest_names on latest_names.team_id = latest_bots.team_id
+        order by coalesce(latest_bots.team_name, latest_names.team_name, latest_bots.team_id),
+                 latest_bots.team_id`,
+      [this.clientId, input.enterpriseId ?? null],
+    );
+    return result.rows.map((row) => ({
+      enterpriseId: nullable(row.enterprise_id),
+      installedAt: row.installed_at,
+      teamId: row.team_id,
+      teamName: nullable(row.team_name),
+    }));
   }
 
   async deleteInstallation(lookup: SlackInstallationLookup): Promise<void> {
@@ -249,6 +292,13 @@ type SlackBotRecord = QueryResultRow & {
   is_enterprise_install: boolean;
   payload: Record<string, unknown>;
   team_id: string | null;
+  team_name: string | null;
+};
+
+type InstalledWorkspaceRecord = QueryResultRow & {
+  enterprise_id: string | null;
+  installed_at: Date;
+  team_id: string;
   team_name: string | null;
 };
 

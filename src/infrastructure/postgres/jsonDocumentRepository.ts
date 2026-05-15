@@ -216,7 +216,13 @@ export const postgresDocumentTables = {
     tableName: "slack_threads",
   },
   workspaceAppSettings: {
-    columns: ["default_agent_id", "default_model_id", "thread_auto_reply", "updated_at"],
+    columns: [
+      "default_agent_id",
+      "default_model_id",
+      "enabled_model_ids",
+      "thread_auto_reply",
+      "updated_at",
+    ],
     keyColumns: ["team_id"],
     tableName: "workspace_app_settings",
   },

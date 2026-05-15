@@ -9,6 +9,261 @@ import {
 } from "../../src/slack/agentHandlers.js";
 
 describe("createAgentSlackHandlers", () => {
+  it("publishes Model routing entry point on App Home with Grid context", async () => {
+    const debugLogs: unknown[] = [];
+    const publishedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces(input) {
+          expect(input).toEqual({ enterpriseId: "E1" });
+          return [
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T2",
+              teamName: "Workspace Two",
+            },
+          ];
+        },
+      },
+    });
+
+    await handlers.handleAppHomeOpened({
+      body: {
+        authorizations: [
+          {
+            enterprise_id: "E1",
+            is_enterprise_install: true,
+            team_id: "T-random",
+          },
+        ],
+        enterprise: { id: "E1" },
+        user: { id: "U1", team_id: "T-random" },
+      },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            publishedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { team: "T-event", user: "U1" },
+      logger: {
+        debug(_message: string, metadata: unknown) {
+          debugLogs.push(metadata);
+        },
+        warn() {},
+      },
+    } as never);
+
+    const serialized = JSON.stringify(publishedViews[0]);
+    expect(serialized).toContain("Model routing");
+    expect(serialized).toContain("model_routing_configure");
+    expect(serialized).toContain('\\"selectedTeamId\\":\\"T2\\"');
+    expect(debugLogs[0]).toMatchObject({
+      authorizationTeamId: "T-random",
+      enterpriseId: "E1",
+      mode: "enterprise_grid",
+      sourceTeamId: "T-random",
+    });
+  });
+
+  it("opens model routing modal with installed workspaces and stored model choices", async () => {
+    const openedViews: unknown[] = [];
+    const operations: string[] = [];
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces(input) {
+          operations.push("listInstalledWorkspaces");
+          expect(input).toEqual({ enterpriseId: "E1" });
+          return [
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T2",
+              teamName: "Workspace Two",
+            },
+          ];
+        },
+      },
+      routingRepository: {
+        async findWorkspaceSettings(teamId: string) {
+          operations.push("findWorkspaceSettings");
+          expect(teamId).toBe("T2");
+          return {
+            default_model_id: "openai:gpt-4o",
+            enabled_model_ids: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
+          };
+        },
+      } as never,
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => {
+        operations.push("ack");
+      },
+      body: {
+        actions: [{ value: JSON.stringify({ enterpriseId: "E1", selectedTeamId: "T2" }) }],
+        enterprise: { id: "E1" },
+        team: { id: "T-random" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => {
+            operations.push("users.info");
+            return { user: { is_admin: true } };
+          },
+        },
+        views: {
+          open: async (payload: unknown) => {
+            operations.push("views.open");
+            openedViews.push(payload);
+            return { view: { id: "VIEW1" } };
+          },
+          update: async (payload: unknown) => {
+            operations.push("views.update");
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(operations).toEqual([
+      "ack",
+      "views.open",
+      "users.info",
+      "listInstalledWorkspaces",
+      "findWorkspaceSettings",
+      "views.update",
+    ]);
+    expect(openedViews).toEqual([
+      expect.objectContaining({
+        trigger_id: "TRIGGER1",
+        view: expect.objectContaining({
+          type: "modal",
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(openedViews[0])).toContain("Loading model routing settings");
+    expect(updatedViews).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({
+          callback_id: "model_routing_modal",
+          private_metadata: expect.stringContaining('"enterpriseId":"E1"'),
+          type: "modal",
+        }),
+      }),
+    ]);
+    const serialized = JSON.stringify(updatedViews[0]);
+    expect(serialized).toContain("Workspace Two");
+    expect(serialized).toContain("Enabled models");
+    expect(serialized).toContain("Workspace default model");
+    expect(serialized).toContain("anthropic:claude-3-5-sonnet-latest");
+  });
+
+  it("saves workspace model routing settings from modal submissions", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const updates: unknown[] = [];
+    let acked = false;
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findWorkspaceSettings(teamId: string) {
+          expect(acked).toBe(true);
+          expect(teamId).toBe("T2");
+          return {
+            default_agent_id: "assistant",
+            default_model_id: "google:gemini-2.5-flash",
+            enabled_model_ids: ["google:gemini-2.5-flash"],
+            thread_auto_reply: true,
+          };
+        },
+        async saveWorkspaceSettings(input: unknown) {
+          expect(acked).toBe(true);
+          saves.push(input);
+        },
+      } as never,
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+        acked = true;
+      },
+      body: { enterprise: { id: "E1" }, team: { id: "T-random" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => {
+            expect(acked).toBe(true);
+            return { user: { is_admin: true } };
+          },
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          enterpriseId: "E1",
+          selectedTeamId: "T2",
+          source: "app_home",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+            model_routing_enabled_models: {
+              enabled_models: {
+                selected_options: [
+                  { value: "openai:gpt-4o" },
+                  { value: "anthropic:claude-3-5-sonnet-latest" },
+                ],
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(acks).toEqual([
+      expect.objectContaining({
+        response_action: "update",
+      }),
+    ]);
+    expect(JSON.stringify(acks[0])).toContain("Saving model routing settings");
+    expect(saves).toEqual([
+      expect.objectContaining({
+        defaultAgentId: "assistant",
+        defaultModelId: "openai:gpt-4o",
+        enabledModelIds: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
+        teamId: "T2",
+        threadAutoReply: true,
+      }),
+    ]);
+    expect(updates).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({ type: "modal" }),
+      }),
+    ]);
+    expect(JSON.stringify(updates[0])).toContain("Model routing settings were saved.");
+  });
+
   it("publishes Salesforce connection status and connect entry points on App Home", async () => {
     const publishedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
@@ -1217,6 +1472,76 @@ describe("createAgentSlackHandlers", () => {
     ]);
     expect((repository.activations[0] as { modelId?: string }).modelId).toBeUndefined();
     expect(posts).toEqual([expect.objectContaining({ text: "configured route" })]);
+  });
+
+  it("notifies the chatting user when model routing falls back to an enabled upper setting", async () => {
+    const invocations: unknown[] = [];
+    const ephemerals: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "forced_invocation" },
+          message: "configured route",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant" },
+        agentId: "assistant",
+        modelFallback: {
+          fromModelId: "disabled-thread-model",
+          fromScope: "thread",
+          toModelId: "workspace-model",
+          toScope: "workspace",
+        },
+        modelId: "workspace-model",
+        modelScope: "workspace",
+        scope: "thread",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postEphemeral: async (payload: unknown) => {
+            ephemerals.push(payload);
+            return {};
+          },
+          postMessage: async () => ({}),
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> hello",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([expect.objectContaining({ modelId: "workspace-model" })]);
+    expect(ephemerals).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: expect.stringContaining("disabled-thread-model"),
+        thread_ts: "1712345678.000100",
+        user: "U1",
+      }),
+    ]);
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        modelId: undefined,
+      }),
+    ]);
   });
 
   it("does not fall back to keyword routing when repository routing has no configured agent", async () => {
@@ -2852,6 +3177,12 @@ class MemoryRoutingRepository {
       route?: {
         agent: JsonObject;
         agentId: string;
+        modelFallback?: {
+          fromModelId: string;
+          fromScope: string;
+          toModelId?: string;
+          toScope?: string;
+        };
         modelId?: string;
         modelScope?: string;
         scope: string;
@@ -2882,6 +3213,12 @@ class MemoryRoutingRepository {
     | {
         agent: JsonObject;
         agentId: string;
+        modelFallback?: {
+          fromModelId: string;
+          fromScope: string;
+          toModelId?: string;
+          toScope?: string;
+        };
         modelId?: string;
         modelScope?: string;
         scope: string;
