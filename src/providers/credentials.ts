@@ -6,6 +6,7 @@ export type CredentialProviderKind = LlmProvider | "google_maps" | "soracom";
 export type ProviderCredential = {
   apiKey: string;
   baseURL?: string;
+  credentialName?: string;
   payload?: Record<string, JsonValue>;
 };
 

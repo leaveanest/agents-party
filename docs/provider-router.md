@@ -59,7 +59,7 @@ This keeps provider expansion local to `src/providers/`: Slack handlers and agen
 
 The adapter converts repository `ConversationHistory` to AI SDK `ModelMessage[]` only at invocation time, maps AI SDK generation and streaming results back to `LlmResult` and `LlmStreamEvent`, and wraps provider failures as `LlmProviderError`.
 
-When a `ProviderCredentialResolver` is configured and the request has `context.workspaceId`, the adapter looks up `provider_kind=<model provider>` and `credential_name=api_key` before constructing the provider model. Missing workspace credentials fail before falling back to process-level provider keys.
+When a `ProviderCredentialResolver` is configured and the request has `context.workspaceId`, the adapter looks up workspace credentials before constructing the provider model. Most providers use `credential_name=api_key`. Google text models first look up `provider_kind=google` and `credential_name=service_account_json`; when present, that JSON is passed to the AI SDK Vertex provider with the credential project and a default `us-central1` location. If no service account credential exists, Google falls back to `credential_name=api_key`. Missing workspace credentials fail before falling back to process-level provider keys.
 
 OpenAI-compatible providers use repository-owned defaults only for non-secret base URLs. API keys must come from workspace credentials or explicit local adapter settings; `src/providers/aiSdkAdapter.ts` does not read provider API keys directly from `process.env`.
 

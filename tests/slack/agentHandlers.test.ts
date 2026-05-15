@@ -655,6 +655,64 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("saves Google service account JSON credentials from modal submissions", async () => {
+    const saves: unknown[] = [];
+    const serviceAccountJson = JSON.stringify({
+      client_email: "agent@project.iam.gserviceaccount.com",
+      private_key: "-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----\\n",
+      project_id: "vertex-project",
+    });
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey(input: unknown) {
+          saves.push(input);
+        },
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialModalSubmission({
+      ack: async () => {},
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {}, warn() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: "T1",
+        state: {
+          values: {
+            workspace_credential_provider: {
+              provider_kind: { selected_option: { value: "google_service_account_json" } },
+            },
+            workspace_credential_secret: {
+              api_key: { value: serviceAccountJson },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(saves).toEqual([
+      {
+        createdByUserId: "UADMIN",
+        credentialName: "service_account_json",
+        payload: {
+          project_id: "vertex-project",
+          source: "slack_app_home",
+        },
+        providerKind: "google",
+        secret: serviceAccountJson,
+        teamId: "T1",
+      },
+    ]);
+  });
+
   it("returns modal field errors for invalid workspace API key input", async () => {
     const acks: unknown[] = [];
     const saves: unknown[] = [];
