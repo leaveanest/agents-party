@@ -37,6 +37,7 @@ describe("PostgresMigrationRunner", () => {
       "20260512_0005",
       "20260512_0006",
       "20260513_0007",
+      "20260515_0008",
     ]);
     expect(postgresMigrations[0]?.upSql).toContain(
       "create table if not exists slack_installations",
@@ -63,6 +64,12 @@ describe("PostgresMigrationRunner", () => {
     expect(postgresMigrations[6]?.upSql).toContain(
       "create table if not exists salesforce_pdf_templates",
     );
+    expect(postgresMigrations[7]?.upSql).toContain("create table if not exists app_user_settings");
+    expect(postgresMigrations[7]?.upSql).toContain(
+      "primary key (scope_kind, scope_id, slack_user_id)",
+    );
+    expect(postgresMigrations[7]?.upSql).toContain("scope_kind in ('enterprise', 'team')");
+    expect(postgresMigrations[7]?.upSql).toContain("locale in ('ja', 'en')");
   });
 
   it("requires explicit Alembic baseline when legacy metadata is present", async () => {

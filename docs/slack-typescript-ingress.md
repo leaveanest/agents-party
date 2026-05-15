@@ -26,6 +26,24 @@ Slack OAuth install routes additionally require:
 
 `SLACK_USER_SCOPES` is optional and comma-separated.
 
+Slack-visible fixed copy is localized with the following fallback order:
+
+1. App-level user setting from `app_user_settings.locale`
+2. `APP_DEFAULT_LOCALE`
+3. `ja`
+
+Supported display locales are `ja` and `en`. Slack `users.info` is not used for routine locale
+resolution so Slack API latency and rate limits do not affect normal display text selection. It is
+still used where Slack permission checks are required, such as workspace admin checks for privileged
+modals. New Slack-visible fixed text should be added through the repository i18n resources instead
+of hardcoded in handlers. User input, AI-generated answers, provider names, model ids, Slack action
+identifiers, and operational log messages are not translated.
+
+`app_user_settings` keys settings by Slack scope and user. Enterprise Grid events use
+`enterprise_id` when it is present; ordinary workspace events use `team_id`. This keeps one user's
+enterprise-level preference from being duplicated across teams while preserving team-scoped settings
+for non-enterprise installations.
+
 Audio attachment understanding requires the bot `files:read` scope in addition to channel history scopes. Audio bytes are fetched only for the current agent invocation and are kept in memory.
 
 Transcription uses `TRANSCRIPTION_MODEL` (default `google:speech-to-text-latest-long`), `TRANSCRIPTION_LANGUAGE_CODE` (default `ja-JP`), and `TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES` (default `en-US`). Provider credentials are resolved from `workspace_credentials`; Google Speech-to-Text uses `provider_kind=google` and `credential_name=service_account_json`, with the encrypted secret containing the service account JSON. AI SDK transcription providers use their provider kind (`openai`, `groq`, or `azure_openai`) with `credential_name=api_key`.

@@ -47,4 +47,40 @@ describe("createSlackRssArticlePublisher", () => {
       },
     ]);
   });
+
+  it("uses the configured default locale for the parent message", async () => {
+    const posts: unknown[] = [];
+    const publisher = createSlackRssArticlePublisher({
+      clientProvider: {
+        async forTeam() {
+          return {
+            chat: {
+              async postMessage(payload: unknown) {
+                posts.push(payload);
+                return { ts: `${posts.length}.000` };
+              },
+            },
+          } as never;
+        },
+      },
+      defaultLocale: "ja",
+    });
+
+    await publisher.publishFeedArticle({
+      article: {
+        articleKey: "a1",
+        articleUrl: "https://example.com/a",
+        text: "Summary",
+        title: "A",
+      },
+      channelId: "C1",
+      feedUrl: "https://example.com/feed.xml",
+      teamId: "T1",
+    });
+
+    expect(posts[0]).toEqual({
+      channel: "C1",
+      text: "RSS更新: https://example.com/feed.xml",
+    });
+  });
 });

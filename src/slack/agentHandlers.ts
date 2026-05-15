@@ -12,6 +12,14 @@ import {
   type AgentRunnerResult,
 } from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
+import {
+  FALLBACK_LOCALE,
+  createTranslator,
+  defaultTranslator,
+  normalizeLocale,
+  type Locale,
+  type Translator,
+} from "../i18n/index.js";
 import type { CredentialProviderKind } from "../providers/credentials.js";
 import {
   salesforceAuthConfigSchema,
@@ -29,6 +37,7 @@ import {
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import type { TranscriptionGateway } from "../providers/transcriptionGateway.js";
 import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
+import type { UserSettingsRepository } from "../repositories/userSettings.js";
 import {
   SlackAudioProcessingError,
   hasSlackAudioFiles,
@@ -78,6 +87,7 @@ import {
   WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
   WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
 } from "./interactiveIds.js";
+import { resolveUserSettingsTranslator } from "./userLocale.js";
 
 type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & AllMiddlewareArgs;
 type SlackActionArgs = SlackActionMiddlewareArgs & AllMiddlewareArgs;
@@ -85,7 +95,7 @@ type SlackViewArgs = SlackViewMiddlewareArgs & AllMiddlewareArgs;
 type SlackClient = SlackEventArgs<"app_mention">["client"];
 export type SlackAgentClient = Pick<
   SlackClient,
-  "chat" | "conversations" | "filesUploadV2" | "token"
+  "chat" | "conversations" | "filesUploadV2" | "token" | "users"
 > & {
   assistant?: {
     threads?: {
@@ -102,23 +112,20 @@ export type SlackAgentClient = Pick<
 type WorkspaceCredentialProviderSelection = CredentialProviderKind | "google_service_account_json";
 
 const workspaceCredentialProviderOptions = [
-  { text: { text: "OpenAI", type: "plain_text" }, value: "openai" },
-  { text: { text: "Azure OpenAI", type: "plain_text" }, value: "azure_openai" },
-  { text: { text: "Anthropic", type: "plain_text" }, value: "anthropic" },
-  { text: { text: "Google", type: "plain_text" }, value: "google" },
-  {
-    text: { text: "Google service account JSON", type: "plain_text" },
-    value: "google_service_account_json",
-  },
-  { text: { text: "Google Maps", type: "plain_text" }, value: "google_maps" },
-  { text: { text: "Groq", type: "plain_text" }, value: "groq" },
-  { text: { text: "xAI", type: "plain_text" }, value: "xai" },
-  { text: { text: "PLaMo", type: "plain_text" }, value: "plamo" },
-  { text: { text: "NVIDIA", type: "plain_text" }, value: "nvidia" },
-  { text: { text: "LiteLLM", type: "plain_text" }, value: "litellm" },
-  { text: { text: "SORACOM", type: "plain_text" }, value: "soracom" },
+  { label: "OpenAI", value: "openai" },
+  { label: "Azure OpenAI", value: "azure_openai" },
+  { label: "Anthropic", value: "anthropic" },
+  { label: "Google", value: "google" },
+  { label: "Google service account JSON", value: "google_service_account_json" },
+  { label: "Google Maps", value: "google_maps" },
+  { label: "Groq", value: "groq" },
+  { label: "xAI", value: "xai" },
+  { label: "PLaMo", value: "plamo" },
+  { label: "NVIDIA", value: "nvidia" },
+  { label: "LiteLLM", value: "litellm" },
+  { label: "SORACOM", value: "soracom" },
 ] as const satisfies readonly {
-  text: { text: string; type: "plain_text" };
+  label: string;
   value: WorkspaceCredentialProviderSelection;
 }[];
 
@@ -209,15 +216,22 @@ export type AgentSlackHandlerOptions = {
   agentJobQueue?: SlackAgentJobQueue;
   audioFetchFn?: typeof fetch;
   audioTranscriptionGateway?: TranscriptionGateway;
+  defaultLocale?: Locale;
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
   salesforcePdfWorkflowHome?: SalesforcePdfWorkflowHome;
+  userSettingsRepository?: UserSettingsRepository;
   workspaceCredentialSettings?: WorkspaceCredentialSettingsHome;
 };
 
 type SlackAgentJobRetryContext = {
   attempts: number;
   attemptsMade: number;
+};
+
+type SlackUserSettingsScope = {
+  enterpriseId?: string;
+  teamId?: string;
 };
 
 export function createAgentSlackHandlers(
@@ -231,11 +245,19 @@ export function createAgentSlackHandlers(
         return;
       }
       const teamId = readTeamId(body, event);
+      const enterpriseId = readSlackEnterpriseId(body);
+      const translator = await resolveHandlerTranslator(
+        { enterpriseId, teamId },
+        event.user,
+        options,
+        logger,
+      );
       const blocks = await buildAppHomeBlocks({
         logger,
         options,
         slackUserId: event.user,
         teamId,
+        translator,
       });
       await client.views.publish({
         user_id: event.user,
@@ -258,7 +280,7 @@ export function createAgentSlackHandlers(
       await handleWorkspaceCredentialConfigureAction(args, options);
     },
     async handleWorkspaceCredentialProviderSelectAction(args) {
-      await handleWorkspaceCredentialProviderSelectAction(args);
+      await handleWorkspaceCredentialProviderSelectAction(args, options);
     },
     async handleWorkspaceCredentialModalSubmission(args) {
       await handleWorkspaceCredentialModalSubmission(args, options);
@@ -277,15 +299,17 @@ async function buildAppHomeBlocks(input: {
   options: AgentSlackHandlerOptions;
   slackUserId: string;
   teamId: string | undefined;
+  translator: Translator;
 }): Promise<Record<string, unknown>[]> {
+  const { translator } = input;
   const blocks: Record<string, unknown>[] = [
     {
-      text: { text: "Agents party", type: "plain_text" },
+      text: { text: translator.t("appHome.title"), type: "plain_text" },
       type: "header",
     },
     {
       text: {
-        text: "Mention the app in a channel or thread to talk to the assistant.",
+        text: translator.t("appHome.intro"),
         type: "mrkdwn",
       },
       type: "section",
@@ -294,17 +318,17 @@ async function buildAppHomeBlocks(input: {
   if (input.options.workspaceCredentialSettings !== undefined && input.teamId !== undefined) {
     blocks.push({ type: "divider" });
     blocks.push({
-      text: { text: "API keys", type: "plain_text" },
+      text: { text: translator.t("appHome.apiKeys.title"), type: "plain_text" },
       type: "header",
     });
     blocks.push({
       accessory: {
         action_id: WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
-        text: { text: "Configure", type: "plain_text" },
+        text: { text: translator.t("appHome.configure"), type: "plain_text" },
         type: "button",
       },
       text: {
-        text: "Store workspace provider API keys for this Slack workspace.",
+        text: translator.t("appHome.apiKeys.body"),
         type: "mrkdwn",
       },
       type: "section",
@@ -336,7 +360,7 @@ async function buildAppHomeBlocks(input: {
     }
     blocks.push({ type: "divider" });
     blocks.push({
-      text: { text: "Salesforce", type: "plain_text" },
+      text: { text: translator.t("appHome.salesforce.title"), type: "plain_text" },
       type: "header",
     });
     for (const config of configs) {
@@ -344,7 +368,10 @@ async function buildAppHomeBlocks(input: {
         (item) => item.salesforce_org_id === config.salesforce_org_id,
       );
       const status = connection?.connection_status ?? "not_connected";
-      const actionLabel = status === "active" ? "Reconnect" : "Connect";
+      const actionLabel =
+        status === "active"
+          ? translator.t("appHome.salesforce.reconnect")
+          : translator.t("appHome.salesforce.connect");
       blocks.push({
         accessory: {
           text: { text: actionLabel, type: "plain_text" },
@@ -360,6 +387,7 @@ async function buildAppHomeBlocks(input: {
           text: `*${config.salesforce_org_name ?? config.salesforce_org_id}*\n${salesforceStatusText(
             status,
             connection?.salesforce_username ?? connection?.salesforce_user_email ?? undefined,
+            translator,
           )}`,
           type: "mrkdwn",
         },
@@ -367,7 +395,11 @@ async function buildAppHomeBlocks(input: {
       });
       if (input.options.salesforcePdfWorkflowHome !== undefined) {
         blocks.push(
-          ...buildSalesforcePdfWorkflowBlocks(config.salesforce_org_id, workflowSettings),
+          ...buildSalesforcePdfWorkflowBlocks(
+            config.salesforce_org_id,
+            workflowSettings,
+            translator,
+          ),
         );
       }
     }
@@ -380,6 +412,7 @@ async function buildAppHomeBlocks(input: {
 function buildSalesforcePdfWorkflowBlocks(
   salesforceOrgId: string,
   settings: readonly SalesforcePdfWorkflowSettings[],
+  translator: Translator,
 ): Record<string, unknown>[] {
   return salesforcePdfWorkflowActions.map((action) => {
     const setting = settings.find(
@@ -389,13 +422,20 @@ function buildSalesforcePdfWorkflowBlocks(
     return {
       accessory: {
         action_id: SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
-        text: { text: "Configure", type: "plain_text" },
+        text: { text: translator.t("appHome.configure"), type: "plain_text" },
         type: "button",
         value: JSON.stringify({ action, salesforceOrgId }),
       },
       text: {
-        text: `*${salesforcePdfWorkflowActionLabel(action)}*\n${enabled ? "Enabled" : "Disabled"}${
-          setting === undefined ? "" : ` - template: ${setting.template_id}`
+        text: `*${salesforcePdfWorkflowActionLabel(action)}*\n${
+          setting === undefined
+            ? enabled
+              ? translator.t("common.enabled")
+              : translator.t("common.disabled")
+            : translator.t("appHome.salesforce.workflowStatus", {
+                status: enabled ? translator.t("common.enabled") : translator.t("common.disabled"),
+                templateId: setting.template_id,
+              })
         }`,
         type: "mrkdwn",
       },
@@ -404,20 +444,26 @@ function buildSalesforcePdfWorkflowBlocks(
   });
 }
 
-function salesforceStatusText(status: string, accountLabel: string | undefined): string {
+function salesforceStatusText(
+  status: string,
+  accountLabel: string | undefined,
+  translator: Translator,
+): string {
   if (status === "active") {
-    return accountLabel === undefined ? "Connected" : `Connected as ${accountLabel}`;
+    return accountLabel === undefined
+      ? translator.t("appHome.salesforce.connected")
+      : translator.t("appHome.salesforce.connectedAs", { account: accountLabel });
   }
   if (status === "expired") {
-    return "Reconnect required";
+    return translator.t("appHome.salesforce.reconnectRequired");
   }
   if (status === "revoked") {
-    return "Disconnected";
+    return translator.t("appHome.salesforce.disconnected");
   }
   if (status === "error") {
-    return "Connection needs attention";
+    return translator.t("appHome.salesforce.connectionNeedsAttention");
   }
-  return "Not connected";
+  return translator.t("appHome.salesforce.notConnected");
 }
 
 async function handleWorkspaceCredentialConfigureAction(
@@ -426,35 +472,103 @@ async function handleWorkspaceCredentialConfigureAction(
 ): Promise<void> {
   await ack();
   const teamId = readTeamId(body, {});
+  const enterpriseId = readSlackEnterpriseId(body);
   const slackUserId = readSlackUserId(body);
   const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
   if (teamId === undefined || slackUserId === undefined || triggerId === undefined) {
     logger.warn("Ignoring API key configuration action with missing Slack context.");
     return;
   }
+  const translator = createTranslator(options.defaultLocale ?? FALLBACK_LOCALE);
   if (options.workspaceCredentialSettings === undefined) {
-    await client.views.open({
+    const response = await client.views.open({
       trigger_id: triggerId,
-      view: buildWorkspaceCredentialUnavailableModal() as never,
+      view: buildWorkspaceCredentialUnavailableModal(translator) as never,
+    });
+    await updateOpenedWorkspaceCredentialModalLocale({
+      client,
+      logger,
+      response,
+      slackUserId,
+      enterpriseId,
+      teamId,
+      translator,
+      userSettingsRepository: options.userSettingsRepository,
+      view: buildWorkspaceCredentialUnavailableModal,
     });
     return;
   }
-  await client.views.open({
+  const response = await client.views.open({
     trigger_id: triggerId,
-    view: buildWorkspaceCredentialModal(teamId, "openai") as never,
+    view: buildWorkspaceCredentialModal({ enterpriseId, teamId }, "openai", translator) as never,
+  });
+  await updateOpenedWorkspaceCredentialModalLocale({
+    client,
+    logger,
+    response,
+    slackUserId,
+    enterpriseId,
+    teamId,
+    translator,
+    userSettingsRepository: options.userSettingsRepository,
+    view: (localizedTranslator) =>
+      buildWorkspaceCredentialModal({ enterpriseId, teamId }, "openai", localizedTranslator),
   });
 }
 
-async function handleWorkspaceCredentialProviderSelectAction({
-  ack,
-  body,
-  client,
-  logger,
-}: SlackActionArgs): Promise<void> {
+async function updateOpenedWorkspaceCredentialModalLocale(input: {
+  client: SlackClient;
+  logger: unknown;
+  response: unknown;
+  enterpriseId: string | undefined;
+  slackUserId: string;
+  teamId: string;
+  translator: Translator;
+  userSettingsRepository: UserSettingsRepository | undefined;
+  view(translator: Translator): Record<string, unknown>;
+}): Promise<void> {
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: input.enterpriseId, teamId: input.teamId },
+    input.slackUserId,
+    {
+      defaultLocale: input.translator.locale,
+      userSettingsRepository: input.userSettingsRepository,
+    },
+    input.logger,
+  );
+  if (translator.locale === input.translator.locale) {
+    return;
+  }
+  const openedView = isRecord(input.response) ? input.response.view : undefined;
+  await updateWorkspaceCredentialModal(
+    input.client,
+    openedView,
+    input.view(translator),
+    input.logger,
+  );
+}
+
+async function handleWorkspaceCredentialProviderSelectAction(
+  { ack, body, client, logger }: SlackActionArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
   await ack();
   const view = isRecord(body) ? body.view : undefined;
-  const teamId =
-    (isRecord(view) ? readString(view, "private_metadata") : undefined) ?? readTeamId(body, {});
+  const metadata = parseWorkspaceCredentialModalMetadata(
+    isRecord(view) ? readString(view, "private_metadata") : undefined,
+  );
+  const slackUserId = readSlackUserId(body);
+  const enterpriseId = metadata?.enterpriseId ?? readSlackEnterpriseId(body);
+  const teamId = metadata?.teamId ?? readTeamId(body, {});
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId, teamId },
+    slackUserId,
+    {
+      defaultLocale: metadata?.locale ?? options.defaultLocale,
+      userSettingsRepository: options.userSettingsRepository,
+    },
+    logger,
+  );
   const providerValue = readSelectedOptionValue(
     view,
     WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
@@ -468,7 +582,11 @@ async function handleWorkspaceCredentialProviderSelectAction({
   await updateWorkspaceCredentialModal(
     client,
     view,
-    buildWorkspaceCredentialModal(teamId ?? "", providerSelection),
+    buildWorkspaceCredentialModal(
+      { enterpriseId, teamId: teamId ?? "" },
+      providerSelection,
+      translator,
+    ),
     logger,
   );
 }
@@ -477,14 +595,20 @@ async function handleWorkspaceCredentialModalSubmission(
   { ack, body, client, logger, view }: SlackViewArgs,
   options: AgentSlackHandlerOptions,
 ): Promise<void> {
-  const metadataTeamId = readString(view as unknown as StringIndexed, "private_metadata");
+  const metadata = parseWorkspaceCredentialModalMetadata(
+    readString(view as unknown as StringIndexed, "private_metadata"),
+  );
+  const metadataTeamId = metadata?.teamId;
   const bodyTeamId = readTeamId(body, {});
   const teamId = bodyTeamId ?? metadataTeamId;
   const slackUserId = readSlackUserId(body);
+  const ackTranslator = createTranslator(
+    metadata?.locale ?? options.defaultLocale ?? FALLBACK_LOCALE,
+  );
   if (options.workspaceCredentialSettings === undefined) {
     await ack({
       errors: {
-        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: "API key storage is not configured.",
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: ackTranslator.t("credential.error.notConfigured"),
       },
       response_action: "errors",
     });
@@ -493,7 +617,7 @@ async function handleWorkspaceCredentialModalSubmission(
   if (metadataTeamId !== undefined && bodyTeamId !== undefined && metadataTeamId !== bodyTeamId) {
     await ack({
       errors: {
-        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: "Slack workspace context does not match.",
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: ackTranslator.t("credential.error.contextMismatch"),
       },
       response_action: "errors",
     });
@@ -502,13 +626,13 @@ async function handleWorkspaceCredentialModalSubmission(
   if (teamId === undefined || slackUserId === undefined) {
     await ack({
       errors: {
-        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: "Slack workspace context is missing.",
+        [WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID]: ackTranslator.t("credential.error.contextMissing"),
       },
       response_action: "errors",
     });
     return;
   }
-  const parsed = parseWorkspaceCredentialModal(view);
+  const parsed = parseWorkspaceCredentialModal(view, ackTranslator);
   if ("errors" in parsed) {
     await ack({
       errors: parsed.errors,
@@ -519,17 +643,22 @@ async function handleWorkspaceCredentialModalSubmission(
 
   await ack({
     response_action: "update",
-    view: buildWorkspaceCredentialSavingModal() as never,
+    view: buildWorkspaceCredentialSavingModal(ackTranslator) as never,
   });
 
+  let resultTranslator = ackTranslator;
   try {
-    if (!(await isWorkspaceAdmin(client, slackUserId, logger))) {
+    const userContext = await resolveSlackUserContext(client, slackUserId, ackTranslator, logger);
+    const { translator } = userContext;
+    resultTranslator = translator;
+    if (!userContext.isWorkspaceAdmin) {
       await updateWorkspaceCredentialModal(
         client,
         view,
         buildWorkspaceCredentialResultModal(
-          "API key",
-          "Only Slack workspace admins and owners can configure API keys.",
+          translator.t("credential.title.apiKey"),
+          translator.t("credential.error.unauthorized"),
+          translator,
         ),
         logger,
       );
@@ -550,7 +679,11 @@ async function handleWorkspaceCredentialModalSubmission(
     await updateWorkspaceCredentialModal(
       client,
       view,
-      buildWorkspaceCredentialResultModal("API key saved", "The workspace API key was saved."),
+      buildWorkspaceCredentialResultModal(
+        translator.t("credential.title.saved"),
+        translator.t("credential.result.saved"),
+        translator,
+      ),
       logger,
     );
   } catch (error) {
@@ -563,8 +696,9 @@ async function handleWorkspaceCredentialModalSubmission(
       client,
       view,
       buildWorkspaceCredentialResultModal(
-        "API key",
-        "Could not save this API key. Try again later.",
+        resultTranslator.t("credential.title.apiKey"),
+        resultTranslator.t("credential.error.saveFailed"),
+        resultTranslator,
       ),
       logger,
     );
@@ -577,6 +711,7 @@ async function handleSalesforcePdfWorkflowConfigureAction(
 ): Promise<void> {
   await ack();
   const teamId = readTeamId(body, {});
+  const enterpriseId = readSlackEnterpriseId(body);
   const slackUserId = readSlackUserId(body);
   const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
   const actionValue = parseSalesforcePdfWorkflowActionValue(readActionValue(body));
@@ -589,24 +724,55 @@ async function handleSalesforcePdfWorkflowConfigureAction(
     logger.warn("Ignoring Salesforce PDF workflow configuration action with missing context.");
     return;
   }
+  const translator = createTranslator(options.defaultLocale ?? FALLBACK_LOCALE);
+  const response = await client.views.open({
+    trigger_id: triggerId,
+    view: buildSalesforcePdfWorkflowResultModal(
+      translator.t("salesforcePdf.title"),
+      translator.t("salesforcePdf.result.loading"),
+      translator,
+    ) as never,
+  });
+  const localizedTranslator = await resolveHandlerTranslator(
+    { enterpriseId, teamId },
+    slackUserId,
+    {
+      defaultLocale: translator.locale,
+      userSettingsRepository: options.userSettingsRepository,
+    },
+    logger,
+  );
+  const openedView = isRecord(response) ? response.view : undefined;
   if (options.salesforcePdfWorkflowHome === undefined) {
-    await client.views.open({
-      trigger_id: triggerId,
-      view: buildSalesforcePdfWorkflowResultModal(
-        "Salesforce PDF",
-        "Salesforce PDF workflow settings are not configured for this app process.",
-      ) as never,
-    });
+    await updateSalesforcePdfWorkflowModal(
+      client,
+      openedView,
+      buildSalesforcePdfWorkflowResultModal(
+        localizedTranslator.t("salesforcePdf.title"),
+        localizedTranslator.t("salesforcePdf.error.processNotConfigured"),
+        localizedTranslator,
+      ),
+      logger,
+    );
     return;
   }
-  if (!(await isWorkspaceAdmin(client, slackUserId, logger))) {
-    await client.views.open({
-      trigger_id: triggerId,
-      view: buildSalesforcePdfWorkflowResultModal(
-        "Salesforce PDF",
-        "Only Slack workspace admins and owners can configure Salesforce PDF workflows.",
-      ) as never,
-    });
+  const userContext = await resolveSlackUserContext(
+    client,
+    slackUserId,
+    localizedTranslator,
+    logger,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    await updateSalesforcePdfWorkflowModal(
+      client,
+      openedView,
+      buildSalesforcePdfWorkflowResultModal(
+        localizedTranslator.t("salesforcePdf.title"),
+        localizedTranslator.t("salesforcePdf.error.unauthorized"),
+        localizedTranslator,
+      ),
+      logger,
+    );
     return;
   }
 
@@ -618,15 +784,19 @@ async function handleSalesforcePdfWorkflowConfigureAction(
     );
   const parsedCurrent =
     current === undefined ? undefined : salesforcePdfWorkflowSettingsSchema.safeParse(current);
-  await client.views.open({
-    trigger_id: triggerId,
-    view: buildSalesforcePdfWorkflowModal({
+  await updateSalesforcePdfWorkflowModal(
+    client,
+    openedView,
+    buildSalesforcePdfWorkflowModal({
       action: actionValue.action,
       salesforceOrgId: actionValue.salesforceOrgId,
       settings: parsedCurrent?.success === true ? parsedCurrent.data : undefined,
+      enterpriseId,
       teamId,
-    }) as never,
-  });
+      translator: localizedTranslator,
+    }),
+    logger,
+  );
 }
 
 async function handleSalesforcePdfWorkflowModalSubmission(
@@ -638,11 +808,15 @@ async function handleSalesforcePdfWorkflowModalSubmission(
   );
   const bodyTeamId = readTeamId(body, {});
   const slackUserId = readSlackUserId(body);
+  const ackTranslator = createTranslator(
+    metadata?.locale ?? options.defaultLocale ?? FALLBACK_LOCALE,
+  );
   if (options.salesforcePdfWorkflowHome === undefined) {
     await ack({
       errors: {
-        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]:
-          "Salesforce PDF workflow settings are not configured.",
+        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]: ackTranslator.t(
+          "salesforcePdf.error.notConfigured",
+        ),
       },
       response_action: "errors",
     });
@@ -655,13 +829,15 @@ async function handleSalesforcePdfWorkflowModalSubmission(
   ) {
     await ack({
       errors: {
-        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]: "Slack workspace context is missing.",
+        [SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID]: ackTranslator.t(
+          "salesforcePdf.error.contextMissing",
+        ),
       },
       response_action: "errors",
     });
     return;
   }
-  const parsed = parseSalesforcePdfWorkflowModal(view);
+  const parsed = parseSalesforcePdfWorkflowModal(view, ackTranslator);
   if ("errors" in parsed) {
     await ack({
       errors: parsed.errors,
@@ -673,19 +849,25 @@ async function handleSalesforcePdfWorkflowModalSubmission(
   await ack({
     response_action: "update",
     view: buildSalesforcePdfWorkflowResultModal(
-      "Salesforce PDF",
-      "Saving workflow settings...",
+      ackTranslator.t("salesforcePdf.title"),
+      ackTranslator.t("salesforcePdf.result.saving"),
+      ackTranslator,
     ) as never,
   });
 
+  let resultTranslator = ackTranslator;
   try {
-    if (!(await isWorkspaceAdmin(client, slackUserId, logger))) {
+    const userContext = await resolveSlackUserContext(client, slackUserId, ackTranslator, logger);
+    const { translator } = userContext;
+    resultTranslator = translator;
+    if (!userContext.isWorkspaceAdmin) {
       await updateSalesforcePdfWorkflowModal(
         client,
         view,
         buildSalesforcePdfWorkflowResultModal(
-          "Salesforce PDF",
-          "Only Slack workspace admins and owners can configure Salesforce PDF workflows.",
+          translator.t("salesforcePdf.title"),
+          translator.t("salesforcePdf.error.unauthorized"),
+          translator,
         ),
         logger,
       );
@@ -751,10 +933,14 @@ async function handleSalesforcePdfWorkflowModalSubmission(
       client,
       view,
       buildSalesforcePdfWorkflowResultModal(
-        "Salesforce PDF",
-        `${salesforcePdfWorkflowActionLabel(payload.action)} is ${
-          payload.enabled ? "enabled" : "disabled"
-        } for this Salesforce org.`,
+        translator.t("salesforcePdf.title"),
+        translator.t("salesforcePdf.result.saved", {
+          action: salesforcePdfWorkflowActionLabel(payload.action),
+          status: payload.enabled
+            ? translator.t("common.enabledStatus")
+            : translator.t("common.disabledStatus"),
+        }),
+        translator,
       ),
       logger,
     );
@@ -767,8 +953,9 @@ async function handleSalesforcePdfWorkflowModalSubmission(
       client,
       view,
       buildSalesforcePdfWorkflowResultModal(
-        "Salesforce PDF",
-        "Could not save these workflow settings. Try again later.",
+        resultTranslator.t("salesforcePdf.title"),
+        resultTranslator.t("salesforcePdf.error.saveFailed"),
+        resultTranslator,
       ),
       logger,
     );
@@ -794,6 +981,13 @@ async function handleMention(
     return;
   }
 
+  const enterpriseId = readSlackEnterpriseId(body);
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId, teamId },
+    event.user,
+    options,
+    logger,
+  );
   const threadTs = readString(event, "thread_ts") ?? event.ts;
   if (options.agentJobQueue !== undefined) {
     if (
@@ -823,6 +1017,7 @@ async function handleMention(
       },
       logger,
       queue: options.agentJobQueue,
+      translator,
       threadTs,
     });
     return;
@@ -843,7 +1038,7 @@ async function handleMention(
       threadTs,
     });
     if (options.routingRepository?.resolveAgent !== undefined && route === undefined) {
-      text = "No agent is configured for this channel or workspace.";
+      text = translator.t("slack.error.noAgent");
       await client.chat.postMessage({
         channel: event.channel,
         text,
@@ -905,7 +1100,7 @@ async function handleMention(
       teamId,
       threadTs,
     });
-    text = runnerUserFacingErrorMessage(error);
+    text = runnerUserFacingErrorMessage(error, translator);
   }
 
   await postAgentResult({
@@ -953,6 +1148,13 @@ async function handleMessage(
     return;
   }
 
+  const enterpriseId = readSlackEnterpriseId(body);
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId, teamId },
+    event.user,
+    options,
+    logger,
+  );
   if (options.agentJobQueue !== undefined) {
     await enqueueSlackAgentJob({
       body,
@@ -974,6 +1176,7 @@ async function handleMessage(
       },
       logger,
       queue: options.agentJobQueue,
+      translator,
       threadTs,
     });
     return;
@@ -1044,7 +1247,7 @@ async function handleMessage(
       teamId,
       threadTs,
     });
-    text = runnerUserFacingErrorMessage(error);
+    text = runnerUserFacingErrorMessage(error, translator);
   }
 
   await postAgentResult({
@@ -1063,10 +1266,12 @@ export async function processSlackAgentJob(
     audioFetchFn?: typeof fetch;
     audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
+    defaultLocale?: Locale;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
+    userSettingsRepository?: UserSettingsRepository;
   },
 ): Promise<void> {
   if (job.eventType === "app_mention") {
@@ -1082,10 +1287,12 @@ async function processAppMentionJob(
     audioFetchFn?: typeof fetch;
     audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
+    defaultLocale?: Locale;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
+    userSettingsRepository?: UserSettingsRepository;
   },
 ): Promise<void> {
   if (
@@ -1094,10 +1301,17 @@ async function processAppMentionJob(
   ) {
     return;
   }
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: job.enterpriseId, teamId: job.teamId },
+    job.userId,
+    input,
+    input.logger,
+  );
   await setSlackAssistantThreadStatus({
     channelId: job.channelId,
     client: input.client,
     logger: input.logger,
+    translator,
     threadTs: job.threadTs,
   });
 
@@ -1112,7 +1326,7 @@ async function processAppMentionJob(
     if (input.routingRepository?.resolveAgent !== undefined && route === undefined) {
       await input.client.chat.postMessage({
         channel: job.channelId,
-        text: "No agent is configured for this channel or workspace.",
+        text: translator.t("slack.error.noAgent"),
         thread_ts: job.threadTs,
       });
       return;
@@ -1173,7 +1387,7 @@ async function processAppMentionJob(
     if (shouldRetryJobFailure(input.retryContext)) {
       throw error;
     }
-    text = runnerUserFacingErrorMessage(error);
+    text = runnerUserFacingErrorMessage(error, translator);
   }
 
   await postAgentResult({
@@ -1192,10 +1406,12 @@ async function processFollowUpMessageJob(
     audioFetchFn?: typeof fetch;
     audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
+    defaultLocale?: Locale;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
+    userSettingsRepository?: UserSettingsRepository;
   },
 ): Promise<void> {
   if (input.routingRepository === undefined) {
@@ -1210,6 +1426,12 @@ async function processFollowUpMessageJob(
     return;
   }
 
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: job.enterpriseId, teamId: job.teamId },
+    job.userId,
+    input,
+    input.logger,
+  );
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
@@ -1225,6 +1447,7 @@ async function processFollowUpMessageJob(
       channelId: job.channelId,
       client: input.client,
       logger: input.logger,
+      translator,
       threadTs: job.threadTs,
     });
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
@@ -1287,7 +1510,7 @@ async function processFollowUpMessageJob(
     if (shouldRetryJobFailure(input.retryContext)) {
       throw error;
     }
-    text = runnerUserFacingErrorMessage(error);
+    text = runnerUserFacingErrorMessage(error, translator);
   }
 
   await postAgentResult({
@@ -1304,6 +1527,7 @@ async function setSlackAssistantThreadStatus(input: {
   channelId: string;
   client: SlackAgentClient;
   logger: unknown;
+  translator: Translator;
   threadTs: string;
 }): Promise<void> {
   const setStatus = input.client.assistant?.threads?.setStatus;
@@ -1313,7 +1537,7 @@ async function setSlackAssistantThreadStatus(input: {
   try {
     await setStatus({
       channel_id: input.channelId,
-      status: "is working on your request...",
+      status: input.translator.t("slack.status.working"),
       thread_ts: input.threadTs,
     });
   } catch (error) {
@@ -1332,6 +1556,7 @@ async function enqueueSlackAgentJob(input: {
   job: SlackAgentJob;
   logger: unknown;
   queue: SlackAgentJobQueue;
+  translator: Translator;
   threadTs: string;
 }): Promise<void> {
   try {
@@ -1354,7 +1579,7 @@ async function enqueueSlackAgentJob(input: {
     });
     await input.client.chat.postMessage({
       channel: input.job.channelId,
-      text: "I couldn't queue that request. Please try again in a moment.",
+      text: input.translator.t("slack.error.queue"),
       thread_ts: input.threadTs,
     });
   }
@@ -1385,6 +1610,12 @@ async function handleReactionAdded(
   if (!(await options.routingRepository.isChannelEnabled(teamId, channelId))) {
     return;
   }
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: readSlackEnterpriseId(body), teamId },
+    readString(event, "user"),
+    options,
+    logger,
+  );
 
   let sourceText: string | undefined;
   let threadTs = messageTs;
@@ -1413,7 +1644,7 @@ async function handleReactionAdded(
     if (sourceText === undefined || sourceText.trim() === "") {
       await client.chat.postMessage({
         channel: channelId,
-        text: "I couldn't read text from the reacted message.",
+        text: translator.t("slack.error.unreadableReaction"),
         thread_ts: threadTs,
       });
       return;
@@ -1444,7 +1675,7 @@ async function handleReactionAdded(
       teamId,
       threadTs,
     });
-    text = "I couldn't translate that message. Please try again in a moment.";
+    text = translator.t("slack.error.translation");
   }
 
   await client.chat.postMessage({
@@ -1467,6 +1698,10 @@ function readTeamId(body: unknown, event: StringIndexed): string | undefined {
     }
     if (isRecord(body.user) && typeof body.user.team_id === "string") {
       return body.user.team_id;
+    }
+    const authorizationTeamId = readFirstAuthorizationString(body, "team_id");
+    if (authorizationTeamId !== undefined) {
+      return authorizationTeamId;
     }
   }
   return readString(event, "team");
@@ -1547,11 +1782,11 @@ function mergeSlackMessages(
   return merged;
 }
 
-function runnerUserFacingErrorMessage(error: unknown): string {
+function runnerUserFacingErrorMessage(error: unknown, translator: Translator): string {
   if (error instanceof SlackAudioProcessingError) {
     return error.message;
   }
-  return "I couldn't complete that request. Please try again in a moment.";
+  return translator.t("slack.error.genericRequest");
 }
 
 export async function postAgentResult(input: {
@@ -1640,6 +1875,50 @@ function logError(logger: unknown, message: string, metadata: Record<string, unk
   }
 }
 
+async function resolveHandlerTranslator(
+  scope: SlackUserSettingsScope,
+  userId: string | undefined,
+  options: { defaultLocale?: Locale; userSettingsRepository?: UserSettingsRepository },
+  logger: unknown,
+): Promise<Translator> {
+  return resolveUserSettingsTranslator({
+    defaultLocale: options.defaultLocale ?? FALLBACK_LOCALE,
+    enterpriseId: scope.enterpriseId,
+    logger,
+    repository: options.userSettingsRepository,
+    teamId: scope.teamId,
+    userId,
+  });
+}
+
+async function resolveSlackUserContext(
+  client: SlackAgentClient,
+  userId: string | undefined,
+  translator: Translator,
+  logger: unknown,
+): Promise<{ isWorkspaceAdmin: boolean; translator: Translator }> {
+  const info = client.users?.info;
+  if (info === undefined || userId === undefined) {
+    return { isWorkspaceAdmin: false, translator };
+  }
+  try {
+    const response = await info({ user: userId });
+    const user = isRecord(response) && isRecord(response.user) ? response.user : undefined;
+    const isAdmin =
+      user !== undefined &&
+      (readBoolean(user, "is_admin") === true ||
+        readBoolean(user, "is_owner") === true ||
+        readBoolean(user, "is_primary_owner") === true);
+    return { isWorkspaceAdmin: isAdmin, translator };
+  } catch (error) {
+    logWarn(logger, "Failed to resolve Slack user context.", {
+      error,
+      slackUserId: userId,
+    });
+    return { isWorkspaceAdmin: false, translator };
+  }
+}
+
 function runnerFailureLogFields(error: unknown): Record<string, unknown> {
   if (!(error instanceof AgentRunnerExecutionError)) {
     return {};
@@ -1724,15 +2003,16 @@ async function fetchSingleMessage(
 }
 
 function buildWorkspaceCredentialModal(
-  teamId: string,
+  scope: SlackUserSettingsScope & { teamId: string },
   providerSelection: WorkspaceCredentialProviderSelection,
+  translator: Translator = defaultTranslator,
 ): Record<string, unknown> {
   const providerKind = providerKindForCredentialSelection(providerSelection);
   return {
     callback_id: WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
-    private_metadata: teamId,
-    submit: { text: "Save", type: "plain_text" },
-    title: { text: "Credentials", type: "plain_text" },
+    private_metadata: workspaceCredentialPrivateMetadata(scope, translator),
+    submit: { text: translator.t("common.save"), type: "plain_text" },
+    title: { text: translator.t("credential.title"), type: "plain_text" },
     type: "modal",
     blocks: [
       {
@@ -1740,11 +2020,11 @@ function buildWorkspaceCredentialModal(
         dispatch_action: true,
         element: {
           action_id: WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
-          initial_option: workspaceCredentialProviderOption(providerSelection),
-          options: workspaceCredentialProviderOptions,
+          initial_option: workspaceCredentialProviderOption(providerSelection, translator),
+          options: workspaceCredentialProviderOptionsFor(translator),
           type: "static_select",
         },
-        label: { text: "Provider", type: "plain_text" },
+        label: { text: translator.t("credential.label.provider"), type: "plain_text" },
         type: "input",
       },
       {
@@ -1757,21 +2037,22 @@ function buildWorkspaceCredentialModal(
         label: {
           text:
             providerSelection === "google_service_account_json"
-              ? "Service account JSON"
+              ? translator.t("credential.label.serviceAccountJson")
               : providerKind === "soracom"
-                ? "SORACOM AuthKey Secret"
-                : "API key",
+                ? translator.t("credential.label.authKeySecret")
+                : translator.t("credential.label.secret"),
           type: "plain_text",
         },
         type: "input",
       },
-      ...workspaceCredentialProviderDetailBlocks(providerSelection),
+      ...workspaceCredentialProviderDetailBlocks(providerSelection, translator),
     ],
   };
 }
 
 function workspaceCredentialProviderDetailBlocks(
   providerSelection: WorkspaceCredentialProviderSelection,
+  translator: Translator,
 ): Record<string, unknown>[] {
   const providerKind = providerKindForCredentialSelection(providerSelection);
   if (providerSelection === "google_service_account_json") {
@@ -1786,7 +2067,7 @@ function workspaceCredentialProviderDetailBlocks(
           placeholder: { text: "https://proxy.example/v1", type: "plain_text" },
           type: "plain_text_input",
         },
-        label: { text: "Base URL", type: "plain_text" },
+        label: { text: translator.t("credential.label.baseUrl"), type: "plain_text" },
         optional: true,
         type: "input",
       },
@@ -1800,21 +2081,30 @@ function workspaceCredentialProviderDetailBlocks(
         placeholder: { text: "keyId-xxxxxxxxxx", type: "plain_text" },
         type: "plain_text_input",
       },
-      label: { text: "SORACOM AuthKey ID", type: "plain_text" },
+      label: { text: translator.t("credential.label.authKeyId"), type: "plain_text" },
       type: "input",
     },
     {
       block_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID,
       element: {
         action_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID,
-        initial_option: { text: { text: "Global", type: "plain_text" }, value: "global" },
+        initial_option: {
+          text: { text: translator.t("credential.option.coverageGlobal"), type: "plain_text" },
+          value: "global",
+        },
         options: [
-          { text: { text: "Global", type: "plain_text" }, value: "global" },
-          { text: { text: "Japan", type: "plain_text" }, value: "japan" },
+          {
+            text: { text: translator.t("credential.option.coverageGlobal"), type: "plain_text" },
+            value: "global",
+          },
+          {
+            text: { text: translator.t("credential.option.coverageJapan"), type: "plain_text" },
+            value: "japan",
+          },
         ],
         type: "static_select",
       },
-      label: { text: "SORACOM coverage", type: "plain_text" },
+      label: { text: translator.t("credential.label.coverage"), type: "plain_text" },
       type: "input",
     },
     {
@@ -1824,7 +2114,7 @@ function workspaceCredentialProviderDetailBlocks(
         placeholder: { text: "OP0012345678", type: "plain_text" },
         type: "plain_text_input",
       },
-      label: { text: "SORACOM Operator ID", type: "plain_text" },
+      label: { text: translator.t("credential.label.operatorId"), type: "plain_text" },
       optional: true,
       type: "input",
     },
@@ -1833,11 +2123,29 @@ function workspaceCredentialProviderDetailBlocks(
 
 function workspaceCredentialProviderOption(
   providerSelection: WorkspaceCredentialProviderSelection,
-): (typeof workspaceCredentialProviderOptions)[number] {
-  return (
-    workspaceCredentialProviderOptions.find((option) => option.value === providerSelection) ??
-    workspaceCredentialProviderOptions[0]
-  );
+  translator: Translator,
+): {
+  text: { text: string; type: "plain_text" };
+  value: WorkspaceCredentialProviderSelection;
+} {
+  const options = workspaceCredentialProviderOptionsFor(translator);
+  return options.find((option) => option.value === providerSelection) ?? options[0];
+}
+
+function workspaceCredentialProviderOptionsFor(translator: Translator): {
+  text: { text: string; type: "plain_text" };
+  value: WorkspaceCredentialProviderSelection;
+}[] {
+  return workspaceCredentialProviderOptions.map((option) => ({
+    text: {
+      text:
+        option.value === "google_service_account_json"
+          ? translator.t("credential.provider.googleServiceAccount")
+          : option.label,
+      type: "plain_text",
+    },
+    value: option.value,
+  }));
 }
 
 function providerKindForCredentialSelection(
@@ -1846,13 +2154,34 @@ function providerKindForCredentialSelection(
   return providerSelection === "google_service_account_json" ? "google" : providerSelection;
 }
 
-function buildWorkspaceCredentialSavingModal(): Record<string, unknown> {
-  return buildWorkspaceCredentialResultModal("API key", "Saving API key...");
+function workspaceCredentialPrivateMetadata(
+  scope: SlackUserSettingsScope & { teamId: string },
+  translator: Translator,
+): string {
+  return JSON.stringify({
+    enterpriseId: scope.enterpriseId,
+    locale: translator.locale,
+    teamId: scope.teamId,
+  });
 }
 
-function buildWorkspaceCredentialResultModal(title: string, text: string): Record<string, unknown> {
+function buildWorkspaceCredentialSavingModal(
+  translator: Translator = defaultTranslator,
+): Record<string, unknown> {
+  return buildWorkspaceCredentialResultModal(
+    translator.t("credential.title.apiKey"),
+    translator.t("credential.result.saving"),
+    translator,
+  );
+}
+
+function buildWorkspaceCredentialResultModal(
+  title: string,
+  text: string,
+  translator: Translator = defaultTranslator,
+): Record<string, unknown> {
   return {
-    close: { text: "Close", type: "plain_text" },
+    close: { text: translator.t("common.close"), type: "plain_text" },
     title: { text: title, type: "plain_text" },
     type: "modal",
     blocks: [
@@ -1867,15 +2196,17 @@ function buildWorkspaceCredentialResultModal(title: string, text: string): Recor
   };
 }
 
-function buildWorkspaceCredentialUnavailableModal(): Record<string, unknown> {
+function buildWorkspaceCredentialUnavailableModal(
+  translator: Translator = defaultTranslator,
+): Record<string, unknown> {
   return {
-    close: { text: "Close", type: "plain_text" },
-    title: { text: "API key", type: "plain_text" },
+    close: { text: translator.t("common.close"), type: "plain_text" },
+    title: { text: translator.t("credential.title.apiKey"), type: "plain_text" },
     type: "modal",
     blocks: [
       {
         text: {
-          text: "API key storage is not configured for this app process.",
+          text: translator.t("credential.unavailable"),
           type: "mrkdwn",
         },
         type: "section",
@@ -1884,65 +2215,119 @@ function buildWorkspaceCredentialUnavailableModal(): Record<string, unknown> {
   };
 }
 
-const salesforcePdfWorkflowEnabledOptions = [
-  { text: { text: "Disabled", type: "plain_text" }, value: "false" },
-  { text: { text: "Enabled", type: "plain_text" }, value: "true" },
-] as const;
+function salesforcePdfWorkflowEnabledOptionsFor(translator: Translator): {
+  text: { text: string; type: "plain_text" };
+  value: "false" | "true";
+}[] {
+  return [
+    { text: { text: translator.t("common.disabled"), type: "plain_text" }, value: "false" },
+    { text: { text: translator.t("common.enabled"), type: "plain_text" }, value: "true" },
+  ];
+}
 
-const salesforcePdfWorkflowAttachTargetOptions = [
-  { text: { text: "Source record", type: "plain_text" }, value: "source_record" },
-  { text: { text: "Quote", type: "plain_text" }, value: "quote" },
-  { text: { text: "Opportunity", type: "plain_text" }, value: "opportunity" },
-  { text: { text: "Quote and Opportunity", type: "plain_text" }, value: "both" },
-] as const;
+function salesforcePdfWorkflowAttachTargetOptionsFor(translator: Translator): {
+  text: { text: string; type: "plain_text" };
+  value: SalesforcePdfAttachTarget;
+}[] {
+  return [
+    {
+      text: { text: translator.t("salesforcePdf.attachTarget.sourceRecord"), type: "plain_text" },
+      value: "source_record",
+    },
+    {
+      text: { text: translator.t("salesforcePdf.attachTarget.quote"), type: "plain_text" },
+      value: "quote",
+    },
+    {
+      text: { text: translator.t("salesforcePdf.attachTarget.opportunity"), type: "plain_text" },
+      value: "opportunity",
+    },
+    {
+      text: { text: translator.t("salesforcePdf.attachTarget.both"), type: "plain_text" },
+      value: "both",
+    },
+  ];
+}
 
-const salesforcePdfWorkflowConfirmationOptions = [
-  { text: { text: "Require confirmation", type: "plain_text" }, value: "true" },
-  { text: { text: "Do not require confirmation", type: "plain_text" }, value: "false" },
-] as const;
+function salesforcePdfWorkflowConfirmationOptionsFor(translator: Translator): {
+  text: { text: string; type: "plain_text" };
+  value: "false" | "true";
+}[] {
+  return [
+    {
+      text: { text: translator.t("salesforcePdf.option.requireConfirmation"), type: "plain_text" },
+      value: "true",
+    },
+    {
+      text: {
+        text: translator.t("salesforcePdf.option.doNotRequireConfirmation"),
+        type: "plain_text",
+      },
+      value: "false",
+    },
+  ];
+}
 
-const salesforcePdfWorkflowAiSummaryOptions = [
-  { text: { text: "AI summary off", type: "plain_text" }, value: "false" },
-  { text: { text: "AI summary on", type: "plain_text" }, value: "true" },
-] as const;
+function salesforcePdfWorkflowAiSummaryOptionsFor(translator: Translator): {
+  text: { text: string; type: "plain_text" };
+  value: "false" | "true";
+}[] {
+  return [
+    {
+      text: { text: translator.t("salesforcePdf.option.aiSummaryOff"), type: "plain_text" },
+      value: "false",
+    },
+    {
+      text: { text: translator.t("salesforcePdf.option.aiSummaryOn"), type: "plain_text" },
+      value: "true",
+    },
+  ];
+}
 
 function buildSalesforcePdfWorkflowModal(input: {
   action: SalesforcePdfWorkflowAction;
+  enterpriseId?: string;
   salesforceOrgId: string;
   settings?: SalesforcePdfWorkflowSettings;
   teamId: string;
+  translator?: Translator;
 }): Record<string, unknown> {
+  const translator = input.translator ?? defaultTranslator;
+  const enabledOptions = salesforcePdfWorkflowEnabledOptionsFor(translator);
+  const attachTargetOptions = salesforcePdfWorkflowAttachTargetOptionsFor(translator);
+  const confirmationOptions = salesforcePdfWorkflowConfirmationOptionsFor(translator);
+  const aiSummaryOptions = salesforcePdfWorkflowAiSummaryOptionsFor(translator);
   const settings = input.settings;
-  const enabledOption = salesforcePdfWorkflowEnabledOptions.find(
+  const enabledOption = enabledOptions.find(
     (option) => option.value === String(settings?.enabled === true),
   );
   const attachTo = settings?.attach_to ?? "source_record";
-  const attachOption = salesforcePdfWorkflowAttachTargetOptions.find(
-    (option) => option.value === attachTo,
-  );
-  const confirmationOption = salesforcePdfWorkflowConfirmationOptions.find(
+  const attachOption = attachTargetOptions.find((option) => option.value === attachTo);
+  const confirmationOption = confirmationOptions.find(
     (option) => option.value === String(settings?.require_confirmation_before_attach !== false),
   );
-  const aiSummaryOption = salesforcePdfWorkflowAiSummaryOptions.find(
+  const aiSummaryOption = aiSummaryOptions.find(
     (option) => option.value === String(settings?.include_ai_summary === true),
   );
   return {
     callback_id: SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
     private_metadata: JSON.stringify({
       action: input.action,
+      enterpriseId: input.enterpriseId,
+      locale: translator.locale,
       salesforceOrgId: input.salesforceOrgId,
       teamId: input.teamId,
     }),
-    submit: { text: "Save", type: "plain_text" },
-    title: { text: "Salesforce PDF", type: "plain_text" },
+    submit: { text: translator.t("common.save"), type: "plain_text" },
+    title: { text: translator.t("salesforcePdf.title"), type: "plain_text" },
     type: "modal",
     blocks: [
       {
         block_id: SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID,
         element: {
           action_id: SALESFORCE_PDF_WORKFLOW_ENABLED_ACTION_ID,
-          initial_option: enabledOption ?? salesforcePdfWorkflowEnabledOptions[0],
-          options: salesforcePdfWorkflowEnabledOptions,
+          initial_option: enabledOption ?? enabledOptions[0],
+          options: enabledOptions,
           type: "static_select",
         },
         label: { text: salesforcePdfWorkflowActionLabel(input.action), type: "plain_text" },
@@ -1956,7 +2341,7 @@ function buildSalesforcePdfWorkflowModal(input: {
           placeholder: { text: `${input.action}_v1`, type: "plain_text" },
           type: "plain_text_input",
         },
-        label: { text: "Template ID", type: "plain_text" },
+        label: { text: translator.t("salesforcePdf.label.templateId"), type: "plain_text" },
         type: "input",
       },
       {
@@ -1967,7 +2352,7 @@ function buildSalesforcePdfWorkflowModal(input: {
           placeholder: { text: "Proposal, Negotiation", type: "plain_text" },
           type: "plain_text_input",
         },
-        label: { text: "Allowed stages", type: "plain_text" },
+        label: { text: translator.t("salesforcePdf.label.allowedStages"), type: "plain_text" },
         optional: true,
         type: "input",
       },
@@ -1979,7 +2364,7 @@ function buildSalesforcePdfWorkflowModal(input: {
           placeholder: { text: "Approved, Presented", type: "plain_text" },
           type: "plain_text_input",
         },
-        label: { text: "Allowed statuses", type: "plain_text" },
+        label: { text: translator.t("salesforcePdf.label.allowedStatuses"), type: "plain_text" },
         optional: true,
         type: "input",
       },
@@ -1993,7 +2378,10 @@ function buildSalesforcePdfWorkflowModal(input: {
                 placeholder: { text: "Approval_Status__c", type: "plain_text" },
                 type: "plain_text_input",
               },
-              label: { text: "Approval status field", type: "plain_text" },
+              label: {
+                text: translator.t("salesforcePdf.label.approvalStatusField"),
+                type: "plain_text",
+              },
               optional: true,
               type: "input",
             },
@@ -2005,7 +2393,10 @@ function buildSalesforcePdfWorkflowModal(input: {
                 placeholder: { text: "Approved, Accepted", type: "plain_text" },
                 type: "plain_text_input",
               },
-              label: { text: "Allowed approval statuses", type: "plain_text" },
+              label: {
+                text: translator.t("salesforcePdf.label.allowedApprovalStatuses"),
+                type: "plain_text",
+              },
               optional: true,
               type: "input",
             },
@@ -2013,11 +2404,11 @@ function buildSalesforcePdfWorkflowModal(input: {
               block_id: SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_BLOCK_ID,
               element: {
                 action_id: SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_ACTION_ID,
-                initial_option: aiSummaryOption ?? salesforcePdfWorkflowAiSummaryOptions[0],
-                options: salesforcePdfWorkflowAiSummaryOptions,
+                initial_option: aiSummaryOption ?? aiSummaryOptions[0],
+                options: aiSummaryOptions,
                 type: "static_select",
               },
-              label: { text: "AI summary", type: "plain_text" },
+              label: { text: translator.t("salesforcePdf.label.aiSummary"), type: "plain_text" },
               type: "input",
             },
           ]
@@ -2030,7 +2421,7 @@ function buildSalesforcePdfWorkflowModal(input: {
           placeholder: { text: "AccountId, Amount, CloseDate", type: "plain_text" },
           type: "plain_text_input",
         },
-        label: { text: "Required fields", type: "plain_text" },
+        label: { text: translator.t("salesforcePdf.label.requiredFields"), type: "plain_text" },
         optional: true,
         type: "input",
       },
@@ -2047,7 +2438,10 @@ function buildSalesforcePdfWorkflowModal(input: {
           placeholder: { text: "New Business, Renewal", type: "plain_text" },
           type: "plain_text_input",
         },
-        label: { text: "Allowed RecordTypes", type: "plain_text" },
+        label: {
+          text: translator.t("salesforcePdf.label.allowedRecordTypes"),
+          type: "plain_text",
+        },
         optional: true,
         type: "input",
       },
@@ -2055,22 +2449,22 @@ function buildSalesforcePdfWorkflowModal(input: {
         block_id: SALESFORCE_PDF_WORKFLOW_ATTACH_TO_BLOCK_ID,
         element: {
           action_id: SALESFORCE_PDF_WORKFLOW_ATTACH_TO_ACTION_ID,
-          initial_option: attachOption ?? salesforcePdfWorkflowAttachTargetOptions[0],
-          options: salesforcePdfWorkflowAttachTargetOptions,
+          initial_option: attachOption ?? attachTargetOptions[0],
+          options: attachTargetOptions,
           type: "static_select",
         },
-        label: { text: "Attach to", type: "plain_text" },
+        label: { text: translator.t("salesforcePdf.label.attachTo"), type: "plain_text" },
         type: "input",
       },
       {
         block_id: SALESFORCE_PDF_WORKFLOW_CONFIRMATION_BLOCK_ID,
         element: {
           action_id: SALESFORCE_PDF_WORKFLOW_CONFIRMATION_ACTION_ID,
-          initial_option: confirmationOption ?? salesforcePdfWorkflowConfirmationOptions[0],
-          options: salesforcePdfWorkflowConfirmationOptions,
+          initial_option: confirmationOption ?? confirmationOptions[0],
+          options: confirmationOptions,
           type: "static_select",
         },
-        label: { text: "Attachment confirmation", type: "plain_text" },
+        label: { text: translator.t("salesforcePdf.label.confirmation"), type: "plain_text" },
         type: "input",
       },
       {
@@ -2085,7 +2479,7 @@ function buildSalesforcePdfWorkflowModal(input: {
           placeholder: { text: '{"customerName":"Account.Name"}', type: "plain_text" },
           type: "plain_text_input",
         },
-        label: { text: "Field mapping JSON", type: "plain_text" },
+        label: { text: translator.t("salesforcePdf.label.fieldMapping"), type: "plain_text" },
         optional: true,
         type: "input",
       },
@@ -2096,9 +2490,10 @@ function buildSalesforcePdfWorkflowModal(input: {
 function buildSalesforcePdfWorkflowResultModal(
   title: string,
   text: string,
+  translator: Translator = defaultTranslator,
 ): Record<string, unknown> {
   return {
-    close: { text: "Close", type: "plain_text" },
+    close: { text: translator.t("common.close"), type: "plain_text" },
     title: { text: title, type: "plain_text" },
     type: "modal",
     blocks: [
@@ -2119,7 +2514,7 @@ async function updateSalesforcePdfWorkflowModal(
   modal: Record<string, unknown>,
   logger: unknown,
 ): Promise<void> {
-  const viewId = readString(view as unknown as StringIndexed, "id");
+  const viewId = isRecord(view) ? readString(view, "id") : undefined;
   if (viewId === undefined) {
     logWarn(logger, "Could not update Salesforce PDF workflow modal without Slack view id.", {});
     return;
@@ -2140,7 +2535,7 @@ async function updateWorkspaceCredentialModal(
   modal: Record<string, unknown>,
   logger: unknown,
 ): Promise<void> {
-  const viewId = readString(view as unknown as StringIndexed, "id");
+  const viewId = isRecord(view) ? readString(view, "id") : undefined;
   if (viewId === undefined) {
     logWarn(logger, "Could not update API key modal without Slack view id.", {});
     return;
@@ -2155,7 +2550,10 @@ async function updateWorkspaceCredentialModal(
   }
 }
 
-function parseWorkspaceCredentialModal(view: unknown):
+function parseWorkspaceCredentialModal(
+  view: unknown,
+  translator: Translator = defaultTranslator,
+):
   | {
       apiKey: string;
       baseURL?: string;
@@ -2201,15 +2599,17 @@ function parseWorkspaceCredentialModal(view: unknown):
   )?.trim();
   const errors: Record<string, string> = {};
   if (providerKind === undefined) {
-    errors[WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID] = "Choose a supported provider.";
+    errors[WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID] = translator.t(
+      "credential.error.chooseProvider",
+    );
   }
   if (apiKey === undefined || apiKey === "") {
     errors[WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID] =
       providerSelection === "google_service_account_json"
-        ? "Enter a service account JSON object."
+        ? translator.t("credential.error.serviceAccountJsonRequired")
         : providerKind === "soracom"
-          ? "Enter an AuthKey Secret."
-          : "Enter an API key.";
+          ? translator.t("credential.error.authKeySecretRequired")
+          : translator.t("credential.error.apiKeyRequired");
   }
   const googleServiceAccount =
     providerSelection === "google_service_account_json"
@@ -2221,15 +2621,20 @@ function parseWorkspaceCredentialModal(view: unknown):
     apiKey !== "" &&
     googleServiceAccount === undefined
   ) {
-    errors[WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID] =
-      "Enter valid Google service account JSON with client_email and private_key.";
+    errors[WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID] = translator.t(
+      "credential.error.invalidServiceAccountJson",
+    );
   }
   if (providerKind === "soracom") {
     if (soracomAuthKeyId === undefined || soracomAuthKeyId === "") {
-      errors[WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID] = "Enter an AuthKey ID.";
+      errors[WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID] = translator.t(
+        "credential.error.authKeyIdRequired",
+      );
     }
     if (soracomCoverage !== "global" && soracomCoverage !== "japan") {
-      errors[WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID] = "Choose Global or Japan coverage.";
+      errors[WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID] = translator.t(
+        "credential.error.chooseCoverage",
+      );
     }
   }
   if (
@@ -2238,7 +2643,9 @@ function parseWorkspaceCredentialModal(view: unknown):
     baseURL !== "" &&
     !isHttpUrl(baseURL)
   ) {
-    errors[WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID] = "Enter a valid http or https URL.";
+    errors[WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID] = translator.t(
+      "credential.error.invalidBaseUrl",
+    );
   }
   if (Object.keys(errors).length > 0) {
     return { errors };
@@ -2282,7 +2689,10 @@ function parseWorkspaceCredentialModal(view: unknown):
   };
 }
 
-function parseSalesforcePdfWorkflowModal(view: unknown):
+function parseSalesforcePdfWorkflowModal(
+  view: unknown,
+  translator: Translator = defaultTranslator,
+):
   | {
       allowedRecordTypeIds: string[];
       allowedRecordTypeNames: string[];
@@ -2337,23 +2747,33 @@ function parseSalesforcePdfWorkflowModal(view: unknown):
       SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_BLOCK_ID,
       SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_ACTION_ID,
     ),
+    translator,
   );
   const errors: Record<string, string> = {};
   if (enabled === undefined) {
-    errors[SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID] = "Choose whether this workflow is enabled.";
+    errors[SALESFORCE_PDF_WORKFLOW_ENABLED_BLOCK_ID] = translator.t(
+      "salesforcePdf.error.enabledRequired",
+    );
   }
   if (templateId === undefined || templateId === "") {
-    errors[SALESFORCE_PDF_WORKFLOW_TEMPLATE_BLOCK_ID] = "Enter a template ID.";
+    errors[SALESFORCE_PDF_WORKFLOW_TEMPLATE_BLOCK_ID] = translator.t(
+      "salesforcePdf.error.templateRequired",
+    );
   }
   if (!attachTo.success) {
-    errors[SALESFORCE_PDF_WORKFLOW_ATTACH_TO_BLOCK_ID] = "Choose a supported attachment target.";
+    errors[SALESFORCE_PDF_WORKFLOW_ATTACH_TO_BLOCK_ID] = translator.t(
+      "salesforcePdf.error.attachTargetRequired",
+    );
   }
   if (requireConfirmationBeforeAttach === undefined) {
-    errors[SALESFORCE_PDF_WORKFLOW_CONFIRMATION_BLOCK_ID] =
-      "Choose whether attachment confirmation is required.";
+    errors[SALESFORCE_PDF_WORKFLOW_CONFIRMATION_BLOCK_ID] = translator.t(
+      "salesforcePdf.error.confirmationRequired",
+    );
   }
   if (includeAiSummary === undefined) {
-    errors[SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_BLOCK_ID] = "Choose whether AI summary is enabled.";
+    errors[SALESFORCE_PDF_WORKFLOW_AI_SUMMARY_BLOCK_ID] = translator.t(
+      "salesforcePdf.error.summaryRequired",
+    );
   }
   if ("error" in fieldMapping) {
     errors[SALESFORCE_PDF_WORKFLOW_FIELD_MAPPING_BLOCK_ID] = fieldMapping.error;
@@ -2426,6 +2846,7 @@ function parseExistingSalesforcePdfWorkflowSetting(
 
 function parseFieldMapping(
   raw: string | undefined,
+  translator: Translator = defaultTranslator,
 ): { value: Record<string, string> } | { error: string } {
   const text = raw?.trim();
   if (text === undefined || text === "") {
@@ -2434,18 +2855,18 @@ function parseFieldMapping(
   try {
     const parsed = JSON.parse(text) as unknown;
     if (!isRecord(parsed)) {
-      return { error: "Enter a JSON object." };
+      return { error: translator.t("salesforcePdf.error.fieldMappingObject") };
     }
     const mapping: Record<string, string> = {};
     for (const [key, value] of Object.entries(parsed)) {
       if (typeof value !== "string" || key.trim() === "" || value.trim() === "") {
-        return { error: "Field mapping values must be non-empty strings." };
+        return { error: translator.t("salesforcePdf.error.fieldMappingStringValues") };
       }
       mapping[key.trim()] = value.trim();
     }
     return { value: mapping };
   } catch {
-    return { error: "Enter valid JSON." };
+    return { error: translator.t("salesforcePdf.error.fieldMappingJson") };
   }
 }
 
@@ -2476,6 +2897,31 @@ function parseWorkspaceCredentialProviderSelection(
   return workspaceCredentialProviderOptions.find((option) => option.value === value)?.value;
 }
 
+function parseWorkspaceCredentialModalMetadata(
+  value: string | undefined,
+): { enterpriseId?: string; locale?: Locale; teamId: string } | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) {
+      return value.trim() === "" ? undefined : { teamId: value };
+    }
+    const teamId = readOptionalString(parsed.teamId);
+    const enterpriseId = readOptionalString(parsed.enterpriseId);
+    return teamId === undefined
+      ? undefined
+      : {
+          enterpriseId,
+          locale: normalizeLocale(readOptionalString(parsed.locale)),
+          teamId,
+        };
+  } catch {
+    return value.trim() === "" ? undefined : { teamId: value };
+  }
+}
+
 function parseGoogleServiceAccountCredentialJson(
   value: string | undefined,
 ): { project_id?: string } | undefined {
@@ -2497,31 +2943,6 @@ function parseGoogleServiceAccountCredentialJson(
     return undefined;
   }
   return { project_id: readString(parsed, "project_id") };
-}
-
-async function isWorkspaceAdmin(
-  client: SlackClient,
-  slackUserId: string,
-  logger: unknown,
-): Promise<boolean> {
-  try {
-    const response = await client.users.info({ user: slackUserId });
-    const user = response.user;
-    if (!isRecord(user)) {
-      return false;
-    }
-    return (
-      readBoolean(user, "is_admin") === true ||
-      readBoolean(user, "is_owner") === true ||
-      readBoolean(user, "is_primary_owner") === true
-    );
-  } catch (error) {
-    logWarn(logger, "Failed to verify Slack workspace admin status.", {
-      error,
-      slackUserId,
-    });
-    return false;
-  }
 }
 
 function readSlackUserId(body: unknown): string | undefined {
@@ -2569,6 +2990,8 @@ function parseSalesforcePdfWorkflowActionValue(
 function parseSalesforcePdfWorkflowModalMetadata(value: string | undefined):
   | {
       action: SalesforcePdfWorkflowAction;
+      enterpriseId?: string;
+      locale?: Locale;
       salesforceOrgId: string;
       teamId: string;
     }
@@ -2582,11 +3005,13 @@ function parseSalesforcePdfWorkflowModalMetadata(value: string | undefined):
       return undefined;
     }
     const action = parseSalesforcePdfWorkflowAction(readOptionalString(parsed.action));
+    const enterpriseId = readOptionalString(parsed.enterpriseId);
+    const locale = normalizeLocale(readOptionalString(parsed.locale));
     const salesforceOrgId = readOptionalString(parsed.salesforceOrgId);
     const teamId = readOptionalString(parsed.teamId);
     return action === undefined || salesforceOrgId === undefined || teamId === undefined
       ? undefined
-      : { action, salesforceOrgId, teamId };
+      : { action, enterpriseId, locale, salesforceOrgId, teamId };
   } catch {
     return undefined;
   }
@@ -2776,8 +3201,22 @@ function readBodyString(value: unknown, field: string): string | undefined {
 
 function readSlackEnterpriseId(body: unknown): string | undefined {
   return (
-    readBodyString(body, "enterprise_id") ?? readFirstAuthorizationString(body, "enterprise_id")
+    readBodyString(body, "enterprise_id") ??
+    readNestedString(body, "enterprise", "id") ??
+    readFirstAuthorizationString(body, "enterprise_id")
   );
+}
+
+function readNestedString(
+  value: unknown,
+  parentField: string,
+  childField: string,
+): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const parent = value[parentField];
+  return isRecord(parent) ? readString(parent, childField) : undefined;
 }
 
 function readSlackEnterpriseInstall(body: unknown): boolean | undefined {

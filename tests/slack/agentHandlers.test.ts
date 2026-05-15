@@ -141,6 +141,7 @@ describe("createAgentSlackHandlers", () => {
 
   it("opens the Salesforce PDF workflow modal for Slack workspace admins", async () => {
     const openedViews: unknown[] = [];
+    const updatedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       salesforcePdfWorkflowHome: {
         repository: {
@@ -170,6 +171,10 @@ describe("createAgentSlackHandlers", () => {
         views: {
           open: async (payload: unknown) => {
             openedViews.push(payload);
+            return { view: { id: "VIEW1" } };
+          },
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
             return {};
           },
         },
@@ -181,23 +186,102 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         trigger_id: "TRIGGER1",
         view: expect.objectContaining({
-          callback_id: "salesforce_pdf_workflow_modal",
-          private_metadata: JSON.stringify({
-            action: "quote_pdf",
-            salesforceOrgId: "00DORG",
-            teamId: "T1",
-          }),
+          type: "modal",
         }),
       }),
     ]);
-    expect(JSON.stringify(openedViews[0])).toContain("quote_v1");
-    expect(JSON.stringify(openedViews[0])).toContain("012000000000001AAA");
+    expect(updatedViews).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({
+          callback_id: "salesforce_pdf_workflow_modal",
+          private_metadata: expect.stringContaining('"teamId":"T1"'),
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(updatedViews[0])).toContain("quote_v1");
+    expect(JSON.stringify(updatedViews[0])).toContain("012000000000001AAA");
+  });
+
+  it("opens Salesforce PDF workflow modals before resolving stored user locale", async () => {
+    const openedViews: unknown[] = [];
+    const updatedViews: unknown[] = [];
+    let userInfoCalls = 0;
+    const handlers = createAgentSlackHandlers({} as never, {
+      defaultLocale: "ja",
+      salesforcePdfWorkflowHome: {
+        repository: {
+          async findSalesforcePdfWorkflowSetting(): Promise<JsonObject> {
+            expect(openedViews).toHaveLength(1);
+            return validSalesforcePdfWorkflowSetting();
+          },
+          async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
+            return [];
+          },
+          async saveSalesforcePdfWorkflowSetting() {},
+        },
+      },
+      userSettingsRepository: {
+        async findUserSettings() {
+          expect(openedViews).toHaveLength(1);
+          return {
+            createdAt: new Date("2026-05-15T00:00:00Z"),
+            locale: "en",
+            payload: {},
+            scopeId: "T1",
+            scopeKind: "team",
+            slackUserId: "UADMIN",
+            teamId: "T1",
+            updatedAt: new Date("2026-05-15T00:00:00Z"),
+          };
+        },
+        async saveUserSettings() {},
+      },
+    });
+
+    await handlers.handleSalesforcePdfWorkflowConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [{ value: JSON.stringify({ action: "quote_pdf", salesforceOrgId: "00DORG" }) }],
+        enterprise: { id: "E1" },
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => {
+            expect(openedViews).toHaveLength(1);
+            userInfoCalls += 1;
+            return { user: { is_admin: true } };
+          },
+        },
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return { view: { id: "VIEW1" } };
+          },
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(userInfoCalls).toBe(1);
+    expect(JSON.stringify(openedViews[0])).toContain("ワークフロー設定を読み込んでいます");
+    expect(JSON.stringify(updatedViews[0])).toContain("Allowed stages");
+    expect(JSON.stringify(updatedViews[0])).toContain('\\"enterpriseId\\":\\"E1\\"');
   });
 
   it("saves Salesforce PDF workflow settings from modal submissions", async () => {
     const acks: unknown[] = [];
     const saves: unknown[] = [];
     const updates: unknown[] = [];
+    let userInfoCalls = 0;
+    let acked = false;
     const handlers = createAgentSlackHandlers({} as never, {
       salesforcePdfWorkflowHome: {
         repository: {
@@ -217,11 +301,16 @@ describe("createAgentSlackHandlers", () => {
     await handlers.handleSalesforcePdfWorkflowModalSubmission({
       ack: async (payload?: unknown) => {
         acks.push(payload);
+        acked = true;
       },
       body: { team: { id: "T1" }, user: { id: "UADMIN" } },
       client: {
         users: {
-          info: async () => ({ user: { is_owner: true } }),
+          info: async () => {
+            expect(acked).toBe(true);
+            userInfoCalls += 1;
+            return { user: { is_owner: true } };
+          },
         },
         views: {
           update: async (payload: unknown) => {
@@ -256,6 +345,7 @@ describe("createAgentSlackHandlers", () => {
       }),
     });
     expect(JSON.stringify(updates[0])).toContain("Quote PDF is enabled");
+    expect(userInfoCalls).toBe(1);
   });
 
   it("saves Deal Review Pack approval and AI summary settings from modal submissions", async () => {
@@ -460,13 +550,94 @@ describe("createAgentSlackHandlers", () => {
         trigger_id: "TRIGGER1",
         view: expect.objectContaining({
           callback_id: "workspace_credential_modal",
-          private_metadata: "T1",
+          private_metadata: expect.stringContaining('"teamId":"T1"'),
         }),
       }),
     ]);
     expect(JSON.stringify(openedViews[0])).toContain('"dispatch_action":true');
     expect(JSON.stringify(openedViews[0])).not.toContain("SORACOM AuthKey ID");
     expect(JSON.stringify(openedViews[0])).toContain("Base URL");
+  });
+
+  it("uses the configured default locale for API key modals", async () => {
+    const openedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      defaultLocale: "ja",
+      workspaceCredentialSettings: {
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialConfigureAction({
+      ack: async () => {},
+      body: { team: { id: "T1" }, trigger_id: "TRIGGER1", user: { id: "UADMIN" } },
+      client: {
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(openedViews[0]);
+    expect(serialized).toContain("認証情報");
+    expect(serialized).toContain("プロバイダー");
+    expect(serialized).not.toContain("Credentials");
+  });
+
+  it("uses the stored user locale when it is available", async () => {
+    const openedViews: unknown[] = [];
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      defaultLocale: "ja",
+      userSettingsRepository: {
+        async findUserSettings() {
+          return {
+            createdAt: new Date("2026-05-15T00:00:00Z"),
+            locale: "en",
+            payload: {},
+            scopeId: "T1",
+            scopeKind: "team",
+            slackUserId: "UADMIN",
+            teamId: "T1",
+            updatedAt: new Date("2026-05-15T00:00:00Z"),
+          };
+        },
+        async saveUserSettings() {},
+      },
+      workspaceCredentialSettings: {
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialConfigureAction({
+      ack: async () => {},
+      body: { team: { id: "T1" }, trigger_id: "TRIGGER1", user: { id: "UADMIN" } },
+      client: {
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return { view: { id: "VIEW1" } };
+          },
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const opened = JSON.stringify(openedViews[0]);
+    expect(opened).toContain("認証情報");
+    expect(opened).toContain("プロバイダー");
+    const updated = JSON.stringify(updatedViews[0]);
+    expect(updated).toContain("Credentials");
+    expect(updated).toContain("Provider");
+    expect(updated).not.toContain("認証情報");
   });
 
   it("updates the API key modal fields when SORACOM is selected", async () => {
@@ -503,7 +674,7 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         view_id: "VIEW1",
         view: expect.objectContaining({
-          private_metadata: "T1",
+          private_metadata: expect.stringContaining('"teamId":"T1"'),
         }),
       }),
     ]);
@@ -511,10 +682,48 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(updates[0])).not.toContain("Base URL");
   });
 
+  it("keeps the existing API key modal locale when provider selection changes", async () => {
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, { defaultLocale: "ja" });
+
+    await handlers.handleWorkspaceCredentialProviderSelectAction({
+      ack: async () => {},
+      body: {
+        view: {
+          id: "VIEW1",
+          private_metadata: JSON.stringify({ locale: "en", teamId: "T1" }),
+          state: {
+            values: {
+              workspace_credential_provider: {
+                provider_kind: { selected_option: { value: "soracom" } },
+              },
+            },
+          },
+        },
+      },
+      client: {
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updates[0]);
+    expect(serialized).toContain("Credentials");
+    expect(serialized).toContain("SORACOM AuthKey ID");
+    expect(serialized).not.toContain("認証情報");
+  });
+
   it("saves workspace provider API keys from modal submissions", async () => {
     const acks: unknown[] = [];
     const saves: unknown[] = [];
     const updates: unknown[] = [];
+    let userInfoCalls = 0;
+    let acked = false;
     const handlers = createAgentSlackHandlers({} as never, {
       workspaceCredentialSettings: {
         async saveProviderApiKey(input: unknown) {
@@ -526,11 +735,16 @@ describe("createAgentSlackHandlers", () => {
     await handlers.handleWorkspaceCredentialModalSubmission({
       ack: async (payload?: unknown) => {
         acks.push(payload);
+        acked = true;
       },
       body: { team: { id: "T1" }, user: { id: "UADMIN" } },
       client: {
         users: {
-          info: async () => ({ user: { is_owner: true } }),
+          info: async () => {
+            expect(acked).toBe(true);
+            userInfoCalls += 1;
+            return { user: { is_owner: true } };
+          },
         },
         views: {
           update: async (payload: unknown) => {
@@ -588,6 +802,7 @@ describe("createAgentSlackHandlers", () => {
         }),
       }),
     ]);
+    expect(userInfoCalls).toBe(1);
     expect(updates[0]).not.toHaveProperty("hash");
   });
 
@@ -1991,6 +2206,7 @@ describe("createAgentSlackHandlers", () => {
 
   it("does not route follow-up messages when thread auto-reply is disabled", async () => {
     let runs = 0;
+    let userInfoCalls = 0;
     const runner = {
       async run() {
         runs += 1;
@@ -2010,7 +2226,15 @@ describe("createAgentSlackHandlers", () => {
 
     await handlers.handleMessage({
       body: { team_id: "T1" },
-      client: { chat: { postMessage: async () => ({}) } },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        users: {
+          info: async () => {
+            userInfoCalls += 1;
+            return { user: { locale: "en-US" } };
+          },
+        },
+      },
       event: {
         channel: "C1",
         text: "follow-up",
@@ -2022,6 +2246,7 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(runs).toBe(0);
+    expect(userInfoCalls).toBe(0);
   });
 
   it("does not route follow-up messages when configured thread route is unavailable", async () => {

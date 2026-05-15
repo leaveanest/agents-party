@@ -38,7 +38,10 @@ const providerRouter = new ProviderRouter([
 const slackClients = createSlackWebClientProvider(settings, { pool });
 const processor = new RssFeedProcessor({
   articleContentFetcher: new ArticleContentGateway({ repository: rssRepository }),
-  articlePublisher: createSlackRssArticlePublisher({ clientProvider: slackClients }),
+  articlePublisher: createSlackRssArticlePublisher({
+    clientProvider: slackClients,
+    defaultLocale: settings.defaultLocale,
+  }),
   feedFetcher: new RssFeedFetchGateway({ repository: rssRepository }),
   logger: console,
   modelSettingsRepository: routingRepository,

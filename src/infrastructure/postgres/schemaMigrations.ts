@@ -333,4 +333,35 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         on salesforce_pdf_templates (team_id, salesforce_org_id, action, status);
     `,
   },
+  {
+    id: "20260515_0008",
+    name: "app_user_settings",
+    upSql: `
+      create table if not exists app_user_settings (
+        scope_kind text not null,
+        scope_id text not null,
+        enterprise_id text,
+        team_id text,
+        slack_user_id text not null,
+        locale text,
+        created_at timestamp with time zone not null,
+        updated_at timestamp with time zone not null,
+        updated_by_slack_user_id text,
+        payload jsonb not null default '{}'::jsonb,
+        primary key (scope_kind, scope_id, slack_user_id),
+        constraint ck_app_user_settings_scope_kind
+          check (scope_kind in ('enterprise', 'team')),
+        constraint ck_app_user_settings_scope
+          check (
+            (scope_kind = 'enterprise' and enterprise_id is not null and scope_id = enterprise_id)
+            or
+            (scope_kind = 'team' and enterprise_id is null and team_id is not null and scope_id = team_id)
+          ),
+        constraint ck_app_user_settings_locale
+          check (locale is null or locale in ('ja', 'en'))
+      );
+      create index if not exists ix_app_user_settings_updated_at
+        on app_user_settings (updated_at desc);
+    `,
+  },
 ];

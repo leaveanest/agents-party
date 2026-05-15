@@ -1,15 +1,20 @@
 import type { WebClient } from "@slack/web-api";
 
 import type { RssArticlePublisher, RssArticlePost } from "../agents/rssFeedProcessor.js";
+import { FALLBACK_LOCALE, createTranslator, type Locale } from "../i18n/index.js";
 import type { SlackWebClientProvider } from "./webClient.js";
 
 export function createSlackRssArticlePublisher(input: {
   clientProvider: Pick<SlackWebClientProvider, "forTeam">;
+  defaultLocale?: Locale;
 }): RssArticlePublisher {
   return {
     async publishFeedArticle(payload) {
       const client = await input.clientProvider.forTeam({ teamId: payload.teamId });
-      return publishFeedArticle(client, payload);
+      return publishFeedArticle(client, {
+        ...payload,
+        locale: input.defaultLocale ?? FALLBACK_LOCALE,
+      });
     },
   };
 }
@@ -20,12 +25,14 @@ async function publishFeedArticle(
     article: RssArticlePost;
     channelId: string;
     feedUrl: string;
+    locale: Locale;
     teamId: string;
   },
 ): Promise<string> {
+  const translator = createTranslator(input.locale);
   const parent = await client.chat.postMessage({
     channel: input.channelId,
-    text: `RSS updates: ${input.feedUrl}`,
+    text: translator.t("rss.parent", { feedUrl: input.feedUrl }),
   });
   const threadTs = stringField(parent, "ts");
   if (threadTs === undefined) {

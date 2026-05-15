@@ -11,6 +11,7 @@ describe("loadSettings", () => {
       appName: "Agents party",
       appPort: 8000,
       databaseUrl: undefined,
+      defaultLocale: "ja",
       redisUrl: undefined,
       imageGenerationModelId: "google:gemini-2.5-flash-image",
       llmApiKeyEncryptionKey: undefined,
@@ -65,6 +66,13 @@ describe("loadSettings", () => {
 
   it("prefers PORT over APP_PORT for platform deployments", () => {
     expect(loadSettings({ APP_PORT: "9000", PORT: "8080" }).appPort).toBe(8080);
+  });
+
+  it("reads the default display locale from APP_DEFAULT_LOCALE", () => {
+    expect(loadSettings({}).defaultLocale).toBe("ja");
+    expect(loadSettings({ APP_DEFAULT_LOCALE: "en" }).defaultLocale).toBe("en");
+    expect(loadSettings({ APP_DEFAULT_LOCALE: " " }).defaultLocale).toBe("ja");
+    expect(loadSettings({ APP_DEFAULT_LOCALE: "fr-FR" }).defaultLocale).toBe("ja");
   });
 
   it("allows the TypeScript AgentRunner model to be configured explicitly", () => {
