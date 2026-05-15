@@ -59,6 +59,14 @@ async function handleRequest(
   }
 
   if (isSlackRoute(url.pathname, settings)) {
+    logSlackIngress(request, url.pathname);
+    if (url.pathname === settings.slackEventsPath && method !== "POST") {
+      sendJson(response, 405, {
+        error: "method_not_allowed",
+        message: "Slack events endpoint only accepts POST requests.",
+      });
+      return;
+    }
     if (dependencies.slackGateway === undefined) {
       sendJson(response, 503, {
         error: "slack_not_configured",
@@ -100,6 +108,16 @@ function parseRequestUrl(rawUrl: string | undefined): URL | undefined {
   } catch {
     return undefined;
   }
+}
+
+function logSlackIngress(request: IncomingMessage, pathname: string): void {
+  console.info("Slack HTTP ingress received.", {
+    contentLength: request.headers["content-length"],
+    contentType: request.headers["content-type"],
+    method: request.method ?? "GET",
+    pathname,
+    userAgent: request.headers["user-agent"],
+  });
 }
 
 function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {

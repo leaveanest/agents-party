@@ -52,11 +52,19 @@ export type SlackInstallationLookup = {
   userId?: string;
 };
 
+export type SlackInstalledWorkspace = {
+  enterpriseId: string | undefined;
+  installedAt: Date;
+  teamId: string;
+  teamName: string | undefined;
+};
+
 export type SlackInstallationRepository = {
   deleteBot(lookup: SlackInstallationLookup): Promise<void>;
   deleteInstallation(lookup: SlackInstallationLookup): Promise<void>;
   findBot(lookup: SlackInstallationLookup): Promise<SlackBotRow | undefined>;
   findInstallation(lookup: SlackInstallationLookup): Promise<SlackInstallationRow | undefined>;
+  listInstalledWorkspaces(input: { enterpriseId?: string }): Promise<SlackInstalledWorkspace[]>;
   saveInstallationBundle(
     installation: SlackInstallationRow,
     bot: SlackBotRow | undefined,

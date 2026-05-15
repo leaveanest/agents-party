@@ -21,6 +21,7 @@ export type AgentDocument = PayloadDocument & {
 export type WorkspaceSettingsDocument = PayloadDocument & {
   defaultAgentId?: string;
   defaultModelId?: string;
+  enabledModelIds?: string[];
   teamId: string;
   threadAutoReply?: boolean;
   updatedAt: Date;
@@ -49,11 +50,19 @@ export type ResolvedAgentRouteDocument = {
   agent: JsonObject;
   agentId: string;
   channelId: string;
+  modelFallback?: ResolvedModelFallbackDocument;
   modelId?: string;
   modelScope?: AgentRouteScope;
   scope: AgentRouteScope;
   teamId: string;
   threadTs?: string;
+};
+
+export type ResolvedModelFallbackDocument = {
+  fromModelId: string;
+  fromScope: AgentRouteScope;
+  toModelId?: string;
+  toScope?: AgentRouteScope;
 };
 
 export type OAuthStateDocument = PayloadDocument & {
@@ -202,8 +211,8 @@ export class PostgresAgentRoutingRepository {
   async saveWorkspaceSettings(document: WorkspaceSettingsDocument): Promise<void> {
     await this.workspaceSettings.upsert({
       key: { team_id: document.teamId },
-      payload: settingsPayload(document),
-      values: settingsValues(document),
+      payload: workspaceSettingsPayload(document),
+      values: workspaceSettingsValues(document),
     });
   }
 
@@ -341,18 +350,31 @@ export class PostgresAgentRoutingRepository {
     if (agent === undefined || booleanField(agent, "enabled") !== true) {
       return undefined;
     }
+    const channelModelId = optionalStringField(channelSettings, "default_model_id");
+    const enabledModelIds = stringArrayField(workspaceSettings, "enabled_model_ids");
+    const threadModelId =
+      optionalStringField(activeThread, "model_scope") === "thread"
+        ? optionalStringField(activeThread, "model_id")
+        : undefined;
+    const workspaceModelId = optionalStringField(workspaceSettings, "default_model_id");
     const resolvedModel = resolveModelId({
-      channelModelId: optionalStringField(channelSettings, "default_model_id"),
-      threadModelId:
-        optionalStringField(activeThread, "model_scope") === "thread"
-          ? optionalStringField(activeThread, "model_id")
-          : undefined,
-      workspaceModelId: optionalStringField(workspaceSettings, "default_model_id"),
+      channelModelId,
+      enabledModelIds,
+      threadModelId,
+      workspaceModelId,
     });
+    if (
+      enabledModelIds.length > 0 &&
+      resolvedModel === undefined &&
+      [threadModelId, channelModelId, workspaceModelId].some((modelId) => modelId !== undefined)
+    ) {
+      return undefined;
+    }
     return {
       agent,
       agentId: resolved.agentId,
       channelId: input.channelId,
+      modelFallback: resolvedModel?.fallback,
       modelId: resolvedModel?.modelId,
       modelScope: resolvedModel?.scope,
       scope: resolved.scope,
@@ -638,17 +660,41 @@ function resolveAgentId(input: {
 
 function resolveModelId(input: {
   channelModelId?: string;
+  enabledModelIds?: readonly string[];
   threadModelId?: string;
   workspaceModelId?: string;
-}): { modelId: string; scope: AgentRouteScope } | undefined {
-  if (input.threadModelId !== undefined) {
-    return { modelId: input.threadModelId, scope: "thread" };
+}):
+  | { fallback?: ResolvedModelFallbackDocument; modelId: string; scope: AgentRouteScope }
+  | undefined {
+  const candidates: Array<{ modelId?: string; scope: AgentRouteScope }> = [
+    { modelId: input.threadModelId, scope: "thread" },
+    { modelId: input.channelModelId, scope: "channel" },
+    { modelId: input.workspaceModelId, scope: "workspace" },
+  ];
+  const configuredCandidates = candidates.filter(
+    (candidate): candidate is { modelId: string; scope: AgentRouteScope } =>
+      candidate.modelId !== undefined,
+  );
+  const enabledModelIds = new Set(input.enabledModelIds ?? []);
+  if (enabledModelIds.size === 0) {
+    return configuredCandidates[0];
   }
-  if (input.channelModelId !== undefined) {
-    return { modelId: input.channelModelId, scope: "channel" };
-  }
-  if (input.workspaceModelId !== undefined) {
-    return { modelId: input.workspaceModelId, scope: "workspace" };
+  let fallbackFrom: { modelId: string; scope: AgentRouteScope } | undefined;
+  for (const candidate of configuredCandidates) {
+    if (enabledModelIds.has(candidate.modelId)) {
+      return fallbackFrom === undefined
+        ? candidate
+        : {
+            ...candidate,
+            fallback: {
+              fromModelId: fallbackFrom.modelId,
+              fromScope: fallbackFrom.scope,
+              toModelId: candidate.modelId,
+              toScope: candidate.scope,
+            },
+          };
+    }
+    fallbackFrom ??= candidate;
   }
   return undefined;
 }
@@ -724,6 +770,13 @@ function settingsValues(document: WorkspaceSettingsDocument): PostgresColumnValu
   };
 }
 
+function workspaceSettingsValues(document: WorkspaceSettingsDocument): PostgresColumnValues {
+  return {
+    ...settingsValues(document),
+    enabled_model_ids: document.enabledModelIds ?? [],
+  };
+}
+
 function agentPayload(document: AgentDocument): JsonObject {
   const payload: JsonObject = { ...document.payload };
   delete payload.agent_id;
@@ -739,12 +792,19 @@ function settingsPayload(document: WorkspaceSettingsDocument): JsonObject {
   const payload: JsonObject = { ...document.payload };
   delete payload.default_agent_id;
   delete payload.default_model_id;
+  delete payload.enabled_model_ids;
   delete payload.thread_auto_reply;
   delete payload.updated_at;
   assignIfDefined(payload, "default_agent_id", document.defaultAgentId);
   assignIfDefined(payload, "default_model_id", document.defaultModelId);
   assignIfDefined(payload, "thread_auto_reply", document.threadAutoReply);
   assignIfDefined(payload, "updated_at", document.updatedAt.toISOString());
+  return payload;
+}
+
+function workspaceSettingsPayload(document: WorkspaceSettingsDocument): JsonObject {
+  const payload = settingsPayload(document);
+  assignIfDefined(payload, "enabled_model_ids", document.enabledModelIds);
   return payload;
 }
 

@@ -13,6 +13,7 @@ describe("Postgres app repositories", () => {
     await new PostgresAgentRoutingRepository(pool as never).saveWorkspaceSettings({
       defaultAgentId: "triage",
       defaultModelId: "google:gemini-2.5-flash",
+      enabledModelIds: ["google:gemini-2.5-flash"],
       payload: { defaultAgentId: "triage" },
       teamId: "T1",
       threadAutoReply: true,
@@ -34,7 +35,29 @@ describe("Postgres app repositories", () => {
     expect(JSON.parse(String(pool.queries[0]?.values?.at(-1)))).toMatchObject({
       default_agent_id: "triage",
       default_model_id: "google:gemini-2.5-flash",
+      enabled_model_ids: ["google:gemini-2.5-flash"],
       thread_auto_reply: true,
+    });
+  });
+
+  it("keeps enabled model ids workspace-only when channel settings are saved", async () => {
+    const pool = new RecordingPool();
+    const repository = new PostgresAgentRoutingRepository(pool as never);
+
+    await repository.saveChannelSettings({
+      channelId: "C1",
+      defaultModelId: "google:gemini-2.5-flash",
+      payload: { enabled_model_ids: ["should-not-persist"], untouched: "keep" },
+      teamId: "T1",
+      updatedAt: new Date("2026-05-11T00:00:00Z"),
+    });
+
+    expect(pool.queries[0]?.text).toContain('insert into "channel_app_settings"');
+    expect(pool.queries[0]?.text).not.toContain("enabled_model_ids");
+    expect(JSON.parse(String(pool.queries[0]?.values?.at(-1)))).toEqual({
+      default_model_id: "google:gemini-2.5-flash",
+      untouched: "keep",
+      updated_at: "2026-05-11T00:00:00.000Z",
     });
   });
 
@@ -319,6 +342,71 @@ describe("Postgres app repositories", () => {
         modelScope: "workspace",
       }),
     );
+  });
+
+  it("falls back to the next enabled upper model when a lower route is disabled", async () => {
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: {} },
+          {
+            payload: {
+              default_agent_id: "workspace",
+              default_model_id: "workspace-model",
+              enabled_model_ids: ["workspace-model"],
+            },
+          },
+          { payload: { default_model_id: "disabled-channel-model" } },
+          {
+            payload: {
+              agent_id: "workspace",
+              model_id: "disabled-thread-model",
+              model_scope: "thread",
+              status: "active",
+            },
+          },
+          { payload: { agent_id: "workspace", enabled: true } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        modelFallback: {
+          fromModelId: "disabled-thread-model",
+          fromScope: "thread",
+          toModelId: "workspace-model",
+          toScope: "workspace",
+        },
+        modelId: "workspace-model",
+        modelScope: "workspace",
+      }),
+    );
+  });
+
+  it("fails closed when configured models are all disabled by the workspace allowlist", async () => {
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: {} },
+          {
+            payload: {
+              default_agent_id: "workspace",
+              default_model_id: "disabled-workspace-model",
+              enabled_model_ids: ["other-model"],
+            },
+          },
+          { payload: { default_model_id: "disabled-channel-model" } },
+          {
+            payload: {
+              agent_id: "workspace",
+              model_id: "disabled-thread-model",
+              model_scope: "thread",
+              status: "active",
+            },
+          },
+          { payload: { agent_id: "workspace", enabled: true } },
+        ]) as never,
+      ).resolveAgent({ channelId: "C1", teamId: "T1", threadTs: "1.0" }),
+    ).resolves.toBeUndefined();
   });
 
   it("ignores inactive thread agent and model routes", async () => {

@@ -3,6 +3,11 @@ export const englishTranslations = {
   "appHome.apiKeys.title": "API keys",
   "appHome.configure": "Configure",
   "appHome.intro": "Mention the app in a channel or thread to talk to the assistant.",
+  "appHome.modelRouting.body":
+    "Choose which models are available and the default model for this workspace.",
+  "appHome.modelRouting.bodyGrid":
+    "Choose which models are available and the default model for an installed workspace. Installed workspaces: {{count}}.",
+  "appHome.modelRouting.title": "Model routing",
   "appHome.salesforce.connect": "Connect",
   "appHome.salesforce.connected": "Connected",
   "appHome.salesforce.connectedAs": "Connected as {{account}}",
@@ -51,6 +56,27 @@ export const englishTranslations = {
   "credential.title.apiKey": "API key",
   "credential.title.saved": "API key saved",
   "credential.unavailable": "API key storage is not configured for this app process.",
+  "modelRouting.modal.intro":
+    "Model routing controls are being prepared for this workspace. The selected workspace context is preserved for save.",
+  "modelRouting.modal.defaultModel": "Workspace default model",
+  "modelRouting.modal.defaultModelPlaceholder": "Choose a default model",
+  "modelRouting.modal.enabledModels": "Enabled models",
+  "modelRouting.modal.enabledModelsPlaceholder": "Choose enabled models",
+  "modelRouting.modal.workspace": "Workspace",
+  "modelRouting.modal.workspacePlaceholder": "Choose a workspace",
+  "modelRouting.error.defaultNotEnabled": "Choose a default model from the enabled models.",
+  "modelRouting.error.enabledModelsRequired":
+    "Choose at least one enabled model and a default model.",
+  "modelRouting.error.notConfigured": "Model routing settings are not configured.",
+  "modelRouting.error.saveFailed": "Could not save model routing settings. Try again later.",
+  "modelRouting.error.unauthorized":
+    "Only Slack workspace admins and owners can configure model routing.",
+  "modelRouting.fallback.notice":
+    "The previously selected {{fromScope}} model {{fromModelId}} is no longer enabled. This thread is now using the {{toScope}} model {{toModelId}}.",
+  "modelRouting.result.loading": "Loading model routing settings...",
+  "modelRouting.result.saved": "Model routing settings were saved.",
+  "modelRouting.result.saving": "Saving model routing settings...",
+  "modelRouting.title": "Model routing",
   "rss.parent": "RSS updates: {{feedUrl}}",
   "salesforcePdf.attachTarget.both": "Quote and Opportunity",
   "salesforcePdf.attachTarget.opportunity": "Opportunity",
@@ -104,6 +130,11 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "appHome.configure": "設定",
   "appHome.intro":
     "チャンネルまたはスレッドでアプリにメンションすると、アシスタントと会話できます。",
+  "appHome.modelRouting.body":
+    "このワークスペースで利用可能なモデルとデフォルトモデルを選択します。",
+  "appHome.modelRouting.bodyGrid":
+    "インストール済みワークスペースごとに、利用可能なモデルとデフォルトモデルを選択します。インストール済みワークスペース: {{count}}。",
+  "appHome.modelRouting.title": "モデルルーティング",
   "appHome.salesforce.connect": "接続",
   "appHome.salesforce.connected": "接続済み",
   "appHome.salesforce.connectedAs": "{{account}} として接続済み",
@@ -155,6 +186,28 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "credential.title.apiKey": "APIキー",
   "credential.title.saved": "APIキーを保存しました",
   "credential.unavailable": "このアプリプロセスではAPIキー保存が設定されていません。",
+  "modelRouting.modal.intro":
+    "このワークスペース向けのモデルルーティング設定を準備中です。保存に使うワークスペース文脈は保持されています。",
+  "modelRouting.modal.defaultModel": "ワークスペースのデフォルトモデル",
+  "modelRouting.modal.defaultModelPlaceholder": "デフォルトモデルを選択",
+  "modelRouting.modal.enabledModels": "有効なモデル",
+  "modelRouting.modal.enabledModelsPlaceholder": "有効にするモデルを選択",
+  "modelRouting.modal.workspace": "ワークスペース",
+  "modelRouting.modal.workspacePlaceholder": "ワークスペースを選択",
+  "modelRouting.error.defaultNotEnabled": "デフォルトモデルは有効モデルの中から選択してください。",
+  "modelRouting.error.enabledModelsRequired":
+    "少なくとも1つの有効モデルとデフォルトモデルを選択してください。",
+  "modelRouting.error.notConfigured": "モデルルーティング設定は構成されていません。",
+  "modelRouting.error.saveFailed":
+    "モデルルーティング設定を保存できませんでした。時間をおいて再試行してください。",
+  "modelRouting.error.unauthorized":
+    "モデルルーティングを設定できるのはSlackワークスペースの管理者またはオーナーのみです。",
+  "modelRouting.fallback.notice":
+    "以前選択されていた{{fromScope}}モデル {{fromModelId}} は無効になっています。このスレッドでは{{toScope}}モデル {{toModelId}} を使用します。",
+  "modelRouting.result.loading": "モデルルーティング設定を読み込んでいます...",
+  "modelRouting.result.saved": "モデルルーティング設定を保存しました。",
+  "modelRouting.result.saving": "モデルルーティング設定を保存しています...",
+  "modelRouting.title": "モデルルーティング",
   "rss.parent": "RSS更新: {{feedUrl}}",
   "salesforcePdf.attachTarget.both": "QuoteとOpportunity",
   "salesforcePdf.attachTarget.opportunity": "Opportunity",

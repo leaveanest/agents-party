@@ -43,6 +43,28 @@ class InMemorySlackInstallationRepository implements SlackInstallationRepository
     );
   }
 
+  async listInstalledWorkspaces(input: { enterpriseId?: string }) {
+    const latestByTeam = new Map<string, SlackBotRow>();
+    for (const bot of this.bots) {
+      if (bot.teamId === undefined || bot.botToken === undefined) {
+        continue;
+      }
+      if (bot.enterpriseId !== input.enterpriseId) {
+        continue;
+      }
+      const current = latestByTeam.get(bot.teamId);
+      if (current === undefined || current.installedAt < bot.installedAt) {
+        latestByTeam.set(bot.teamId, bot);
+      }
+    }
+    return [...latestByTeam.values()].map((bot) => ({
+      enterpriseId: bot.enterpriseId,
+      installedAt: bot.installedAt,
+      teamId: bot.teamId ?? "",
+      teamName: bot.teamName,
+    }));
+  }
+
   async deleteInstallation(lookup: SlackInstallationLookup): Promise<void> {
     this.installations.splice(
       0,

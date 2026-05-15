@@ -17,6 +17,14 @@ export const WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID =
   "workspace_credential_soracom_operator";
 export const WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID = "operator_id";
 
+export const MODEL_ROUTING_CONFIGURE_ACTION_ID = "model_routing_configure";
+export const MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID = "model_routing_workspace_select";
+export const MODEL_ROUTING_MODAL_CALLBACK_ID = "model_routing_modal";
+export const MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID = "model_routing_default_model";
+export const MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID = "default_model";
+export const MODEL_ROUTING_ENABLED_MODELS_BLOCK_ID = "model_routing_enabled_models";
+export const MODEL_ROUTING_ENABLED_MODELS_ACTION_ID = "enabled_models";
+
 export const SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID = "salesforce_pdf_workflow_configure";
 export const SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID = "salesforce_pdf_workflow_modal";
 
