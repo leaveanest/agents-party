@@ -24,7 +24,6 @@ oauth_config:
       - mpim:history
       - reactions:read
       - users:read
-      - views:write
 settings:
   event_subscriptions:
     request_url: https://agents-party.example.com/slack/events
