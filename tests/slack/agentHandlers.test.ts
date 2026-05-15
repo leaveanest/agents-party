@@ -502,11 +502,24 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).not.toContain("Credentials");
   });
 
-  it("uses the Slack user locale when it is available", async () => {
+  it("uses the stored user locale when it is available", async () => {
     const openedViews: unknown[] = [];
     const updatedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       defaultLocale: "ja",
+      userSettingsRepository: {
+        async findUserSettings() {
+          return {
+            createdAt: new Date("2026-05-15T00:00:00Z"),
+            locale: "en",
+            payload: {},
+            slackUserId: "UADMIN",
+            teamId: "T1",
+            updatedAt: new Date("2026-05-15T00:00:00Z"),
+          };
+        },
+        async saveUserSettings() {},
+      },
       workspaceCredentialSettings: {
         async saveProviderApiKey() {},
       },
@@ -516,12 +529,6 @@ describe("createAgentSlackHandlers", () => {
       ack: async () => {},
       body: { team: { id: "T1" }, trigger_id: "TRIGGER1", user: { id: "UADMIN" } },
       client: {
-        users: {
-          info: async () => {
-            expect(openedViews).toHaveLength(1);
-            return { user: { locale: "en-US" } };
-          },
-        },
         views: {
           open: async (payload: unknown) => {
             openedViews.push(payload);

@@ -9,6 +9,7 @@ import {
   PostgresOAuthRepository,
   PostgresSalesforcePdfWorkflowRepository,
 } from "./infrastructure/postgres/appRepositories.js";
+import { PostgresUserSettingsRepository } from "./infrastructure/postgres/userSettingsRepository.js";
 import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createBullMqSlackAgentJobWorker } from "./queues/slackAgentJobs.js";
@@ -29,6 +30,7 @@ const pool = new Pool({ connectionString: settings.databaseUrl });
 const routingRepository = new PostgresAgentRoutingRepository(pool);
 const oauthRepository = new PostgresOAuthRepository(pool);
 const salesforcePdfWorkflowRepository = new PostgresSalesforcePdfWorkflowRepository(pool);
+const userSettingsRepository = new PostgresUserSettingsRepository(pool);
 const workspaceCredentialResolver =
   settings.llmApiKeyEncryptionKey === undefined
     ? undefined
@@ -69,6 +71,7 @@ const worker = createBullMqSlackAgentJobWorker(settings.redisUrl, async (job, co
     retryContext: context,
     routingRepository,
     runner,
+    userSettingsRepository,
   });
 });
 

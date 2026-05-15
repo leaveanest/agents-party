@@ -37,6 +37,7 @@ import {
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import type { TranscriptionGateway } from "../providers/transcriptionGateway.js";
 import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
+import type { UserSettingsRepository } from "../repositories/userSettings.js";
 import {
   SlackAudioProcessingError,
   hasSlackAudioFiles,
@@ -86,7 +87,7 @@ import {
   WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
   WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
 } from "./interactiveIds.js";
-import { resolveSlackUserTranslator } from "./userLocale.js";
+import { resolveUserSettingsTranslator } from "./userLocale.js";
 
 type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & AllMiddlewareArgs;
 type SlackActionArgs = SlackActionMiddlewareArgs & AllMiddlewareArgs;
@@ -219,6 +220,7 @@ export type AgentSlackHandlerOptions = {
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
   salesforcePdfWorkflowHome?: SalesforcePdfWorkflowHome;
+  userSettingsRepository?: UserSettingsRepository;
   workspaceCredentialSettings?: WorkspaceCredentialSettingsHome;
 };
 
@@ -237,8 +239,8 @@ export function createAgentSlackHandlers(
         logger.warn("Ignoring app_home_opened without a Slack user id.");
         return;
       }
-      const translator = await resolveHandlerTranslator(client, event.user, options, logger);
       const teamId = readTeamId(body, event);
+      const translator = await resolveHandlerTranslator(teamId, event.user, options, logger);
       const blocks = await buildAppHomeBlocks({
         logger,
         options,
@@ -476,7 +478,9 @@ async function handleWorkspaceCredentialConfigureAction(
       logger,
       response,
       slackUserId,
+      teamId,
       translator,
+      userSettingsRepository: options.userSettingsRepository,
       view: buildWorkspaceCredentialUnavailableModal,
     });
     return;
@@ -490,7 +494,9 @@ async function handleWorkspaceCredentialConfigureAction(
     logger,
     response,
     slackUserId,
+    teamId,
     translator,
+    userSettingsRepository: options.userSettingsRepository,
     view: (localizedTranslator) =>
       buildWorkspaceCredentialModal(teamId, "openai", localizedTranslator),
   });
@@ -501,13 +507,18 @@ async function updateOpenedWorkspaceCredentialModalLocale(input: {
   logger: unknown;
   response: unknown;
   slackUserId: string;
+  teamId: string;
   translator: Translator;
+  userSettingsRepository: UserSettingsRepository | undefined;
   view(translator: Translator): Record<string, unknown>;
 }): Promise<void> {
   const translator = await resolveHandlerTranslator(
-    input.client,
+    input.teamId,
     input.slackUserId,
-    { defaultLocale: input.translator.locale },
+    {
+      defaultLocale: input.translator.locale,
+      userSettingsRepository: input.userSettingsRepository,
+    },
     input.logger,
   );
   if (translator.locale === input.translator.locale) {
@@ -532,13 +543,16 @@ async function handleWorkspaceCredentialProviderSelectAction(
     isRecord(view) ? readString(view, "private_metadata") : undefined,
   );
   const slackUserId = readSlackUserId(body);
+  const teamId = metadata?.teamId ?? readTeamId(body, {});
   const translator = await resolveHandlerTranslator(
-    client,
+    teamId,
     slackUserId,
-    { defaultLocale: metadata?.locale ?? options.defaultLocale },
+    {
+      defaultLocale: metadata?.locale ?? options.defaultLocale,
+      userSettingsRepository: options.userSettingsRepository,
+    },
     logger,
   );
-  const teamId = metadata?.teamId ?? readTeamId(body, {});
   const providerValue = readSelectedOptionValue(
     view,
     WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
@@ -614,12 +628,7 @@ async function handleWorkspaceCredentialModalSubmission(
 
   let resultTranslator = ackTranslator;
   try {
-    const userContext = await resolveSlackUserContext(
-      client,
-      slackUserId,
-      { defaultLocale: ackTranslator.locale },
-      logger,
-    );
+    const userContext = await resolveSlackUserContext(client, slackUserId, ackTranslator, logger);
     const { translator } = userContext;
     resultTranslator = translator;
     if (!userContext.isWorkspaceAdmin) {
@@ -694,8 +703,8 @@ async function handleSalesforcePdfWorkflowConfigureAction(
     logger.warn("Ignoring Salesforce PDF workflow configuration action with missing context.");
     return;
   }
-  const userContext = await resolveSlackUserContext(client, slackUserId, options, logger);
-  const { translator } = userContext;
+  const translator = await resolveHandlerTranslator(teamId, slackUserId, options, logger);
+  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
   if (options.salesforcePdfWorkflowHome === undefined) {
     await client.views.open({
       trigger_id: triggerId,
@@ -797,12 +806,7 @@ async function handleSalesforcePdfWorkflowModalSubmission(
 
   let resultTranslator = ackTranslator;
   try {
-    const userContext = await resolveSlackUserContext(
-      client,
-      slackUserId,
-      { defaultLocale: ackTranslator.locale },
-      logger,
-    );
+    const userContext = await resolveSlackUserContext(client, slackUserId, ackTranslator, logger);
     const { translator } = userContext;
     resultTranslator = translator;
     if (!userContext.isWorkspaceAdmin) {
@@ -926,7 +930,7 @@ async function handleMention(
     return;
   }
 
-  const translator = await resolveHandlerTranslator(client, event.user, options, logger);
+  const translator = await resolveHandlerTranslator(teamId, event.user, options, logger);
   const threadTs = readString(event, "thread_ts") ?? event.ts;
   if (options.agentJobQueue !== undefined) {
     if (
@@ -1087,7 +1091,7 @@ async function handleMessage(
     return;
   }
 
-  const translator = await resolveHandlerTranslator(client, event.user, options, logger);
+  const translator = await resolveHandlerTranslator(teamId, event.user, options, logger);
   if (options.agentJobQueue !== undefined) {
     await enqueueSlackAgentJob({
       body,
@@ -1204,6 +1208,7 @@ export async function processSlackAgentJob(
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
+    userSettingsRepository?: UserSettingsRepository;
   },
 ): Promise<void> {
   if (job.eventType === "app_mention") {
@@ -1224,6 +1229,7 @@ async function processAppMentionJob(
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
+    userSettingsRepository?: UserSettingsRepository;
   },
 ): Promise<void> {
   if (
@@ -1232,7 +1238,7 @@ async function processAppMentionJob(
   ) {
     return;
   }
-  const translator = await resolveHandlerTranslator(input.client, job.userId, input, input.logger);
+  const translator = await resolveHandlerTranslator(job.teamId, job.userId, input, input.logger);
   await setSlackAssistantThreadStatus({
     channelId: job.channelId,
     client: input.client,
@@ -1337,6 +1343,7 @@ async function processFollowUpMessageJob(
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
     runner: AgentRunner;
+    userSettingsRepository?: UserSettingsRepository;
   },
 ): Promise<void> {
   if (input.routingRepository === undefined) {
@@ -1351,7 +1358,7 @@ async function processFollowUpMessageJob(
     return;
   }
 
-  const translator = await resolveHandlerTranslator(input.client, job.userId, input, input.logger);
+  const translator = await resolveHandlerTranslator(job.teamId, job.userId, input, input.logger);
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
@@ -1531,7 +1538,7 @@ async function handleReactionAdded(
     return;
   }
   const translator = await resolveHandlerTranslator(
-    client,
+    teamId,
     readString(event, "user"),
     options,
     logger,
@@ -1792,15 +1799,16 @@ function logError(logger: unknown, message: string, metadata: Record<string, unk
 }
 
 async function resolveHandlerTranslator(
-  client: SlackAgentClient,
+  teamId: string | undefined,
   userId: string | undefined,
-  options: { defaultLocale?: Locale },
+  options: { defaultLocale?: Locale; userSettingsRepository?: UserSettingsRepository },
   logger: unknown,
 ): Promise<Translator> {
-  return resolveSlackUserTranslator({
-    client,
+  return resolveUserSettingsTranslator({
     defaultLocale: options.defaultLocale ?? FALLBACK_LOCALE,
     logger,
+    repository: options.userSettingsRepository,
+    teamId,
     userId,
   });
 }
@@ -1808,33 +1816,28 @@ async function resolveHandlerTranslator(
 async function resolveSlackUserContext(
   client: SlackAgentClient,
   userId: string | undefined,
-  options: { defaultLocale?: Locale },
+  translator: Translator,
   logger: unknown,
 ): Promise<{ isWorkspaceAdmin: boolean; translator: Translator }> {
-  const defaultLocale = options.defaultLocale ?? FALLBACK_LOCALE;
   const info = client.users?.info;
   if (info === undefined || userId === undefined) {
-    return { isWorkspaceAdmin: false, translator: createTranslator(defaultLocale) };
+    return { isWorkspaceAdmin: false, translator };
   }
   try {
-    const response = await info({ include_locale: true, user: userId });
+    const response = await info({ user: userId });
     const user = isRecord(response) && isRecord(response.user) ? response.user : undefined;
-    const locale = normalizeLocale(user === undefined ? undefined : readString(user, "locale"));
     const isAdmin =
       user !== undefined &&
       (readBoolean(user, "is_admin") === true ||
         readBoolean(user, "is_owner") === true ||
         readBoolean(user, "is_primary_owner") === true);
-    return {
-      isWorkspaceAdmin: isAdmin,
-      translator: createTranslator(locale ?? defaultLocale),
-    };
+    return { isWorkspaceAdmin: isAdmin, translator };
   } catch (error) {
     logWarn(logger, "Failed to resolve Slack user context.", {
       error,
       slackUserId: userId,
     });
-    return { isWorkspaceAdmin: false, translator: createTranslator(defaultLocale) };
+    return { isWorkspaceAdmin: false, translator };
   }
 }
 

@@ -28,13 +28,16 @@ Slack OAuth install routes additionally require:
 
 Slack-visible fixed copy is localized with the following fallback order:
 
-1. Slack user locale from `users.info` with `include_locale=true`
+1. App-level user setting from `app_user_settings.locale`
 2. `APP_DEFAULT_LOCALE`
 3. `ja`
 
-Supported display locales are `ja` and `en`. New Slack-visible fixed text should be added through
-the repository i18n resources instead of hardcoded in handlers. User input, AI-generated answers,
-provider names, model ids, Slack action identifiers, and operational log messages are not translated.
+Supported display locales are `ja` and `en`. Slack `users.info` is not used for routine locale
+resolution so Slack API latency and rate limits do not affect normal display text selection. It is
+still used where Slack permission checks are required, such as workspace admin checks for privileged
+modals. New Slack-visible fixed text should be added through the repository i18n resources instead
+of hardcoded in handlers. User input, AI-generated answers, provider names, model ids, Slack action
+identifiers, and operational log messages are not translated.
 
 Audio attachment understanding requires the bot `files:read` scope in addition to channel history scopes. Audio bytes are fetched only for the current agent invocation and are kept in memory.
 

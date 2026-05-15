@@ -333,4 +333,24 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         on salesforce_pdf_templates (team_id, salesforce_org_id, action, status);
     `,
   },
+  {
+    id: "20260515_0008",
+    name: "app_user_settings",
+    upSql: `
+      create table if not exists app_user_settings (
+        team_id text not null,
+        slack_user_id text not null,
+        locale text,
+        created_at timestamp with time zone not null,
+        updated_at timestamp with time zone not null,
+        updated_by_slack_user_id text,
+        payload jsonb not null default '{}'::jsonb,
+        primary key (team_id, slack_user_id),
+        constraint ck_app_user_settings_locale
+          check (locale is null or locale in ('ja', 'en'))
+      );
+      create index if not exists ix_app_user_settings_updated_at
+        on app_user_settings (updated_at desc);
+    `,
+  },
 ];

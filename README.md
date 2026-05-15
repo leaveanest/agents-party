@@ -265,16 +265,18 @@ APP_PORT=8000
 APP_DEFAULT_LOCALE=ja
 ```
 
-`APP_DEFAULT_LOCALE` controls Slack-visible fallback display language when a Slack user locale is
-unavailable or unsupported. Supported values are `ja` and `en`; unsupported values fall back to
-`ja`.
+`APP_DEFAULT_LOCALE` controls Slack-visible fallback display language when no app-level user
+setting exists. Supported values are `ja` and `en`; unsupported values fall back to `ja`.
 
 ### Slack
 
 The Slack App Manifest template is [`slack-app-manifest.yaml`](slack-app-manifest.yaml).
 Replace `agents-party.example.com` with the public HTTPS host before importing it into Slack.
 
-Slack runtime authorization uses the database-backed Slack installation store:
+Slack runtime authorization uses the database-backed Slack installation store. Per-user display
+preferences such as locale are stored in `app_user_settings` keyed by `(team_id, slack_user_id)`;
+Slack `users.info` is reserved for permission checks such as workspace admin detection, not for
+routine locale resolution.
 
 ```bash
 SLACK_SIGNING_SECRET=...
