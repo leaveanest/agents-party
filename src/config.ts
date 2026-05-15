@@ -64,7 +64,6 @@ const DEFAULT_SLACK_SCOPES = [
   "mpim:history",
   "reactions:read",
   "users:read",
-  "views:write",
 ];
 
 /**

@@ -5,6 +5,7 @@ import {
   google,
   type GoogleGenerativeAIProviderSettings,
 } from "@ai-sdk/google";
+import { createVertex, type GoogleVertexProviderSettings } from "@ai-sdk/google-vertex";
 import { createGroq, groq, type GroqProviderSettings } from "@ai-sdk/groq";
 import { createOpenAI, openai, type OpenAIProviderSettings } from "@ai-sdk/openai";
 import {
@@ -42,7 +43,7 @@ import {
   MissingWorkspaceCredentialError,
   type ProviderCredential,
   type ProviderCredentialResolver,
-  resolveCredentialForRequest,
+  stringPayloadField,
 } from "./credentials.js";
 
 export type AiSdkModelResolver = (
@@ -54,6 +55,7 @@ export type AiSdkAdapterSettings = {
   anthropic?: AnthropicProviderSettings;
   azureOpenAI?: AzureOpenAIProviderSettings;
   google?: GoogleGenerativeAIProviderSettings;
+  googleVertex?: GoogleVertexProviderSettings;
   groq?: GroqProviderSettings;
   openAI?: OpenAIProviderSettings;
   openAICompatible?: Partial<Record<OpenAICompatibleProvider, OpenAICompatibleProviderConfig>>;
@@ -95,11 +97,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
   async generate(request: LlmRequest): Promise<LlmResult> {
     try {
       assertSupportedResponseFormat(request);
-      const credential = await resolveCredentialForRequest(
-        this.credentialResolver,
-        request,
-        request.model.provider,
-      );
+      const credential = await this.resolveCredential(request);
       const result = await generateText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
@@ -147,11 +145,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
   private async *streamResponse(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
     try {
       assertSupportedResponseFormat(request);
-      const credential = await resolveCredentialForRequest(
-        this.credentialResolver,
-        request,
-        request.model.provider,
-      );
+      const credential = await this.resolveCredential(request);
       const result = streamText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
@@ -232,6 +226,39 @@ export class AiSdkLlmAdapter implements LlmAdapter {
         type: "error",
       };
     }
+  }
+
+  private async resolveCredential(request: LlmRequest): Promise<ProviderCredential | undefined> {
+    if (this.credentialResolver === undefined) {
+      return undefined;
+    }
+    if (request.context?.workspaceId === undefined) {
+      throw new MissingWorkspaceContextError(request.model.provider);
+    }
+
+    if (request.model.provider === "google") {
+      const serviceAccountCredential = await this.credentialResolver.resolveProviderCredential({
+        credentialName: "service_account_json",
+        provider: "google",
+        workspaceId: request.context.workspaceId,
+      });
+      if (serviceAccountCredential !== undefined) {
+        return { ...serviceAccountCredential, credentialName: "service_account_json" };
+      }
+    }
+
+    const credential = await this.credentialResolver.resolveProviderCredential({
+      credentialName: "api_key",
+      provider: request.model.provider,
+      workspaceId: request.context.workspaceId,
+    });
+    if (credential === undefined) {
+      throw new MissingWorkspaceCredentialError(
+        request.context.workspaceId,
+        request.model.provider,
+      );
+    }
+    return { ...credential, credentialName: "api_key" };
   }
 }
 
@@ -327,6 +354,26 @@ export function createAiSdkModelResolver(settings: AiSdkAdapterSettings = {}): A
               })
         )(model.providerModelId);
       case "google":
+        if (credential !== undefined) {
+          const serviceAccountCredential = parseGoogleServiceAccountCredential(credential);
+          if (
+            credential.credentialName === "service_account_json" &&
+            serviceAccountCredential === undefined
+          ) {
+            throw new LlmProviderError(
+              model.provider,
+              model.id,
+              "Google service account credential must be valid JSON with client_email and private_key.",
+            );
+          }
+          if (serviceAccountCredential !== undefined) {
+            return createVertexForServiceAccount(
+              settings.googleVertex,
+              credential,
+              serviceAccountCredential,
+            )(model.providerModelId);
+          }
+        }
         return (
           credential === undefined
             ? configuredGoogle
@@ -371,6 +418,73 @@ export function createAiSdkModelResolver(settings: AiSdkAdapterSettings = {}): A
         );
     }
   };
+}
+
+type GoogleServiceAccountCredential = {
+  client_email: string;
+  private_key: string;
+  private_key_id?: string;
+  project_id?: string;
+};
+
+function createVertexForServiceAccount(
+  settings: GoogleVertexProviderSettings | undefined,
+  credential: ProviderCredential,
+  serviceAccountCredential: GoogleServiceAccountCredential,
+) {
+  const project =
+    stringPayloadField(credential.payload, "project_id") ?? serviceAccountCredential.project_id;
+  const location =
+    stringPayloadField(credential.payload, "location") ?? settings?.location ?? "us-central1";
+  return createVertex({
+    ...settings,
+    googleAuthOptions: {
+      ...settings?.googleAuthOptions,
+      credentials: {
+        client_email: serviceAccountCredential.client_email,
+        private_key: serviceAccountCredential.private_key,
+        ...(serviceAccountCredential.private_key_id === undefined
+          ? {}
+          : { private_key_id: serviceAccountCredential.private_key_id }),
+      },
+    },
+    location,
+    project,
+  });
+}
+
+function parseGoogleServiceAccountCredential(
+  credential: ProviderCredential,
+): GoogleServiceAccountCredential | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(credential.apiKey);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+  const clientEmail = readString(parsed, "client_email");
+  const privateKey = readString(parsed, "private_key");
+  if (clientEmail === undefined || privateKey === undefined) {
+    return undefined;
+  }
+  return {
+    client_email: clientEmail,
+    private_key: privateKey,
+    private_key_id: readString(parsed, "private_key_id"),
+    project_id: readString(parsed, "project_id"),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(record: Record<string, unknown>, field: string): string | undefined {
+  const value = record[field];
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
 
 function createOpenAICompatibleProviders(

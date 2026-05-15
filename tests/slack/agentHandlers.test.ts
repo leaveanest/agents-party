@@ -464,6 +464,51 @@ describe("createAgentSlackHandlers", () => {
         }),
       }),
     ]);
+    expect(JSON.stringify(openedViews[0])).toContain('"dispatch_action":true');
+    expect(JSON.stringify(openedViews[0])).not.toContain("SORACOM AuthKey ID");
+    expect(JSON.stringify(openedViews[0])).toContain("Base URL");
+  });
+
+  it("updates the API key modal fields when SORACOM is selected", async () => {
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never);
+
+    await handlers.handleWorkspaceCredentialProviderSelectAction({
+      ack: async () => {},
+      body: {
+        view: {
+          id: "VIEW1",
+          private_metadata: "T1",
+          state: {
+            values: {
+              workspace_credential_provider: {
+                provider_kind: { selected_option: { value: "soracom" } },
+              },
+            },
+          },
+        },
+      },
+      client: {
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(updates).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({
+          private_metadata: "T1",
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(updates[0])).toContain("SORACOM AuthKey ID");
+    expect(JSON.stringify(updates[0])).not.toContain("Base URL");
   });
 
   it("saves workspace provider API keys from modal submissions", async () => {
@@ -605,6 +650,64 @@ describe("createAgentSlackHandlers", () => {
         },
         providerKind: "soracom",
         secret: "secret-test",
+        teamId: "T1",
+      },
+    ]);
+  });
+
+  it("saves Google service account JSON credentials from modal submissions", async () => {
+    const saves: unknown[] = [];
+    const serviceAccountJson = JSON.stringify({
+      client_email: "agent@project.iam.gserviceaccount.com",
+      private_key: "-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----\\n",
+      project_id: "vertex-project",
+    });
+    const handlers = createAgentSlackHandlers({} as never, {
+      workspaceCredentialSettings: {
+        async saveProviderApiKey(input: unknown) {
+          saves.push(input);
+        },
+      },
+    });
+
+    await handlers.handleWorkspaceCredentialModalSubmission({
+      ack: async () => {},
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {}, warn() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: "T1",
+        state: {
+          values: {
+            workspace_credential_provider: {
+              provider_kind: { selected_option: { value: "google_service_account_json" } },
+            },
+            workspace_credential_secret: {
+              api_key: { value: serviceAccountJson },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(saves).toEqual([
+      {
+        createdByUserId: "UADMIN",
+        credentialName: "service_account_json",
+        payload: {
+          project_id: "vertex-project",
+          source: "slack_app_home",
+        },
+        providerKind: "google",
+        secret: serviceAccountJson,
         teamId: "T1",
       },
     ]);

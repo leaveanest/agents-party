@@ -21,6 +21,13 @@ const model: ModelInfo = {
   providerModelId: "test-model",
 };
 
+const googleModel: ModelInfo = {
+  capabilities: ["text", "streaming", "tool_calling"],
+  id: "google:gemini-test",
+  provider: "google",
+  providerModelId: "gemini-test",
+};
+
 const history: ConversationHistory = {
   messages: [
     {
@@ -94,7 +101,11 @@ describe("AiSdkLlmAdapter", () => {
     const adapter = new AiSdkLlmAdapter(
       "openai",
       (_model, credential) => {
-        expect(credential).toEqual({ apiKey: "workspace-key", baseURL: "https://proxy.example" });
+        expect(credential).toEqual({
+          apiKey: "workspace-key",
+          baseURL: "https://proxy.example",
+          credentialName: "api_key",
+        });
         return languageModel;
       },
       {
@@ -116,6 +127,135 @@ describe("AiSdkLlmAdapter", () => {
         model,
       }),
     ).resolves.toMatchObject({ content: "credential ok" });
+  });
+
+  it("prefers Google service account credentials before API keys", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "vertex credential ok", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(1, 1),
+        warnings: [],
+      },
+      modelId: "gemini-test",
+      provider: "google",
+    });
+    const credential = {
+      apiKey: JSON.stringify({
+        client_email: "agent@project.iam.gserviceaccount.com",
+        private_key: "-----BEGIN PRIVATE KEY-----\\nkey\\n-----END PRIVATE KEY-----\\n",
+        project_id: "vertex-project",
+      }),
+      payload: { project_id: "vertex-project" },
+    };
+    const lookups: unknown[] = [];
+    const adapter = new AiSdkLlmAdapter(
+      "google",
+      (_model, resolvedCredential) => {
+        expect(resolvedCredential).toEqual({
+          ...credential,
+          credentialName: "service_account_json",
+        });
+        return languageModel;
+      },
+      {
+        async resolveProviderCredential(input) {
+          lookups.push(input);
+          return credential;
+        },
+      },
+    );
+
+    await expect(
+      adapter.generate({
+        context: { workspaceId: "T1" },
+        history,
+        model: googleModel,
+      }),
+    ).resolves.toMatchObject({ content: "vertex credential ok" });
+
+    expect(lookups).toEqual([
+      {
+        credentialName: "service_account_json",
+        provider: "google",
+        workspaceId: "T1",
+      },
+    ]);
+  });
+
+  it("falls back to Google API keys when service account credentials are absent", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "google api key ok", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(1, 1),
+        warnings: [],
+      },
+      modelId: "gemini-test",
+      provider: "google",
+    });
+    const credential = { apiKey: "workspace-google-key" };
+    const lookups: unknown[] = [];
+    const adapter = new AiSdkLlmAdapter(
+      "google",
+      (_model, resolvedCredential) => {
+        expect(resolvedCredential).toEqual({
+          ...credential,
+          credentialName: "api_key",
+        });
+        return languageModel;
+      },
+      {
+        async resolveProviderCredential(input) {
+          lookups.push(input);
+          return input.credentialName === "service_account_json" ? undefined : credential;
+        },
+      },
+    );
+
+    await expect(
+      adapter.generate({
+        context: { workspaceId: "T1" },
+        history,
+        model: googleModel,
+      }),
+    ).resolves.toMatchObject({ content: "google api key ok" });
+
+    expect(lookups).toEqual([
+      {
+        credentialName: "service_account_json",
+        provider: "google",
+        workspaceId: "T1",
+      },
+      {
+        credentialName: "api_key",
+        provider: "google",
+        workspaceId: "T1",
+      },
+    ]);
+  });
+
+  it("rejects invalid Google service account credentials before provider invocation", async () => {
+    const adapter = new AiSdkLlmAdapter("google", createAiSdkModelResolver(), {
+      async resolveProviderCredential(input) {
+        expect(input).toEqual({
+          credentialName: "service_account_json",
+          provider: "google",
+          workspaceId: "T1",
+        });
+        return { apiKey: '{"type":"service_account"}' };
+      },
+    });
+
+    await expect(
+      adapter.generate({
+        context: { workspaceId: "T1" },
+        history,
+        model: googleModel,
+      }),
+    ).rejects.toThrow(
+      "Google service account credential must be valid JSON with client_email and private_key.",
+    );
   });
 
   it("fails clearly when a workspace credential resolver is configured but missing", async () => {

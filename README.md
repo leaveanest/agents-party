@@ -276,7 +276,7 @@ SLACK_SIGNING_SECRET=...
 SLACK_CLIENT_ID=...
 SLACK_CLIENT_SECRET=...
 SLACK_STATE_SECRET=...
-SLACK_SCOPES=app_mentions:read,channels:history,chat:write,files:read,files:write,groups:history,im:history,mpim:history,reactions:read,users:read,views:write
+SLACK_SCOPES=app_mentions:read,channels:history,chat:write,files:read,files:write,groups:history,im:history,mpim:history,reactions:read,users:read
 SLACK_USER_SCOPES=
 SLACK_EVENTS_PATH=/slack/events
 SLACK_INSTALL_PATH=/slack/install
@@ -298,7 +298,7 @@ VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 LLM_API_KEY_ENCRYPTION_KEY=...
 ```
 
-When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Production-like runtimes (`APP_ENV=heroku`, `APP_ENV=prod`, `APP_ENV=production`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set) require both values at startup so provider calls cannot silently fall back to process-level provider keys. Without that resolver, isolated local development can still use process-level provider environment variables supported by the AI SDK provider packages.
+When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Google text models prefer `provider_kind='google'` / `credential_name='service_account_json'` for Vertex AI service account JSON, then fall back to `credential_name='api_key'` for Google Generative AI API keys. Production-like runtimes (`APP_ENV=heroku`, `APP_ENV=prod`, `APP_ENV=production`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set) require both values at startup so provider calls cannot silently fall back to process-level provider keys. Without that resolver, isolated local development can still use process-level provider environment variables supported by the AI SDK provider packages.
 
 ### Local database
 

@@ -48,7 +48,6 @@ describe("loadSettings", () => {
         "mpim:history",
         "reactions:read",
         "users:read",
-        "views:write",
       ],
       slackSigningSecret: undefined,
       slackStateSecret: undefined,

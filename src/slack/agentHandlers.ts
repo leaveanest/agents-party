@@ -99,25 +99,17 @@ export type SlackAgentClient = Pick<
   };
 };
 
-const workspaceCredentialProviderKinds = [
-  "openai",
-  "azure_openai",
-  "anthropic",
-  "google",
-  "google_maps",
-  "groq",
-  "xai",
-  "plamo",
-  "nvidia",
-  "litellm",
-  "soracom",
-] as const satisfies readonly CredentialProviderKind[];
+type WorkspaceCredentialProviderSelection = CredentialProviderKind | "google_service_account_json";
 
 const workspaceCredentialProviderOptions = [
   { text: { text: "OpenAI", type: "plain_text" }, value: "openai" },
   { text: { text: "Azure OpenAI", type: "plain_text" }, value: "azure_openai" },
   { text: { text: "Anthropic", type: "plain_text" }, value: "anthropic" },
   { text: { text: "Google", type: "plain_text" }, value: "google" },
+  {
+    text: { text: "Google service account JSON", type: "plain_text" },
+    value: "google_service_account_json",
+  },
   { text: { text: "Google Maps", type: "plain_text" }, value: "google_maps" },
   { text: { text: "Groq", type: "plain_text" }, value: "groq" },
   { text: { text: "xAI", type: "plain_text" }, value: "xai" },
@@ -127,7 +119,7 @@ const workspaceCredentialProviderOptions = [
   { text: { text: "SORACOM", type: "plain_text" }, value: "soracom" },
 ] as const satisfies readonly {
   text: { text: string; type: "plain_text" };
-  value: CredentialProviderKind;
+  value: WorkspaceCredentialProviderSelection;
 }[];
 
 export type SlackResolvedAgentRoute = {
@@ -264,6 +256,9 @@ export function createAgentSlackHandlers(
     },
     async handleWorkspaceCredentialConfigureAction(args) {
       await handleWorkspaceCredentialConfigureAction(args, options);
+    },
+    async handleWorkspaceCredentialProviderSelectAction(args) {
+      await handleWorkspaceCredentialProviderSelectAction(args);
     },
     async handleWorkspaceCredentialModalSubmission(args) {
       await handleWorkspaceCredentialModalSubmission(args, options);
@@ -446,8 +441,36 @@ async function handleWorkspaceCredentialConfigureAction(
   }
   await client.views.open({
     trigger_id: triggerId,
-    view: buildWorkspaceCredentialModal(teamId) as never,
+    view: buildWorkspaceCredentialModal(teamId, "openai") as never,
   });
+}
+
+async function handleWorkspaceCredentialProviderSelectAction({
+  ack,
+  body,
+  client,
+  logger,
+}: SlackActionArgs): Promise<void> {
+  await ack();
+  const view = isRecord(body) ? body.view : undefined;
+  const teamId =
+    (isRecord(view) ? readString(view, "private_metadata") : undefined) ?? readTeamId(body, {});
+  const providerValue = readSelectedOptionValue(
+    view,
+    WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
+    WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
+  );
+  const providerSelection = parseWorkspaceCredentialProviderSelection(providerValue) ?? "openai";
+  logInfo(logger, "Updating workspace credential modal for selected provider.", {
+    providerSelection,
+    teamId,
+  });
+  await updateWorkspaceCredentialModal(
+    client,
+    view,
+    buildWorkspaceCredentialModal(teamId ?? "", providerSelection),
+    logger,
+  );
 }
 
 async function handleWorkspaceCredentialModalSubmission(
@@ -1700,7 +1723,11 @@ async function fetchSingleMessage(
   return message;
 }
 
-function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> {
+function buildWorkspaceCredentialModal(
+  teamId: string,
+  providerSelection: WorkspaceCredentialProviderSelection,
+): Record<string, unknown> {
+  const providerKind = providerKindForCredentialSelection(providerSelection);
   return {
     callback_id: WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
     private_metadata: teamId,
@@ -1710,9 +1737,10 @@ function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> 
     blocks: [
       {
         block_id: WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
+        dispatch_action: true,
         element: {
           action_id: WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
-          initial_option: workspaceCredentialProviderOptions[0],
+          initial_option: workspaceCredentialProviderOption(providerSelection),
           options: workspaceCredentialProviderOptions,
           type: "static_select",
         },
@@ -1723,48 +1751,34 @@ function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> 
         block_id: WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
         element: {
           action_id: WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
+          ...(providerSelection === "google_service_account_json" ? { multiline: true } : {}),
           type: "plain_text_input",
         },
-        label: { text: "API key or AuthKey Secret", type: "plain_text" },
-        type: "input",
-      },
-      {
-        block_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID,
-        element: {
-          action_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_ACTION_ID,
-          placeholder: { text: "keyId-xxxxxxxxxx", type: "plain_text" },
-          type: "plain_text_input",
+        label: {
+          text:
+            providerSelection === "google_service_account_json"
+              ? "Service account JSON"
+              : providerKind === "soracom"
+                ? "SORACOM AuthKey Secret"
+                : "API key",
+          type: "plain_text",
         },
-        label: { text: "SORACOM AuthKey ID", type: "plain_text" },
-        optional: true,
         type: "input",
       },
-      {
-        block_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID,
-        element: {
-          action_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID,
-          initial_option: { text: { text: "Global", type: "plain_text" }, value: "global" },
-          options: [
-            { text: { text: "Global", type: "plain_text" }, value: "global" },
-            { text: { text: "Japan", type: "plain_text" }, value: "japan" },
-          ],
-          type: "static_select",
-        },
-        label: { text: "SORACOM coverage", type: "plain_text" },
-        optional: true,
-        type: "input",
-      },
-      {
-        block_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID,
-        element: {
-          action_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID,
-          placeholder: { text: "OP0012345678", type: "plain_text" },
-          type: "plain_text_input",
-        },
-        label: { text: "SORACOM Operator ID", type: "plain_text" },
-        optional: true,
-        type: "input",
-      },
+      ...workspaceCredentialProviderDetailBlocks(providerSelection),
+    ],
+  };
+}
+
+function workspaceCredentialProviderDetailBlocks(
+  providerSelection: WorkspaceCredentialProviderSelection,
+): Record<string, unknown>[] {
+  const providerKind = providerKindForCredentialSelection(providerSelection);
+  if (providerSelection === "google_service_account_json") {
+    return [];
+  }
+  if (providerKind !== "soracom") {
+    return [
       {
         block_id: WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID,
         element: {
@@ -1776,8 +1790,60 @@ function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> 
         optional: true,
         type: "input",
       },
-    ],
-  };
+    ];
+  }
+  return [
+    {
+      block_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID,
+      element: {
+        action_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_ACTION_ID,
+        placeholder: { text: "keyId-xxxxxxxxxx", type: "plain_text" },
+        type: "plain_text_input",
+      },
+      label: { text: "SORACOM AuthKey ID", type: "plain_text" },
+      type: "input",
+    },
+    {
+      block_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID,
+      element: {
+        action_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID,
+        initial_option: { text: { text: "Global", type: "plain_text" }, value: "global" },
+        options: [
+          { text: { text: "Global", type: "plain_text" }, value: "global" },
+          { text: { text: "Japan", type: "plain_text" }, value: "japan" },
+        ],
+        type: "static_select",
+      },
+      label: { text: "SORACOM coverage", type: "plain_text" },
+      type: "input",
+    },
+    {
+      block_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID,
+      element: {
+        action_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID,
+        placeholder: { text: "OP0012345678", type: "plain_text" },
+        type: "plain_text_input",
+      },
+      label: { text: "SORACOM Operator ID", type: "plain_text" },
+      optional: true,
+      type: "input",
+    },
+  ];
+}
+
+function workspaceCredentialProviderOption(
+  providerSelection: WorkspaceCredentialProviderSelection,
+): (typeof workspaceCredentialProviderOptions)[number] {
+  return (
+    workspaceCredentialProviderOptions.find((option) => option.value === providerSelection) ??
+    workspaceCredentialProviderOptions[0]
+  );
+}
+
+function providerKindForCredentialSelection(
+  providerSelection: WorkspaceCredentialProviderSelection,
+): CredentialProviderKind {
+  return providerSelection === "google_service_account_json" ? "google" : providerSelection;
 }
 
 function buildWorkspaceCredentialSavingModal(): Record<string, unknown> {
@@ -2103,7 +2169,11 @@ function parseWorkspaceCredentialModal(view: unknown):
     WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
     WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
   );
-  const providerKind = parseCredentialProviderKind(providerValue);
+  const providerSelection = parseWorkspaceCredentialProviderSelection(providerValue);
+  const providerKind =
+    providerSelection === undefined
+      ? undefined
+      : providerKindForCredentialSelection(providerSelection);
   const apiKey = readModalInputValue(
     view,
     WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
@@ -2135,7 +2205,24 @@ function parseWorkspaceCredentialModal(view: unknown):
   }
   if (apiKey === undefined || apiKey === "") {
     errors[WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID] =
-      providerKind === "soracom" ? "Enter an AuthKey Secret." : "Enter an API key.";
+      providerSelection === "google_service_account_json"
+        ? "Enter a service account JSON object."
+        : providerKind === "soracom"
+          ? "Enter an AuthKey Secret."
+          : "Enter an API key.";
+  }
+  const googleServiceAccount =
+    providerSelection === "google_service_account_json"
+      ? parseGoogleServiceAccountCredentialJson(apiKey)
+      : undefined;
+  if (
+    providerSelection === "google_service_account_json" &&
+    apiKey !== undefined &&
+    apiKey !== "" &&
+    googleServiceAccount === undefined
+  ) {
+    errors[WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID] =
+      "Enter valid Google service account JSON with client_email and private_key.";
   }
   if (providerKind === "soracom") {
     if (soracomAuthKeyId === undefined || soracomAuthKeyId === "") {
@@ -2169,6 +2256,19 @@ function parseWorkspaceCredentialModal(view: unknown):
         source: "slack_app_home",
       },
       providerKind,
+    };
+  }
+  if (providerSelection === "google_service_account_json") {
+    return {
+      apiKey: apiKey as string,
+      credentialName: "service_account_json",
+      payload: {
+        ...(googleServiceAccount?.project_id === undefined
+          ? {}
+          : { project_id: googleServiceAccount.project_id }),
+        source: "slack_app_home",
+      },
+      providerKind: "google",
     };
   }
   return {
@@ -2370,10 +2470,33 @@ function parseBooleanOption(value: string | undefined): boolean | undefined {
   return undefined;
 }
 
-function parseCredentialProviderKind(
+function parseWorkspaceCredentialProviderSelection(
   value: string | undefined,
-): CredentialProviderKind | undefined {
-  return workspaceCredentialProviderKinds.find((providerKind) => providerKind === value);
+): WorkspaceCredentialProviderSelection | undefined {
+  return workspaceCredentialProviderOptions.find((option) => option.value === value)?.value;
+}
+
+function parseGoogleServiceAccountCredentialJson(
+  value: string | undefined,
+): { project_id?: string } | undefined {
+  if (value === undefined || value.trim() === "") {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+  const clientEmail = readString(parsed, "client_email");
+  const privateKey = readString(parsed, "private_key");
+  if (clientEmail === undefined || privateKey === undefined) {
+    return undefined;
+  }
+  return { project_id: readString(parsed, "project_id") };
 }
 
 async function isWorkspaceAdmin(

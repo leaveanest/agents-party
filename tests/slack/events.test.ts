@@ -53,6 +53,7 @@ const handlers: SlackEventFeatureHandlers = {
   async handleSalesforcePdfWorkflowConfigureAction() {},
   async handleSalesforcePdfWorkflowModalSubmission() {},
   async handleWorkspaceCredentialConfigureAction() {},
+  async handleWorkspaceCredentialProviderSelectAction() {},
   async handleWorkspaceCredentialModalSubmission() {},
 };
 
@@ -69,6 +70,7 @@ describe("registerSlackEventHandlers", () => {
       "reaction_added",
     ]);
     expect([...app.actions.keys()].sort()).toEqual([
+      "provider_kind",
       "salesforce_pdf_workflow_configure",
       "workspace_credential_configure",
     ]);
