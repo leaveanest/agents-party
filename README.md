@@ -228,10 +228,16 @@ Build locally if needed:
 docker build -t agents-party .
 ```
 
-Run a production-like local stack with PostgreSQL, Redis, web, worker, and migrations:
+Run a local stack with PostgreSQL, Redis, migrations, web, and worker:
 
 ```bash
 docker compose up --build web worker
+```
+
+In another shell:
+
+```bash
+curl http://localhost:8000/healthz
 ```
 
 Seed a local bootstrap Slack workspace route in the same stack:
@@ -240,8 +246,11 @@ Seed a local bootstrap Slack workspace route in the same stack:
 docker compose --profile seed run --rm seed
 ```
 
-The compose defaults are local-only placeholder values. Override Slack/OAuth/provider settings from
-your shell or a local `.env` file when testing real Slack requests.
+The compose defaults start without Slack credentials so the server can be health-checked locally.
+To test real Slack requests, copy [`.env.example`](.env.example) to `.env`, fill the Slack OAuth
+settings, point your Slack App Manifest public HTTPS tunnel at `http://localhost:8000`, and rerun
+the stack. Docker Compose uses the container-internal PostgreSQL and Redis URLs from
+[`compose.yaml`](compose.yaml), even if `.env` contains localhost URLs for `vp run ...` workflows.
 
 ## Configuration
 
