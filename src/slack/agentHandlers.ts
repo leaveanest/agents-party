@@ -703,10 +703,10 @@ async function handleSalesforcePdfWorkflowConfigureAction(
     logger.warn("Ignoring Salesforce PDF workflow configuration action with missing context.");
     return;
   }
-  const translator = await resolveHandlerTranslator(teamId, slackUserId, options, logger);
+  const translator = createTranslator(options.defaultLocale ?? FALLBACK_LOCALE);
   const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
   if (options.salesforcePdfWorkflowHome === undefined) {
-    await client.views.open({
+    const response = await client.views.open({
       trigger_id: triggerId,
       view: buildSalesforcePdfWorkflowResultModal(
         translator.t("salesforcePdf.title"),
@@ -714,16 +714,46 @@ async function handleSalesforcePdfWorkflowConfigureAction(
         translator,
       ) as never,
     });
+    await updateOpenedSalesforcePdfWorkflowModalLocale({
+      client,
+      logger,
+      response,
+      slackUserId,
+      teamId,
+      translator,
+      userSettingsRepository: options.userSettingsRepository,
+      view: (localizedTranslator) =>
+        buildSalesforcePdfWorkflowResultModal(
+          localizedTranslator.t("salesforcePdf.title"),
+          localizedTranslator.t("salesforcePdf.error.processNotConfigured"),
+          localizedTranslator,
+        ),
+    });
     return;
   }
   if (!userContext.isWorkspaceAdmin) {
-    await client.views.open({
+    const response = await client.views.open({
       trigger_id: triggerId,
       view: buildSalesforcePdfWorkflowResultModal(
         translator.t("salesforcePdf.title"),
         translator.t("salesforcePdf.error.unauthorized"),
         translator,
       ) as never,
+    });
+    await updateOpenedSalesforcePdfWorkflowModalLocale({
+      client,
+      logger,
+      response,
+      slackUserId,
+      teamId,
+      translator,
+      userSettingsRepository: options.userSettingsRepository,
+      view: (localizedTranslator) =>
+        buildSalesforcePdfWorkflowResultModal(
+          localizedTranslator.t("salesforcePdf.title"),
+          localizedTranslator.t("salesforcePdf.error.unauthorized"),
+          localizedTranslator,
+        ),
     });
     return;
   }
@@ -736,7 +766,7 @@ async function handleSalesforcePdfWorkflowConfigureAction(
     );
   const parsedCurrent =
     current === undefined ? undefined : salesforcePdfWorkflowSettingsSchema.safeParse(current);
-  await client.views.open({
+  const response = await client.views.open({
     trigger_id: triggerId,
     view: buildSalesforcePdfWorkflowModal({
       action: actionValue.action,
@@ -746,6 +776,54 @@ async function handleSalesforcePdfWorkflowConfigureAction(
       translator,
     }) as never,
   });
+  await updateOpenedSalesforcePdfWorkflowModalLocale({
+    client,
+    logger,
+    response,
+    slackUserId,
+    teamId,
+    translator,
+    userSettingsRepository: options.userSettingsRepository,
+    view: (localizedTranslator) =>
+      buildSalesforcePdfWorkflowModal({
+        action: actionValue.action,
+        salesforceOrgId: actionValue.salesforceOrgId,
+        settings: parsedCurrent?.success === true ? parsedCurrent.data : undefined,
+        teamId,
+        translator: localizedTranslator,
+      }),
+  });
+}
+
+async function updateOpenedSalesforcePdfWorkflowModalLocale(input: {
+  client: SlackClient;
+  logger: unknown;
+  response: unknown;
+  slackUserId: string;
+  teamId: string;
+  translator: Translator;
+  userSettingsRepository: UserSettingsRepository | undefined;
+  view(translator: Translator): Record<string, unknown>;
+}): Promise<void> {
+  const translator = await resolveHandlerTranslator(
+    input.teamId,
+    input.slackUserId,
+    {
+      defaultLocale: input.translator.locale,
+      userSettingsRepository: input.userSettingsRepository,
+    },
+    input.logger,
+  );
+  if (translator.locale === input.translator.locale) {
+    return;
+  }
+  const openedView = isRecord(input.response) ? input.response.view : undefined;
+  await updateSalesforcePdfWorkflowModal(
+    input.client,
+    openedView,
+    input.view(translator),
+    input.logger,
+  );
 }
 
 async function handleSalesforcePdfWorkflowModalSubmission(

@@ -190,6 +190,68 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(openedViews[0])).toContain("012000000000001AAA");
   });
 
+  it("opens Salesforce PDF workflow modals before resolving stored user locale", async () => {
+    const openedViews: unknown[] = [];
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      defaultLocale: "ja",
+      salesforcePdfWorkflowHome: {
+        repository: {
+          async findSalesforcePdfWorkflowSetting(): Promise<JsonObject> {
+            return validSalesforcePdfWorkflowSetting();
+          },
+          async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
+            return [];
+          },
+          async saveSalesforcePdfWorkflowSetting() {},
+        },
+      },
+      userSettingsRepository: {
+        async findUserSettings() {
+          expect(openedViews).toHaveLength(1);
+          return {
+            createdAt: new Date("2026-05-15T00:00:00Z"),
+            locale: "en",
+            payload: {},
+            slackUserId: "UADMIN",
+            teamId: "T1",
+            updatedAt: new Date("2026-05-15T00:00:00Z"),
+          };
+        },
+        async saveUserSettings() {},
+      },
+    });
+
+    await handlers.handleSalesforcePdfWorkflowConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [{ value: JSON.stringify({ action: "quote_pdf", salesforceOrgId: "00DORG" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return { view: { id: "VIEW1" } };
+          },
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(openedViews[0])).toContain("許可するステージ");
+    expect(JSON.stringify(updatedViews[0])).toContain("Allowed stages");
+  });
+
   it("saves Salesforce PDF workflow settings from modal submissions", async () => {
     const acks: unknown[] = [];
     const saves: unknown[] = [];
