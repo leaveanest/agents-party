@@ -12,11 +12,6 @@ The route paths are configurable with `SLACK_EVENTS_PATH`, `SLACK_INSTALL_PATH`,
 
 ## Configuration
 
-Static bot-token mode requires:
-
-- `SLACK_SIGNING_SECRET`
-- `SLACK_BOT_TOKEN`
-
 Database-backed installation authorization requires:
 
 - `SLACK_SIGNING_SECRET`

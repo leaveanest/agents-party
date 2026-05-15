@@ -86,11 +86,10 @@ Repository-local Codex skills for development live under [`.agents/skills/`](.ag
 
 ## Local Setup
 
-`agents-party` can run in three local modes:
+`agents-party` can run in two local modes:
 
 - health-check only, with no Slack credentials
-- single-workspace Slack development, using a static bot token
-- production-like development, using PostgreSQL-backed Slack OAuth installation storage
+- Slack development, using PostgreSQL-backed Slack OAuth installation storage
 
 ### Prerequisites
 
@@ -143,21 +142,7 @@ Use the Slack App Manifest template at [`slack-app-manifest.yaml`](slack-app-man
 Replace `agents-party.example.com` with a public HTTPS tunnel URL that forwards to
 `http://localhost:8000` before importing the manifest into Slack.
 
-For local single-workspace development, set a static bot token and signing secret:
-
-```bash
-export SLACK_SIGNING_SECRET=...
-export SLACK_BOT_TOKEN=xoxb-...
-export GOOGLE_GENERATIVE_AI_API_KEY=...
-vp run dev
-```
-
-The default local bootstrap model is `google:gemini-2.5-flash`. Set `AGENT_MODEL` to another
-registered provider model id when testing a different provider. Keep provider API keys in your
-shell or local `.env`; never commit them.
-
-For production-like Slack OAuth install testing, use PostgreSQL plus Slack OAuth settings instead
-of `SLACK_BOT_TOKEN`:
+Use PostgreSQL plus Slack OAuth settings for local Slack testing:
 
 ```bash
 export SLACK_SIGNING_SECRET=...
@@ -168,6 +153,11 @@ export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents
 vp run migrate
 vp run dev
 ```
+
+The default local bootstrap model is `google:gemini-2.5-flash`. Set `AGENT_MODEL` to another
+registered provider model id when testing a different provider. Store provider API keys in
+workspace credentials when `LLM_API_KEY_ENCRYPTION_KEY` is configured, or use provider-package
+local environment fallback only for isolated local testing. Never commit provider keys.
 
 The TypeScript runtime exposes these local routes:
 
@@ -270,8 +260,7 @@ APP_PORT=8000
 The Slack App Manifest template is [`slack-app-manifest.yaml`](slack-app-manifest.yaml).
 Replace `agents-party.example.com` with the public HTTPS host before importing it into Slack.
 
-Use a static bot token for local single-workspace development only. Production-like runtimes are
-multi-workspace and require the database-backed Slack installation store:
+Slack runtime authorization uses the database-backed Slack installation store:
 
 ```bash
 SLACK_SIGNING_SECRET=...
@@ -285,9 +274,6 @@ SLACK_INSTALL_PATH=/slack/install
 SLACK_OAUTH_REDIRECT_PATH=/slack/oauth_redirect
 AGENT_MODEL=google:gemini-2.5-flash
 ```
-
-For local single-workspace development without the installation store, set `SLACK_BOT_TOKEN` and
-`SLACK_SIGNING_SECRET` instead of the Slack OAuth client settings.
 
 `AGENT_MODEL` is the application bootstrap/fallback model passed to the TypeScript `AgentRunner`
 when Slack routing has not supplied a thread, channel, or workspace model. Local development can
@@ -303,7 +289,7 @@ VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 LLM_API_KEY_ENCRYPTION_KEY=...
 ```
 
-When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Production-like runtimes (`APP_ENV=heroku`, `APP_ENV=prod`, `APP_ENV=production`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set) require both values at startup so provider calls cannot silently fall back to process-level provider keys. Without that resolver, local development can still use process-level provider environment variables supported by the AI SDK provider packages.
+When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Production-like runtimes (`APP_ENV=heroku`, `APP_ENV=prod`, `APP_ENV=production`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set) require both values at startup so provider calls cannot silently fall back to process-level provider keys. Without that resolver, isolated local development can still use process-level provider environment variables supported by the AI SDK provider packages.
 
 ### Local database
 
@@ -373,13 +359,7 @@ IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
 VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 ```
 
-For local fallback only:
-
-```bash
-GOOGLE_GENERATIVE_AI_API_KEY=...
-```
-
-The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call provider-aware media gateways. In workspace-credential mode they use the encrypted provider credential row for the Slack team, for example `provider_kind='google'` / `credential_name='api_key'` for Google image and video models and `provider_kind='openai'` / `credential_name='api_key'` for OpenAI image models. `GOOGLE_GENERATIVE_AI_API_KEY` or `GEMINI_API_KEY` remain local fallbacks only for Google media models.
+The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call provider-aware media gateways. In workspace-credential mode they use the encrypted provider credential row for the Slack team, for example `provider_kind='google'` / `credential_name='api_key'` for Google image and video models and `provider_kind='openai'` / `credential_name='api_key'` for OpenAI image models. Provider-package process environment fallbacks are for isolated local testing only.
 
 ## Deployment
 

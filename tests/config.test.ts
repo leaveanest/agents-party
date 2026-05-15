@@ -24,12 +24,10 @@ describe("loadSettings", () => {
       googleOAuthStartPath: "/oauth/google/start",
       googleTokenEncryptionKey: undefined,
       googleMapsApiKey: undefined,
-      googleGenerativeAiApiKey: undefined,
       transcriptionAlternativeLanguageCodes: ["en-US"],
       transcriptionLanguageCode: "ja-JP",
       transcriptionModelId: "google:speech-to-text-latest-long",
       videoGenerationModelId: "google:veo-3.1-fast-generate-001",
-      slackBotToken: undefined,
       slackClientId: undefined,
       slackClientSecret: undefined,
       slackAgentQueueEnabled: false,
@@ -129,7 +127,6 @@ describe("loadSettings", () => {
     expect(() =>
       loadSettings({
         ...baseEnv,
-        SLACK_BOT_TOKEN: "xoxb-token",
         SLACK_SIGNING_SECRET: "signing-secret",
       }),
     ).toThrow("SLACK_CLIENT_ID is required for production-like multi-workspace");
@@ -162,13 +159,12 @@ describe("loadSettings", () => {
     expect(settings.slackOAuthInstallEnabled).toBe(true);
   });
 
-  it("enables static-token Slack ingress with signing secret and bot token", () => {
+  it("does not enable Slack ingress without installation storage", () => {
     const settings = loadSettings({
-      SLACK_BOT_TOKEN: "xoxb-token",
       SLACK_SIGNING_SECRET: "secret",
     });
 
-    expect(settings.slackEnabled).toBe(true);
+    expect(settings.slackEnabled).toBe(false);
     expect(settings.slackInstallationStoreEnabled).toBe(false);
     expect(settings.slackOAuthInstallEnabled).toBe(false);
   });
@@ -241,14 +237,12 @@ describe("loadSettings", () => {
     expect(loadSettings({ GOOGLE_MAPS_API_KEY: "maps-key" }).googleMapsApiKey).toBe("maps-key");
   });
 
-  it("reads the Google GenAI API key and media model overrides", () => {
+  it("reads media model overrides", () => {
     const settings = loadSettings({
-      GEMINI_API_KEY: "gemini-key",
       IMAGE_GENERATION_MODEL: "google:image-model",
       VIDEO_GENERATION_MODEL: "google:video-model",
     });
 
-    expect(settings.googleGenerativeAiApiKey).toBe("gemini-key");
     expect(settings.imageGenerationModelId).toBe("google:image-model");
     expect(settings.videoGenerationModelId).toBe("google:video-model");
   });
