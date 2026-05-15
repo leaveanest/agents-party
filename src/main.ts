@@ -72,6 +72,7 @@ const slackGateway = settings.slackEnabled
       featureHandlers: createAgentSlackHandlers(agentRunner, {
         agentJobQueue,
         audioTranscriptionGateway,
+        defaultLocale: settings.defaultLocale,
         routingRepository,
         salesforceConnectionHome:
           settings.salesforceOAuthEnabled &&

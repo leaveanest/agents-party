@@ -1,3 +1,5 @@
+import { DEFAULT_LOCALE, resolveLocale, type Locale } from "./i18n/index.js";
+
 export type AppSettings = {
   agentModelId: string;
   appEnv: string;
@@ -5,6 +7,7 @@ export type AppSettings = {
   appName: string;
   appPort: number;
   databaseUrl: string | undefined;
+  defaultLocale: Locale;
   redisUrl?: string;
   imageGenerationModelId: string;
   llmApiKeyEncryptionKey: string | undefined;
@@ -153,6 +156,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     appName: env.APP_NAME ?? "Agents party",
     appPort: parsePort(env.PORT ?? env.APP_PORT, DEFAULT_PORT),
     databaseUrl,
+    defaultLocale: resolveLocale(readText(env.APP_DEFAULT_LOCALE), DEFAULT_LOCALE),
     redisUrl,
     imageGenerationModelId:
       readText(env.IMAGE_GENERATION_MODEL) ?? DEFAULT_IMAGE_GENERATION_MODEL_ID,

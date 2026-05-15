@@ -262,7 +262,12 @@ The TypeScript runtime reads configuration from process environment variables.
 APP_ENV=local
 APP_HOST=0.0.0.0
 APP_PORT=8000
+APP_DEFAULT_LOCALE=ja
 ```
+
+`APP_DEFAULT_LOCALE` controls Slack-visible fallback display language when a Slack user locale is
+unavailable or unsupported. Supported values are `ja` and `en`; unsupported values fall back to
+`ja`.
 
 ### Slack
 
@@ -281,6 +286,7 @@ SLACK_USER_SCOPES=
 SLACK_EVENTS_PATH=/slack/events
 SLACK_INSTALL_PATH=/slack/install
 SLACK_OAUTH_REDIRECT_PATH=/slack/oauth_redirect
+APP_DEFAULT_LOCALE=ja
 AGENT_MODEL=google:gemini-2.5-flash
 ```
 

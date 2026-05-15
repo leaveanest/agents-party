@@ -62,9 +62,10 @@ const worker = createBullMqSlackAgentJobWorker(settings.redisUrl, async (job, co
     teamId: job.teamId,
   });
   await processSlackAgentJob(job, {
-    client,
-    logger: console,
     audioTranscriptionGateway,
+    client,
+    defaultLocale: settings.defaultLocale,
+    logger: console,
     retryContext: context,
     routingRepository,
     runner,

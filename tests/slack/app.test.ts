@@ -10,6 +10,7 @@ const baseSettings: AppSettings = {
   appName: "Agents party",
   appPort: 0,
   databaseUrl: undefined,
+  defaultLocale: "ja",
   imageGenerationModelId: "google:gemini-2.5-flash-image",
   llmApiKeyEncryptionKey: undefined,
   googleOAuthCallbackPath: "/oauth/google/callback",
