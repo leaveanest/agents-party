@@ -141,6 +141,7 @@ describe("createAgentSlackHandlers", () => {
 
   it("opens the Salesforce PDF workflow modal for Slack workspace admins", async () => {
     const openedViews: unknown[] = [];
+    const updatedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       salesforcePdfWorkflowHome: {
         repository: {
@@ -170,6 +171,10 @@ describe("createAgentSlackHandlers", () => {
         views: {
           open: async (payload: unknown) => {
             openedViews.push(payload);
+            return { view: { id: "VIEW1" } };
+          },
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
             return {};
           },
         },
@@ -181,23 +186,33 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         trigger_id: "TRIGGER1",
         view: expect.objectContaining({
+          type: "modal",
+        }),
+      }),
+    ]);
+    expect(updatedViews).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({
           callback_id: "salesforce_pdf_workflow_modal",
           private_metadata: expect.stringContaining('"teamId":"T1"'),
         }),
       }),
     ]);
-    expect(JSON.stringify(openedViews[0])).toContain("quote_v1");
-    expect(JSON.stringify(openedViews[0])).toContain("012000000000001AAA");
+    expect(JSON.stringify(updatedViews[0])).toContain("quote_v1");
+    expect(JSON.stringify(updatedViews[0])).toContain("012000000000001AAA");
   });
 
   it("opens Salesforce PDF workflow modals before resolving stored user locale", async () => {
     const openedViews: unknown[] = [];
     const updatedViews: unknown[] = [];
+    let userInfoCalls = 0;
     const handlers = createAgentSlackHandlers({} as never, {
       defaultLocale: "ja",
       salesforcePdfWorkflowHome: {
         repository: {
           async findSalesforcePdfWorkflowSetting(): Promise<JsonObject> {
+            expect(openedViews).toHaveLength(1);
             return validSalesforcePdfWorkflowSetting();
           },
           async listSalesforcePdfWorkflowSettings(): Promise<JsonObject[]> {
@@ -228,13 +243,18 @@ describe("createAgentSlackHandlers", () => {
       ack: async () => undefined,
       body: {
         actions: [{ value: JSON.stringify({ action: "quote_pdf", salesforceOrgId: "00DORG" }) }],
+        enterprise: { id: "E1" },
         team: { id: "T1" },
         trigger_id: "TRIGGER1",
         user: { id: "UADMIN" },
       },
       client: {
         users: {
-          info: async () => ({ user: { is_admin: true } }),
+          info: async () => {
+            expect(openedViews).toHaveLength(1);
+            userInfoCalls += 1;
+            return { user: { is_admin: true } };
+          },
         },
         views: {
           open: async (payload: unknown) => {
@@ -250,8 +270,10 @@ describe("createAgentSlackHandlers", () => {
       logger: { warn() {} },
     } as never);
 
-    expect(JSON.stringify(openedViews[0])).toContain("許可するステージ");
+    expect(userInfoCalls).toBe(1);
+    expect(JSON.stringify(openedViews[0])).toContain("ワークフロー設定を読み込んでいます");
     expect(JSON.stringify(updatedViews[0])).toContain("Allowed stages");
+    expect(JSON.stringify(updatedViews[0])).toContain('\\"enterpriseId\\":\\"E1\\"');
   });
 
   it("saves Salesforce PDF workflow settings from modal submissions", async () => {

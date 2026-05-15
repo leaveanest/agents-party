@@ -725,59 +725,54 @@ async function handleSalesforcePdfWorkflowConfigureAction(
     return;
   }
   const translator = createTranslator(options.defaultLocale ?? FALLBACK_LOCALE);
-  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
-  if (options.salesforcePdfWorkflowHome === undefined) {
-    const response = await client.views.open({
-      trigger_id: triggerId,
-      view: buildSalesforcePdfWorkflowResultModal(
-        translator.t("salesforcePdf.title"),
-        translator.t("salesforcePdf.error.processNotConfigured"),
-        translator,
-      ) as never,
-    });
-    await updateOpenedSalesforcePdfWorkflowModalLocale({
-      client,
-      logger,
-      response,
-      slackUserId,
-      enterpriseId,
-      teamId,
+  const response = await client.views.open({
+    trigger_id: triggerId,
+    view: buildSalesforcePdfWorkflowResultModal(
+      translator.t("salesforcePdf.title"),
+      translator.t("salesforcePdf.result.loading"),
       translator,
+    ) as never,
+  });
+  const localizedTranslator = await resolveHandlerTranslator(
+    { enterpriseId, teamId },
+    slackUserId,
+    {
+      defaultLocale: translator.locale,
       userSettingsRepository: options.userSettingsRepository,
-      view: (localizedTranslator) =>
-        buildSalesforcePdfWorkflowResultModal(
-          localizedTranslator.t("salesforcePdf.title"),
-          localizedTranslator.t("salesforcePdf.error.processNotConfigured"),
-          localizedTranslator,
-        ),
-    });
+    },
+    logger,
+  );
+  const openedView = isRecord(response) ? response.view : undefined;
+  if (options.salesforcePdfWorkflowHome === undefined) {
+    await updateSalesforcePdfWorkflowModal(
+      client,
+      openedView,
+      buildSalesforcePdfWorkflowResultModal(
+        localizedTranslator.t("salesforcePdf.title"),
+        localizedTranslator.t("salesforcePdf.error.processNotConfigured"),
+        localizedTranslator,
+      ),
+      logger,
+    );
     return;
   }
+  const userContext = await resolveSlackUserContext(
+    client,
+    slackUserId,
+    localizedTranslator,
+    logger,
+  );
   if (!userContext.isWorkspaceAdmin) {
-    const response = await client.views.open({
-      trigger_id: triggerId,
-      view: buildSalesforcePdfWorkflowResultModal(
-        translator.t("salesforcePdf.title"),
-        translator.t("salesforcePdf.error.unauthorized"),
-        translator,
-      ) as never,
-    });
-    await updateOpenedSalesforcePdfWorkflowModalLocale({
+    await updateSalesforcePdfWorkflowModal(
       client,
+      openedView,
+      buildSalesforcePdfWorkflowResultModal(
+        localizedTranslator.t("salesforcePdf.title"),
+        localizedTranslator.t("salesforcePdf.error.unauthorized"),
+        localizedTranslator,
+      ),
       logger,
-      response,
-      slackUserId,
-      enterpriseId,
-      teamId,
-      translator,
-      userSettingsRepository: options.userSettingsRepository,
-      view: (localizedTranslator) =>
-        buildSalesforcePdfWorkflowResultModal(
-          localizedTranslator.t("salesforcePdf.title"),
-          localizedTranslator.t("salesforcePdf.error.unauthorized"),
-          localizedTranslator,
-        ),
-    });
+    );
     return;
   }
 
@@ -789,67 +784,18 @@ async function handleSalesforcePdfWorkflowConfigureAction(
     );
   const parsedCurrent =
     current === undefined ? undefined : salesforcePdfWorkflowSettingsSchema.safeParse(current);
-  const response = await client.views.open({
-    trigger_id: triggerId,
-    view: buildSalesforcePdfWorkflowModal({
+  await updateSalesforcePdfWorkflowModal(
+    client,
+    openedView,
+    buildSalesforcePdfWorkflowModal({
       action: actionValue.action,
       salesforceOrgId: actionValue.salesforceOrgId,
       settings: parsedCurrent?.success === true ? parsedCurrent.data : undefined,
       enterpriseId,
       teamId,
-      translator,
-    }) as never,
-  });
-  await updateOpenedSalesforcePdfWorkflowModalLocale({
-    client,
+      translator: localizedTranslator,
+    }),
     logger,
-    response,
-    slackUserId,
-    enterpriseId,
-    teamId,
-    translator,
-    userSettingsRepository: options.userSettingsRepository,
-    view: (localizedTranslator) =>
-      buildSalesforcePdfWorkflowModal({
-        action: actionValue.action,
-        salesforceOrgId: actionValue.salesforceOrgId,
-        settings: parsedCurrent?.success === true ? parsedCurrent.data : undefined,
-        enterpriseId,
-        teamId,
-        translator: localizedTranslator,
-      }),
-  });
-}
-
-async function updateOpenedSalesforcePdfWorkflowModalLocale(input: {
-  client: SlackClient;
-  logger: unknown;
-  response: unknown;
-  enterpriseId: string | undefined;
-  slackUserId: string;
-  teamId: string;
-  translator: Translator;
-  userSettingsRepository: UserSettingsRepository | undefined;
-  view(translator: Translator): Record<string, unknown>;
-}): Promise<void> {
-  const translator = await resolveHandlerTranslator(
-    { enterpriseId: input.enterpriseId, teamId: input.teamId },
-    input.slackUserId,
-    {
-      defaultLocale: input.translator.locale,
-      userSettingsRepository: input.userSettingsRepository,
-    },
-    input.logger,
-  );
-  if (translator.locale === input.translator.locale) {
-    return;
-  }
-  const openedView = isRecord(input.response) ? input.response.view : undefined;
-  await updateSalesforcePdfWorkflowModal(
-    input.client,
-    openedView,
-    input.view(translator),
-    input.logger,
   );
 }
 
@@ -2568,7 +2514,7 @@ async function updateSalesforcePdfWorkflowModal(
   modal: Record<string, unknown>,
   logger: unknown,
 ): Promise<void> {
-  const viewId = readString(view as unknown as StringIndexed, "id");
+  const viewId = isRecord(view) ? readString(view, "id") : undefined;
   if (viewId === undefined) {
     logWarn(logger, "Could not update Salesforce PDF workflow modal without Slack view id.", {});
     return;
@@ -2589,7 +2535,7 @@ async function updateWorkspaceCredentialModal(
   modal: Record<string, unknown>,
   logger: unknown,
 ): Promise<void> {
-  const viewId = readString(view as unknown as StringIndexed, "id");
+  const viewId = isRecord(view) ? readString(view, "id") : undefined;
   if (viewId === undefined) {
     logWarn(logger, "Could not update API key modal without Slack view id.", {});
     return;
@@ -3255,8 +3201,22 @@ function readBodyString(value: unknown, field: string): string | undefined {
 
 function readSlackEnterpriseId(body: unknown): string | undefined {
   return (
-    readBodyString(body, "enterprise_id") ?? readFirstAuthorizationString(body, "enterprise_id")
+    readBodyString(body, "enterprise_id") ??
+    readNestedString(body, "enterprise", "id") ??
+    readFirstAuthorizationString(body, "enterprise_id")
   );
+}
+
+function readNestedString(
+  value: unknown,
+  parentField: string,
+  childField: string,
+): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const parent = value[parentField];
+  return isRecord(parent) ? readString(parent, childField) : undefined;
 }
 
 function readSlackEnterpriseInstall(body: unknown): boolean | undefined {
