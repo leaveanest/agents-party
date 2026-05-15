@@ -8,7 +8,7 @@ describe("loadSettings", () => {
       agentModelId: "google:gemini-2.5-flash",
       appEnv: "local",
       appHost: "0.0.0.0",
-      appName: "agents-party",
+      appName: "Agents party",
       appPort: 8000,
       databaseUrl: undefined,
       redisUrl: undefined,

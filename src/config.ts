@@ -151,7 +151,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     agentModelId,
     appEnv,
     appHost: env.APP_HOST ?? "0.0.0.0",
-    appName: env.APP_NAME ?? "agents-party",
+    appName: env.APP_NAME ?? "Agents party",
     appPort: parsePort(env.PORT ?? env.APP_PORT, DEFAULT_PORT),
     databaseUrl,
     redisUrl,

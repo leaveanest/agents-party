@@ -1,5 +1,5 @@
 display_information:
-  name: Party on Slack
+  name: Agents party
   description: Slack-native agent routing for channel and thread workflows.
   background_color: "#1f2937"
 features:
@@ -7,7 +7,7 @@ features:
     home_tab_enabled: true
     messages_tab_enabled: false
   bot_user:
-    display_name: Party on Slack
+    display_name: Agents party
     always_online: false
 oauth_config:
   redirect_urls:

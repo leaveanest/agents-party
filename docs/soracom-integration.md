@@ -1,6 +1,6 @@
 # SORACOM Integration
 
-Agents Party exposes SORACOM as read-only agent tools. Slack users do not run slash
+Agents party exposes SORACOM as read-only agent tools. Slack users do not run slash
 commands and Slack routing does not select a SORACOM-specific specialist. The selected
 model decides whether to call these tools during normal tool calling.
 
