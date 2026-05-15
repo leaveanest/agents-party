@@ -68,4 +68,23 @@ describe("createSlackApp", () => {
     expect(result.installationStore).toBeDefined();
     await result.close();
   });
+
+  it("constructs a Bolt app with OAuth installation enabled", async () => {
+    const result = createSlackApp({
+      ...baseSettings,
+      databaseUrl: "postgres://localhost/app",
+      slackClientId: "123.456",
+      slackClientSecret: "client-secret",
+      slackEnabled: true,
+      slackInstallationStoreEnabled: true,
+      slackOAuthInstallEnabled: true,
+      slackSigningSecret: "secret",
+      slackStateSecret: "state-secret",
+    });
+
+    expect(result.app).toBeDefined();
+    expect(result.receiver).toBeDefined();
+    expect(result.installationStore).toBeDefined();
+    await result.close();
+  });
 });

@@ -15,12 +15,16 @@ import {
   SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
   WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
   WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
+  WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
 } from "./interactiveIds.js";
 
 export type SlackEventFeatureHandlers = {
   handleAppHomeOpened(args: SlackEventArgs<"app_home_opened">): Promise<void>;
   handleAppMention(args: SlackEventArgs<"app_mention">): Promise<void>;
   handleWorkspaceCredentialConfigureAction(
+    args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
+  handleWorkspaceCredentialProviderSelectAction(
     args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
   ): Promise<void>;
   handleWorkspaceCredentialModalSubmission(
@@ -69,6 +73,9 @@ export function registerSlackEventHandlers(
   app.event("reaction_added", async (args) => handlers.handleReactionAdded(args));
   app.action(WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID, async (args) =>
     handlers.handleWorkspaceCredentialConfigureAction(args),
+  );
+  app.action(WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID, async (args) =>
+    handlers.handleWorkspaceCredentialProviderSelectAction(args),
   );
   app.action(SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID, async (args) =>
     handlers.handleSalesforcePdfWorkflowConfigureAction(args),
@@ -133,6 +140,9 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
       });
     },
     async handleWorkspaceCredentialConfigureAction({ ack }) {
+      await ack();
+    },
+    async handleWorkspaceCredentialProviderSelectAction({ ack }) {
       await ack();
     },
     async handleWorkspaceCredentialModalSubmission({ ack }) {

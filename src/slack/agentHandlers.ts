@@ -265,6 +265,9 @@ export function createAgentSlackHandlers(
     async handleWorkspaceCredentialConfigureAction(args) {
       await handleWorkspaceCredentialConfigureAction(args, options);
     },
+    async handleWorkspaceCredentialProviderSelectAction(args) {
+      await handleWorkspaceCredentialProviderSelectAction(args);
+    },
     async handleWorkspaceCredentialModalSubmission(args) {
       await handleWorkspaceCredentialModalSubmission(args, options);
     },
@@ -446,8 +449,36 @@ async function handleWorkspaceCredentialConfigureAction(
   }
   await client.views.open({
     trigger_id: triggerId,
-    view: buildWorkspaceCredentialModal(teamId) as never,
+    view: buildWorkspaceCredentialModal(teamId, "openai") as never,
   });
+}
+
+async function handleWorkspaceCredentialProviderSelectAction({
+  ack,
+  body,
+  client,
+  logger,
+}: SlackActionArgs): Promise<void> {
+  await ack();
+  const view = isRecord(body) ? body.view : undefined;
+  const teamId =
+    (isRecord(view) ? readString(view, "private_metadata") : undefined) ?? readTeamId(body, {});
+  const providerValue = readSelectedOptionValue(
+    view,
+    WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
+    WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
+  );
+  const providerKind = parseCredentialProviderKind(providerValue) ?? "openai";
+  logInfo(logger, "Updating workspace credential modal for selected provider.", {
+    providerKind,
+    teamId,
+  });
+  await updateWorkspaceCredentialModal(
+    client,
+    view,
+    buildWorkspaceCredentialModal(teamId ?? "", providerKind),
+    logger,
+  );
 }
 
 async function handleWorkspaceCredentialModalSubmission(
@@ -1700,7 +1731,10 @@ async function fetchSingleMessage(
   return message;
 }
 
-function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> {
+function buildWorkspaceCredentialModal(
+  teamId: string,
+  providerKind: CredentialProviderKind,
+): Record<string, unknown> {
   return {
     callback_id: WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID,
     private_metadata: teamId,
@@ -1710,9 +1744,10 @@ function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> 
     blocks: [
       {
         block_id: WORKSPACE_CREDENTIAL_PROVIDER_BLOCK_ID,
+        dispatch_action: true,
         element: {
           action_id: WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID,
-          initial_option: workspaceCredentialProviderOptions[0],
+          initial_option: workspaceCredentialProviderOption(providerKind),
           options: workspaceCredentialProviderOptions,
           type: "static_select",
         },
@@ -1725,46 +1760,22 @@ function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> 
           action_id: WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
           type: "plain_text_input",
         },
-        label: { text: "API key or AuthKey Secret", type: "plain_text" },
-        type: "input",
-      },
-      {
-        block_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID,
-        element: {
-          action_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_ACTION_ID,
-          placeholder: { text: "keyId-xxxxxxxxxx", type: "plain_text" },
-          type: "plain_text_input",
+        label: {
+          text: providerKind === "soracom" ? "SORACOM AuthKey Secret" : "API key",
+          type: "plain_text",
         },
-        label: { text: "SORACOM AuthKey ID", type: "plain_text" },
-        optional: true,
         type: "input",
       },
-      {
-        block_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID,
-        element: {
-          action_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID,
-          initial_option: { text: { text: "Global", type: "plain_text" }, value: "global" },
-          options: [
-            { text: { text: "Global", type: "plain_text" }, value: "global" },
-            { text: { text: "Japan", type: "plain_text" }, value: "japan" },
-          ],
-          type: "static_select",
-        },
-        label: { text: "SORACOM coverage", type: "plain_text" },
-        optional: true,
-        type: "input",
-      },
-      {
-        block_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID,
-        element: {
-          action_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID,
-          placeholder: { text: "OP0012345678", type: "plain_text" },
-          type: "plain_text_input",
-        },
-        label: { text: "SORACOM Operator ID", type: "plain_text" },
-        optional: true,
-        type: "input",
-      },
+      ...workspaceCredentialProviderDetailBlocks(providerKind),
+    ],
+  };
+}
+
+function workspaceCredentialProviderDetailBlocks(
+  providerKind: CredentialProviderKind,
+): Record<string, unknown>[] {
+  if (providerKind !== "soracom") {
+    return [
       {
         block_id: WORKSPACE_CREDENTIAL_BASE_URL_BLOCK_ID,
         element: {
@@ -1776,8 +1787,54 @@ function buildWorkspaceCredentialModal(teamId: string): Record<string, unknown> 
         optional: true,
         type: "input",
       },
-    ],
-  };
+    ];
+  }
+  return [
+    {
+      block_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_BLOCK_ID,
+      element: {
+        action_id: WORKSPACE_CREDENTIAL_SORACOM_AUTH_KEY_ID_ACTION_ID,
+        placeholder: { text: "keyId-xxxxxxxxxx", type: "plain_text" },
+        type: "plain_text_input",
+      },
+      label: { text: "SORACOM AuthKey ID", type: "plain_text" },
+      type: "input",
+    },
+    {
+      block_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_BLOCK_ID,
+      element: {
+        action_id: WORKSPACE_CREDENTIAL_SORACOM_COVERAGE_ACTION_ID,
+        initial_option: { text: { text: "Global", type: "plain_text" }, value: "global" },
+        options: [
+          { text: { text: "Global", type: "plain_text" }, value: "global" },
+          { text: { text: "Japan", type: "plain_text" }, value: "japan" },
+        ],
+        type: "static_select",
+      },
+      label: { text: "SORACOM coverage", type: "plain_text" },
+      type: "input",
+    },
+    {
+      block_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID,
+      element: {
+        action_id: WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID,
+        placeholder: { text: "OP0012345678", type: "plain_text" },
+        type: "plain_text_input",
+      },
+      label: { text: "SORACOM Operator ID", type: "plain_text" },
+      optional: true,
+      type: "input",
+    },
+  ];
+}
+
+function workspaceCredentialProviderOption(
+  providerKind: CredentialProviderKind,
+): (typeof workspaceCredentialProviderOptions)[number] {
+  return (
+    workspaceCredentialProviderOptions.find((option) => option.value === providerKind) ??
+    workspaceCredentialProviderOptions[0]
+  );
 }
 
 function buildWorkspaceCredentialSavingModal(): Record<string, unknown> {

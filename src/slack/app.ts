@@ -71,11 +71,16 @@ export function createSlackApp(
     throw new Error("Slack installation storage is required.");
   }
   const receiver = new HTTPReceiver(buildReceiverOptions(settings, installationStore));
-  const app = new App({
-    authorize: buildAuthorize(settings, installationStore),
-    ignoreSelf: true,
-    receiver,
-  });
+  const app = settings.slackOAuthInstallEnabled
+    ? new App({
+        ignoreSelf: true,
+        receiver,
+      })
+    : new App({
+        authorize: buildAuthorize(settings, installationStore),
+        ignoreSelf: true,
+        receiver,
+      });
 
   registerSlackEventHandlers(
     app,

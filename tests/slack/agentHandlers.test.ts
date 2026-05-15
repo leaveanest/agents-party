@@ -464,6 +464,51 @@ describe("createAgentSlackHandlers", () => {
         }),
       }),
     ]);
+    expect(JSON.stringify(openedViews[0])).toContain('"dispatch_action":true');
+    expect(JSON.stringify(openedViews[0])).not.toContain("SORACOM AuthKey ID");
+    expect(JSON.stringify(openedViews[0])).toContain("Base URL");
+  });
+
+  it("updates the API key modal fields when SORACOM is selected", async () => {
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never);
+
+    await handlers.handleWorkspaceCredentialProviderSelectAction({
+      ack: async () => {},
+      body: {
+        view: {
+          id: "VIEW1",
+          private_metadata: "T1",
+          state: {
+            values: {
+              workspace_credential_provider: {
+                provider_kind: { selected_option: { value: "soracom" } },
+              },
+            },
+          },
+        },
+      },
+      client: {
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(updates).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({
+          private_metadata: "T1",
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(updates[0])).toContain("SORACOM AuthKey ID");
+    expect(JSON.stringify(updates[0])).not.toContain("Base URL");
   });
 
   it("saves workspace provider API keys from modal submissions", async () => {
