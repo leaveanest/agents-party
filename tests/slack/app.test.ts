@@ -22,12 +22,10 @@ const baseSettings: AppSettings = {
   googleOAuthStartPath: "/oauth/google/start",
   googleTokenEncryptionKey: undefined,
   googleMapsApiKey: undefined,
-  googleGenerativeAiApiKey: undefined,
   transcriptionAlternativeLanguageCodes: ["en-US"],
   transcriptionLanguageCode: "ja-JP",
   transcriptionModelId: "google:speech-to-text-latest-long",
   videoGenerationModelId: "google:veo-3.1-fast-generate-001",
-  slackBotToken: undefined,
   slackClientId: undefined,
   slackClientSecret: undefined,
   slackEnabled: false,
@@ -55,16 +53,19 @@ describe("createSlackApp", () => {
     expect(() => createSlackApp(baseSettings)).toThrow("Slack is not configured");
   });
 
-  it("constructs a Bolt app in static token mode", () => {
+  it("constructs a Bolt app with installation storage", async () => {
     const result = createSlackApp({
       ...baseSettings,
-      slackBotToken: "xoxb-token",
+      databaseUrl: "postgres://localhost/app",
+      slackClientId: "123.456",
       slackEnabled: true,
+      slackInstallationStoreEnabled: true,
       slackSigningSecret: "secret",
     });
 
     expect(result.app).toBeDefined();
     expect(result.receiver).toBeDefined();
-    expect(result.installationStore).toBeUndefined();
+    expect(result.installationStore).toBeDefined();
+    await result.close();
   });
 });

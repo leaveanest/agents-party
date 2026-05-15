@@ -18,12 +18,10 @@ export type AppSettings = {
   googleOAuthStartPath: string;
   googleTokenEncryptionKey: string | undefined;
   googleMapsApiKey: string | undefined;
-  googleGenerativeAiApiKey: string | undefined;
   transcriptionAlternativeLanguageCodes: string[];
   transcriptionLanguageCode: string;
   transcriptionModelId: string;
   videoGenerationModelId: string;
-  slackBotToken: string | undefined;
   slackClientId: string | undefined;
   slackClientSecret: string | undefined;
   slackAgentQueueEnabled?: boolean;
@@ -95,9 +93,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
   );
   const googleTokenEncryptionKey = readText(env.GOOGLE_TOKEN_ENCRYPTION_KEY);
   const googleMapsApiKey = readText(env.GOOGLE_MAPS_API_KEY);
-  const googleGenerativeAiApiKey =
-    readText(env.GOOGLE_GENERATIVE_AI_API_KEY) ?? readText(env.GEMINI_API_KEY);
-  const slackBotToken = readText(env.SLACK_BOT_TOKEN);
   const slackClientId = readText(env.SLACK_CLIENT_ID);
   const slackClientSecret = readText(env.SLACK_CLIENT_SECRET);
   const slackSigningSecret = readText(env.SLACK_SIGNING_SECRET);
@@ -107,9 +102,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     slackInstallationStoreEnabled &&
     slackClientSecret !== undefined &&
     slackStateSecret !== undefined;
-  const slackEnabled =
-    slackSigningSecret !== undefined &&
-    (slackBotToken !== undefined || slackInstallationStoreEnabled);
+  const slackEnabled = slackSigningSecret !== undefined && slackInstallationStoreEnabled;
   assertProductionSlackInstallationStoreSettings(env, appEnv, {
     databaseUrl,
     slackClientId,
@@ -175,7 +168,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     googleOAuthStartPath,
     googleTokenEncryptionKey,
     googleMapsApiKey,
-    googleGenerativeAiApiKey,
     transcriptionAlternativeLanguageCodes: parseList(
       env.TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES,
       DEFAULT_TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES,
@@ -185,7 +177,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     transcriptionModelId: readText(env.TRANSCRIPTION_MODEL) ?? DEFAULT_TRANSCRIPTION_MODEL_ID,
     videoGenerationModelId:
       readText(env.VIDEO_GENERATION_MODEL) ?? DEFAULT_VIDEO_GENERATION_MODEL_ID,
-    slackBotToken,
     slackClientId,
     slackClientSecret,
     slackAgentQueueEnabled: parseBoolean(env.SLACK_AGENT_QUEUE_ENABLED, false),

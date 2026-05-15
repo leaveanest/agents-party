@@ -36,16 +36,19 @@ services:
         condition: service_healthy
     environment: &app_environment
       AGENT_MODEL: ${AGENT_MODEL:-google:gemini-2.5-flash}
-      APP_ENV: ${APP_ENV:-production}
+      APP_ENV: ${APP_ENV:-local}
+      APP_HOST: 0.0.0.0
       DATABASE_URL: postgresql://agents_party:agents_party@postgres:5432/agents_party
-      LLM_API_KEY_ENCRYPTION_KEY: ${LLM_API_KEY_ENCRYPTION_KEY:-fFG7i2JvbhwExKzWSpQ9hCOca6nLMyDNdTlPV7sGoAs}
-      PORT: ${PORT:-8000}
+      LLM_API_KEY_ENCRYPTION_KEY: ${LLM_API_KEY_ENCRYPTION_KEY:-}
+      APP_PORT: ${APP_PORT:-8000}
       REDIS_URL: redis://redis:6379
       SLACK_AGENT_QUEUE_ENABLED: ${SLACK_AGENT_QUEUE_ENABLED:-true}
-      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-local-client-id}
-      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-local-client-secret}
-      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-local-signing-secret}
-      SLACK_STATE_SECRET: ${SLACK_STATE_SECRET:-local-state-secret}
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SLACK_SCOPES: ${SLACK_SCOPES:-}
+      SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
+      SLACK_STATE_SECRET: ${SLACK_STATE_SECRET:-}
+      SLACK_USER_SCOPES: ${SLACK_USER_SCOPES:-}
 
   seed:
     build: .

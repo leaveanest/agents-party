@@ -55,7 +55,7 @@ export function createSlackApp(
 } {
   if (!settings.slackEnabled || settings.slackSigningSecret === undefined) {
     throw new Error(
-      "Slack is not configured. Set SLACK_SIGNING_SECRET and either SLACK_BOT_TOKEN or SLACK_CLIENT_ID with DATABASE_URL.",
+      "Slack is not configured. Set SLACK_SIGNING_SECRET, SLACK_CLIENT_ID, and DATABASE_URL.",
     );
   }
 
@@ -67,13 +67,14 @@ export function createSlackApp(
           store: dependencies.installationStore,
         };
   const installationStore = installationStoreHandle.store;
+  if (installationStore === undefined) {
+    throw new Error("Slack installation storage is required.");
+  }
   const receiver = new HTTPReceiver(buildReceiverOptions(settings, installationStore));
   const app = new App({
-    authorize:
-      installationStore === undefined ? undefined : buildAuthorize(settings, installationStore),
+    authorize: buildAuthorize(settings, installationStore),
     ignoreSelf: true,
     receiver,
-    token: installationStore === undefined ? settings.slackBotToken : undefined,
   });
 
   registerSlackEventHandlers(
@@ -93,12 +94,6 @@ function buildInstallationStore(settings: AppSettings): {
   close(): Promise<void>;
   store: InstallationStore | undefined;
 } {
-  if (!settings.slackInstallationStoreEnabled) {
-    return {
-      close: async () => {},
-      store: undefined,
-    };
-  }
   if (settings.slackClientId === undefined || settings.databaseUrl === undefined) {
     throw new Error(
       "SLACK_CLIENT_ID and DATABASE_URL are required for Slack installation storage.",
