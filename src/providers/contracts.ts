@@ -84,6 +84,7 @@ export type LlmRequest = {
   providerOptions?: Record<string, Record<string, JsonValue>>;
   requiredCapabilities?: readonly LlmCapability[];
   responseFormat?: LlmResponseFormat;
+  system?: string;
   temperature?: number;
   tools?: readonly LlmToolDefinition[];
 };

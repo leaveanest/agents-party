@@ -89,8 +89,6 @@ export class AgentRunner {
     try {
       let history = buildAgentHistory({
         invocation,
-        model,
-        prompt: this.systemPrompt(),
         toolResults,
       });
       const requestBase: Omit<LlmRequest, "history"> = {
@@ -103,6 +101,7 @@ export class AgentRunner {
           slack_user_id: invocation.userId,
         },
         model,
+        system: this.systemPrompt(),
         tools: toolRegistry?.definitions(),
       };
       const maxToolRounds = this.options.maxToolRounds ?? 1;
@@ -121,8 +120,6 @@ export class AgentRunner {
         toolResults.push(...roundToolResults);
         history = buildAgentHistory({
           invocation,
-          model,
-          prompt: this.systemPrompt(),
           toolResults,
         });
       }
@@ -201,8 +198,6 @@ export function selectAgentAction(): AgentRouterDecision {
 
 function buildAgentHistory(input: {
   invocation: SlackAgentInvocation;
-  model: ModelInfo;
-  prompt: string;
   toolResults: AgentToolResult[];
 }): ConversationHistory {
   const threadHistoryMessages =
@@ -242,11 +237,6 @@ function buildAgentHistory(input: {
         );
   return {
     messages: [
-      {
-        content: input.prompt,
-        id: "system",
-        role: "system",
-      },
       ...threadHistoryMessages,
       {
         author: {

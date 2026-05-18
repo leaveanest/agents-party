@@ -62,6 +62,7 @@ describe("AiSdkLlmAdapter", () => {
     const result = await adapter.generate({
       history,
       model,
+      system: "Reply as a concise Slack assistant.",
       tools: [
         {
           name: "search",
@@ -76,6 +77,13 @@ describe("AiSdkLlmAdapter", () => {
       ],
     });
 
+    expect(languageModel.doGenerateCalls[0]?.prompt.at(0)).toEqual({
+      content: "Reply as a concise Slack assistant.",
+      role: "system",
+    });
+    expect(languageModel.doGenerateCalls[0]?.prompt.at(1)).toMatchObject({
+      role: "user",
+    });
     expect(result).toMatchObject({
       content: "Hello from AI SDK",
       finishReason: "stop",
@@ -413,10 +421,17 @@ describe("AiSdkLlmAdapter", () => {
     const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
 
     const events = [];
-    for await (const event of adapter.stream({ history, model })) {
+    for await (const event of adapter.stream({ history, model, system: "Stream concisely." })) {
       events.push(event);
     }
 
+    expect(languageModel.doStreamCalls[0]?.prompt.at(0)).toEqual({
+      content: "Stream concisely.",
+      role: "system",
+    });
+    expect(languageModel.doStreamCalls[0]?.prompt.at(1)).toMatchObject({
+      role: "user",
+    });
     expect(events).toEqual([
       { text: "Hel", type: "text-delta" },
       { text: "lo", type: "text-delta" },

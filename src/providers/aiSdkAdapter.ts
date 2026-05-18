@@ -157,6 +157,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
         model: this.resolveModel(request.model, credential),
         providerOptions: request.providerOptions,
         stopWhen: providerTools === undefined ? undefined : stepCountIs(10),
+        system: request.system,
         temperature: request.temperature,
         tools,
       });
@@ -212,6 +213,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
         model: this.resolveModel(request.model, credential),
         providerOptions: request.providerOptions,
         stopWhen: providerTools === undefined ? undefined : stepCountIs(10),
+        system: request.system,
         temperature: request.temperature,
         tools,
       });

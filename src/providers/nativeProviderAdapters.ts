@@ -104,6 +104,7 @@ export class GoogleWebSearchNativeAdapter implements LlmAdapter {
       ),
       model: googleProvider(request.model.providerModelId),
       providerOptions: request.providerOptions,
+      system: request.system,
       temperature: request.temperature,
       tools: {
         google_search: googleProvider.tools.googleSearch({}),

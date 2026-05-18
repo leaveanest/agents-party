@@ -61,6 +61,12 @@ describe("AgentRunner", () => {
       role: "user",
     });
     expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
+    expect(router.requests[0]?.system).toBe(
+      "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.",
+    );
+    expect(router.requests[0]?.history.messages.map((message) => message.role)).not.toContain(
+      "system",
+    );
   });
 
   it("uses an explicit invocation model before the default model", async () => {
@@ -358,7 +364,7 @@ describe("AgentRunner", () => {
       userId: "U1",
     });
 
-    expect(router.requests[0]?.history.messages.slice(1, 3)).toEqual([
+    expect(router.requests[0]?.history.messages.slice(0, 2)).toEqual([
       expect.objectContaining({
         author: { id: "slack:T1:U1", kind: "user" },
         role: "user",

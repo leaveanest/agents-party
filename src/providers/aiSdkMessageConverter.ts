@@ -64,11 +64,6 @@ function convertMessage(
   capabilities: AiSdkMessageConversionCapabilities,
 ): ModelMessage {
   switch (message.role) {
-    case "system":
-      return {
-        content: message.content,
-        role: "system",
-      };
     case "user":
       return {
         content: convertUserContent(message.content, capabilities),
@@ -104,6 +99,10 @@ function convertMessage(
         ),
         role: "tool",
       };
+    default:
+      throw new Error(
+        `Conversation history cannot contain system instructions. Pass system instructions via LlmRequest.system instead. Received role '${String((message as { role?: unknown }).role)}'.`,
+      );
   }
 }
 
