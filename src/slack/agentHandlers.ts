@@ -2561,6 +2561,26 @@ async function handleMessage(
     options,
     logger,
   );
+  const messageText = readString(event, "text") ?? "";
+  if (isMentionOnlyText(messageText, context?.botUserId)) {
+    await postMentionMenuMessage({
+      channelId: event.channel,
+      client,
+      enterpriseId,
+      teamId,
+      threadTs,
+      translator,
+    });
+    await activateMentionMenuThread({
+      channelId: event.channel,
+      logger,
+      messageTs: event.ts,
+      routingRepository: options.routingRepository,
+      teamId,
+      threadTs,
+    });
+    return;
+  }
   if (options.agentJobQueue !== undefined) {
     await enqueueSlackAgentJob({
       body,
@@ -2578,7 +2598,7 @@ async function handleMessage(
         retryNum: readOptionalContextValue(context.retryNum),
         retryReason: readOptionalContextValue(context.retryReason),
         teamId,
-        text: readString(event, "text") ?? "",
+        text: messageText,
         threadTs,
         userId: event.user,
       },
@@ -2617,7 +2637,7 @@ async function handleMessage(
       messageTs: event.ts,
       modelId,
       teamId,
-      text: readString(event, "text") ?? "",
+      text: messageText,
       threadHistory: readThreadHistoryMessages(threadMessages, {
         apiAppId: readSlackApiAppId(body),
         botUserId: context?.botUserId,
@@ -2892,6 +2912,25 @@ async function processFollowUpMessageJob(
     input,
     input.logger,
   );
+  if (isMentionOnlyText(job.text, job.botUserId)) {
+    await postMentionMenuMessage({
+      channelId: job.channelId,
+      client: input.client,
+      enterpriseId: job.enterpriseId,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+      translator,
+    });
+    await activateMentionMenuThread({
+      channelId: job.channelId,
+      logger: input.logger,
+      messageTs: job.messageTs,
+      routingRepository: input.routingRepository,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    return;
+  }
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
@@ -5101,6 +5140,10 @@ function stripBotMention(text: string, botUserId: string | undefined): string {
   return stripMentionOnlyText(
     text.replace(new RegExp(`<@${escapeRegExp(botUserId)}>\\s*`, "gu"), "").trim(),
   );
+}
+
+function isMentionOnlyText(text: string, botUserId: string | undefined): boolean {
+  return text.trim().length > 0 && stripBotMention(text, botUserId).length === 0;
 }
 
 function stripMentionOnlyText(text: string): string {

@@ -2321,6 +2321,142 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(posts[0])).toContain("model_routing_channel_configure");
   });
 
+  it("posts a settings menu instead of running AI for mention-only active thread follow-ups", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { action: "respond", reason: "unexpected" },
+          message: "unexpected",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        modelId: "openai:gpt-4o",
+        modelScope: "thread",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleMessage({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: {
+          replies: async () => {
+            throw new Error("Thread history should not be read for mention-only menus.");
+          },
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1>\n<@B1>",
+        thread_ts: "1712345678.000100",
+        ts: "1712345678.000200",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(posts[0]);
+    expect(runs).toBe(0);
+    expect(posts).toHaveLength(1);
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        channelId: "C1",
+        lastMessageTs: "1712345678.000200",
+        modelId: "openai:gpt-4o",
+        rootMessageTs: "1712345678.000100",
+        teamId: "T1",
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+    expect(serialized).toContain("model_routing_thread_configure");
+    expect(serialized).toContain("model_routing_channel_configure");
+    expect(serialized).toContain('"kind":"mention_menu"');
+  });
+
+  it("does not enqueue AI jobs for mention-only active thread follow-ups", async () => {
+    const runner = {
+      async run() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const posts: unknown[] = [];
+    const queue = new MemorySlackAgentJobQueue();
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        modelId: "openai:gpt-4o",
+        modelScope: "thread",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, {
+      agentJobQueue: queue,
+      routingRepository: repository,
+    });
+
+    await handlers.handleMessage({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1>",
+        thread_ts: "1712345678.000100",
+        ts: "1712345678.000200",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(queue.jobs).toEqual([]);
+    expect(posts).toHaveLength(1);
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        lastMessageTs: "1712345678.000200",
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+  });
+
   it("posts a model routing configure button for queued mentions with no configured agent", async () => {
     let runs = 0;
     const runner = {
@@ -3223,6 +3359,79 @@ describe("createAgentSlackHandlers", () => {
         channel: "C1",
         text: "thread reply",
         thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("posts a settings menu instead of running AI for queued mention-only follow-up jobs", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { action: "respond", reason: "unexpected" },
+          message: "unexpected",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        modelId: "openai:gpt-4o",
+        modelScope: "thread",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        botUserId: "B1",
+        channelId: "C1",
+        eventType: "message_follow_up",
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "<@B1>",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            replies: async () => {
+              throw new Error("Thread history should not be read for mention-only menus.");
+            },
+          },
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(runs).toBe(0);
+    expect(posts).toHaveLength(1);
+    expect(JSON.stringify(posts[0])).toContain("model_routing_thread_configure");
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        lastMessageTs: "1712345678.000200",
+        modelId: "openai:gpt-4o",
+        threadTs: "1712345678.000100",
       }),
     ]);
   });
