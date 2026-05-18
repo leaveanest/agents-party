@@ -21,6 +21,28 @@ export const slackTransientAudioAttachmentSchema = z
   })
   .strict();
 
+export const slackThreadHistoryMessageSchema = z.discriminatedUnion("role", [
+  z
+    .object({
+      messageTs: z.string().min(1).optional(),
+      role: z.literal("user"),
+      teamId: z.string().min(1),
+      text: z.string().min(1),
+      userId: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      botId: z.string().min(1).optional(),
+      messageTs: z.string().min(1).optional(),
+      role: z.literal("assistant"),
+      teamId: z.string().min(1).optional(),
+      text: z.string().min(1),
+      userId: z.string().min(1).optional(),
+    })
+    .strict(),
+]);
+
 export const slackAgentInvocationSchema = z
   .object({
     channelId: z.string().min(1),
@@ -34,6 +56,7 @@ export const slackAgentInvocationSchema = z
     referenceImages: z.array(slackReferenceImageSchema).default([]),
     teamId: z.string().min(1),
     text: z.string().default(""),
+    threadHistory: z.array(slackThreadHistoryMessageSchema).default([]),
     threadMessages: z.array(z.string()).default([]),
     threadTs: z.string().min(1).optional(),
     transientAttachments: z.array(slackTransientAudioAttachmentSchema).default([]),

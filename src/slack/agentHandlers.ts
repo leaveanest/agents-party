@@ -21,6 +21,7 @@ import {
   type Translator,
 } from "../i18n/index.js";
 import type { CredentialProviderKind } from "../providers/credentials.js";
+import { llmProviders, type LlmProvider } from "../providers/contracts.js";
 import {
   salesforceAuthConfigSchema,
   salesforceConnectionSchema,
@@ -54,12 +55,14 @@ import {
 import type { SlackEventFeatureHandlers } from "./events.js";
 import { readSlackEventId } from "./idempotency.js";
 import {
+  MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
   MODEL_ROUTING_ENABLED_MODELS_ACTION_ID,
   MODEL_ROUTING_ENABLED_MODELS_BLOCK_ID,
   MODEL_ROUTING_MODAL_CALLBACK_ID,
+  MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_BLOCK_ID,
@@ -109,6 +112,51 @@ type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & 
 type SlackActionArgs = SlackActionMiddlewareArgs & AllMiddlewareArgs;
 type SlackViewArgs = SlackViewMiddlewareArgs & AllMiddlewareArgs;
 type SlackClient = SlackEventArgs<"app_mention">["client"];
+type SlackOption = {
+  text: {
+    text: string;
+    type: "plain_text";
+  };
+  value: string;
+};
+type SlackThreadHistoryMessage =
+  | {
+      messageTs?: string;
+      role: "user";
+      teamId: string;
+      text: string;
+      userId: string;
+    }
+  | {
+      botId?: string;
+      messageTs?: string;
+      role: "assistant";
+      teamId?: string;
+      text: string;
+      userId?: string;
+    };
+type ModelRoutingActionValue = {
+  channelId?: string;
+  enterpriseId?: string;
+  selectedTeamId?: string;
+  source?: "app_home" | "channel" | "thread";
+  teamId?: string;
+  threadTs?: string;
+};
+
+const DEFAULT_AGENT_OPTION = {
+  description: "General Slack assistant.",
+  displayName: "Assistant",
+  id: "assistant",
+} as const;
+const AGENTS_PARTY_CONTROL_EVENT_TYPE = "agents_party_control";
+const SLACK_SECTION_TEXT_LIMIT = 3000;
+const THREAD_HISTORY_CONVERSATION_SUBTYPES = new Set([
+  "bot_message",
+  "file_share",
+  "me_message",
+  "thread_broadcast",
+]);
 export type SlackAgentClient = Pick<
   SlackClient,
   "chat" | "conversations" | "filesUploadV2" | "token" | "users"
@@ -131,10 +179,20 @@ const workspaceCredentialProviderOptions = [
   { label: "OpenAI", value: "openai" },
   { label: "Azure OpenAI", value: "azure_openai" },
   { label: "Anthropic", value: "anthropic" },
+  { label: "Amazon Bedrock", value: "bedrock" },
+  { label: "Baseten", value: "baseten" },
+  { label: "Cerebras", value: "cerebras" },
+  { label: "Cohere", value: "cohere" },
+  { label: "DeepInfra", value: "deepinfra" },
+  { label: "DeepSeek", value: "deepseek" },
+  { label: "Fireworks", value: "fireworks" },
   { label: "Google", value: "google" },
   { label: "Google service account JSON", value: "google_service_account_json" },
   { label: "Google Maps", value: "google_maps" },
   { label: "Groq", value: "groq" },
+  { label: "Mistral", value: "mistral" },
+  { label: "Perplexity", value: "perplexity" },
+  { label: "Together.ai", value: "togetherai" },
   { label: "xAI", value: "xai" },
   { label: "PLaMo", value: "plamo" },
   { label: "NVIDIA", value: "nvidia" },
@@ -174,6 +232,7 @@ export type SlackAgentRoutingRepository = {
     channelId: string,
     threadTs: string,
   ): Promise<JsonObject | undefined>;
+  findChannelSettings?(teamId: string, channelId: string): Promise<JsonObject | undefined>;
   findWorkspaceSettings?(teamId: string): Promise<JsonObject | undefined>;
   isChannelEnabled(teamId: string, channelId: string): Promise<boolean>;
   isThreadAutoReplyEnabled(teamId: string, channelId: string): Promise<boolean>;
@@ -189,6 +248,21 @@ export type SlackAgentRoutingRepository = {
     payload: JsonObject;
     teamId: string;
     threadAutoReply?: boolean;
+    updatedAt: Date;
+  }): Promise<void>;
+  saveChannelSettings?(document: {
+    channelId: string;
+    defaultAgentId?: string;
+    defaultModelId?: string;
+    payload: JsonObject;
+    teamId: string;
+    threadAutoReply?: boolean;
+    updatedAt: Date;
+  }): Promise<void>;
+  saveAgent?(document: {
+    agentId: string;
+    enabled: boolean;
+    payload: JsonObject;
     updatedAt: Date;
   }): Promise<void>;
 };
@@ -234,6 +308,7 @@ export type SalesforcePdfWorkflowHome = {
 };
 
 export type WorkspaceCredentialSettingsHome = {
+  listActiveProviderKinds?(input: { teamId: string }): Promise<CredentialProviderKind[]>;
   saveProviderApiKey(input: {
     createdByUserId?: string;
     credentialName?: string;
@@ -537,7 +612,9 @@ async function handleModelRoutingConfigureAction(
   const actionValue = parseModelRoutingActionValue(readActionValue(body));
   const enterpriseId = actionValue?.enterpriseId ?? readSlackEnterpriseId(body);
   const bodyTeamId = readTeamId(body, {});
-  const selectedTeamId = actionValue?.selectedTeamId ?? bodyTeamId;
+  const selectedTeamId = actionValue?.selectedTeamId ?? actionValue?.teamId ?? bodyTeamId;
+  const isChannelSettings = actionValue?.source === "channel";
+  const isThreadSettings = actionValue?.source === "thread";
   const slackUserId = readSlackUserId(body);
   const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
   if (slackUserId === undefined || triggerId === undefined) {
@@ -549,7 +626,14 @@ async function handleModelRoutingConfigureAction(
   try {
     const response = await client.views.open({
       trigger_id: triggerId,
-      view: buildModelRoutingOpeningModal(ackTranslator) as never,
+      view: buildModelRoutingOpeningModal(
+        ackTranslator,
+        isThreadSettings
+          ? ackTranslator.t("modelRouting.title.thread")
+          : isChannelSettings
+            ? ackTranslator.t("modelRouting.title.channel")
+            : undefined,
+      ) as never,
     });
     openedView = isRecord(response) ? response.view : undefined;
   } catch (error) {
@@ -575,6 +659,33 @@ async function handleModelRoutingConfigureAction(
     );
     return;
   }
+
+  if (isChannelSettings) {
+    await updateChannelModelRoutingModal({
+      actionValue,
+      bodyTeamId,
+      client,
+      logger,
+      openedView,
+      options,
+      translator: userContext.translator,
+    });
+    return;
+  }
+
+  if (isThreadSettings) {
+    await updateThreadModelRoutingModal({
+      actionValue,
+      bodyTeamId,
+      client,
+      logger,
+      openedView,
+      options,
+      translator: userContext.translator,
+    });
+    return;
+  }
+
   let installedWorkspaces: SlackInstalledWorkspace[] = [];
   if (options.installedWorkspaceDirectory !== undefined) {
     try {
@@ -593,21 +704,178 @@ async function handleModelRoutingConfigureAction(
     effectiveTeamId === undefined
       ? undefined
       : await options.routingRepository?.findWorkspaceSettings?.(effectiveTeamId);
+  const credentialedProviders =
+    effectiveTeamId === undefined
+      ? []
+      : await listWorkspaceCredentialedLlmProviders(effectiveTeamId, options, logger);
   await updateModelRoutingModal(
     client,
     openedView,
-    buildModelRoutingModal({
-      enterpriseId,
-      selectedTeamId: effectiveTeamId,
-      translator: userContext.translator,
-      workspaceSettings,
-      workspaces: installedWorkspaces,
-    }),
+    credentialedProviders.length === 0
+      ? buildModelRoutingResultModal(
+          userContext.translator.t("modelRouting.error.noCredentialedModels"),
+          userContext.translator,
+        )
+      : buildModelRoutingModal({
+          credentialedProviders,
+          enterpriseId,
+          selectedTeamId: effectiveTeamId,
+          translator: userContext.translator,
+          workspaceSettings,
+          workspaces: installedWorkspaces,
+        }),
     logger,
   );
 }
 
+async function updateChannelModelRoutingModal(input: {
+  actionValue: ModelRoutingActionValue | undefined;
+  bodyTeamId?: string;
+  client: SlackClient;
+  logger: unknown;
+  openedView: unknown;
+  options: AgentSlackHandlerOptions;
+  translator: Translator;
+}): Promise<void> {
+  const selectedTeamId =
+    input.actionValue?.teamId ?? input.actionValue?.selectedTeamId ?? input.bodyTeamId;
+  const channelId = input.actionValue?.channelId;
+  if (
+    selectedTeamId === undefined ||
+    channelId === undefined ||
+    input.options.routingRepository?.findChannelSettings === undefined ||
+    input.options.routingRepository.findWorkspaceSettings === undefined
+  ) {
+    await updateModelRoutingModal(
+      input.client,
+      input.openedView,
+      buildModelRoutingResultModal(
+        input.translator.t("modelRouting.error.notConfigured"),
+        input.translator,
+        input.translator.t("modelRouting.title.channel"),
+      ),
+      input.logger,
+    );
+    return;
+  }
+
+  const [channelSettings, workspaceSettings, credentialedProviders] = await Promise.all([
+    input.options.routingRepository.findChannelSettings(selectedTeamId, channelId),
+    input.options.routingRepository.findWorkspaceSettings(selectedTeamId),
+    listWorkspaceCredentialedLlmProviders(selectedTeamId, input.options, input.logger),
+  ]);
+  const modelOptions = channelModelOptions({
+    credentialedProviders,
+    workspaceSettings,
+  });
+  if (modelOptions.length === 0) {
+    await updateModelRoutingModal(
+      input.client,
+      input.openedView,
+      buildModelRoutingResultModal(
+        input.translator.t("modelRouting.error.noCredentialedModels"),
+        input.translator,
+        input.translator.t("modelRouting.title.channel"),
+      ),
+      input.logger,
+    );
+    return;
+  }
+
+  await updateModelRoutingModal(
+    input.client,
+    input.openedView,
+    buildChannelModelRoutingModal({
+      channelId,
+      channelSettings,
+      enterpriseId: input.actionValue?.enterpriseId,
+      modelOptions,
+      selectedTeamId,
+      translator: input.translator,
+    }),
+    input.logger,
+  );
+}
+
+async function updateThreadModelRoutingModal(input: {
+  actionValue: ModelRoutingActionValue | undefined;
+  bodyTeamId?: string;
+  client: SlackClient;
+  logger: unknown;
+  openedView: unknown;
+  options: AgentSlackHandlerOptions;
+  translator: Translator;
+}): Promise<void> {
+  const selectedTeamId =
+    input.actionValue?.teamId ?? input.actionValue?.selectedTeamId ?? input.bodyTeamId;
+  const channelId = input.actionValue?.channelId;
+  const threadTs = input.actionValue?.threadTs;
+  if (
+    selectedTeamId === undefined ||
+    channelId === undefined ||
+    threadTs === undefined ||
+    input.options.routingRepository?.findSlackThread === undefined ||
+    input.options.routingRepository.findWorkspaceSettings === undefined
+  ) {
+    await updateModelRoutingModal(
+      input.client,
+      input.openedView,
+      buildModelRoutingResultModal(
+        input.translator.t("modelRouting.error.notConfigured"),
+        input.translator,
+        input.translator.t("modelRouting.title.thread"),
+      ),
+      input.logger,
+    );
+    return;
+  }
+
+  const [threadSettings, channelSettings, workspaceSettings, credentialedProviders] =
+    await Promise.all([
+      input.options.routingRepository.findSlackThread(selectedTeamId, channelId, threadTs),
+      input.options.routingRepository.findChannelSettings?.(selectedTeamId, channelId) ??
+        Promise.resolve(undefined),
+      input.options.routingRepository.findWorkspaceSettings(selectedTeamId),
+      listWorkspaceCredentialedLlmProviders(selectedTeamId, input.options, input.logger),
+    ]);
+  const modelOptions = channelModelOptions({
+    credentialedProviders,
+    workspaceSettings,
+  });
+  if (modelOptions.length === 0) {
+    await updateModelRoutingModal(
+      input.client,
+      input.openedView,
+      buildModelRoutingResultModal(
+        input.translator.t("modelRouting.error.noCredentialedModels"),
+        input.translator,
+        input.translator.t("modelRouting.title.thread"),
+      ),
+      input.logger,
+    );
+    return;
+  }
+
+  await updateModelRoutingModal(
+    input.client,
+    input.openedView,
+    buildThreadModelRoutingModal({
+      channelId,
+      channelSettings,
+      enterpriseId: input.actionValue?.enterpriseId,
+      modelOptions,
+      selectedTeamId,
+      threadSettings,
+      threadTs,
+      translator: input.translator,
+      workspaceSettings,
+    }),
+    input.logger,
+  );
+}
+
 function buildModelRoutingModal(input: {
+  credentialedProviders: readonly LlmProvider[];
   enterpriseId?: string;
   selectedTeamId?: string;
   translator: Translator;
@@ -654,7 +922,10 @@ function buildModelRoutingModal(input: {
   }
   const modelOptions = createDefaultModelRegistry()
     .list()
-    .filter((model) => model.capabilities.includes("text"))
+    .filter(
+      (model) =>
+        model.capabilities.includes("text") && input.credentialedProviders.includes(model.provider),
+    )
     .map((model) => ({
       text: {
         text: model.displayName,
@@ -724,6 +995,121 @@ function buildModelRoutingModal(input: {
   };
 }
 
+function buildChannelModelRoutingModal(input: {
+  channelId: string;
+  channelSettings?: JsonObject;
+  enterpriseId?: string;
+  modelOptions: readonly SlackOption[];
+  selectedTeamId: string;
+  translator: Translator;
+}): Record<string, unknown> {
+  const defaultModelId = stringField(input.channelSettings, "default_model_id");
+  return {
+    blocks: [
+      {
+        text: {
+          text: input.translator.t("modelRouting.channelModal.intro"),
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+      {
+        block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+        element: {
+          action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
+          initial_option: input.modelOptions.find((option) => option.value === defaultModelId),
+          options: input.modelOptions,
+          placeholder: {
+            text: input.translator.t("modelRouting.modal.defaultModelPlaceholder"),
+            type: "plain_text",
+          },
+          type: "static_select",
+        },
+        label: {
+          text: input.translator.t("modelRouting.channelModal.defaultModel"),
+          type: "plain_text",
+        },
+        optional: false,
+        type: "input",
+      },
+    ],
+    callback_id: MODEL_ROUTING_MODAL_CALLBACK_ID,
+    close: { text: input.translator.t("common.close"), type: "plain_text" },
+    private_metadata: JSON.stringify({
+      channelId: input.channelId,
+      enterpriseId: input.enterpriseId,
+      source: "channel",
+      teamId: input.selectedTeamId,
+    }),
+    submit: { text: input.translator.t("common.save"), type: "plain_text" },
+    title: { text: input.translator.t("modelRouting.title.channel"), type: "plain_text" },
+    type: "modal",
+  };
+}
+
+function buildThreadModelRoutingModal(input: {
+  channelId: string;
+  channelSettings?: JsonObject;
+  enterpriseId?: string;
+  modelOptions: readonly SlackOption[];
+  selectedTeamId: string;
+  threadSettings?: JsonObject;
+  threadTs: string;
+  translator: Translator;
+  workspaceSettings?: JsonObject;
+}): Record<string, unknown> {
+  const threadModelId =
+    stringField(input.threadSettings, "model_scope") === "thread"
+      ? stringField(input.threadSettings, "model_id")
+      : undefined;
+  const defaultModelId =
+    threadModelId ??
+    stringField(input.channelSettings, "default_model_id") ??
+    stringField(input.workspaceSettings, "default_model_id");
+  return {
+    blocks: [
+      {
+        text: {
+          text: input.translator.t("modelRouting.threadModal.intro"),
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+      {
+        block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+        element: {
+          action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
+          initial_option: input.modelOptions.find((option) => option.value === defaultModelId),
+          options: input.modelOptions,
+          placeholder: {
+            text: input.translator.t("modelRouting.modal.defaultModelPlaceholder"),
+            type: "plain_text",
+          },
+          type: "static_select",
+        },
+        label: {
+          text: input.translator.t("modelRouting.threadModal.defaultModel"),
+          type: "plain_text",
+        },
+        optional: false,
+        type: "input",
+      },
+    ],
+    callback_id: MODEL_ROUTING_MODAL_CALLBACK_ID,
+    close: { text: input.translator.t("common.close"), type: "plain_text" },
+    private_metadata: JSON.stringify({
+      channelId: input.channelId,
+      enterpriseId: input.enterpriseId,
+      source: "thread",
+      teamId: input.selectedTeamId,
+      threadTs: input.threadTs,
+    }),
+    submit: { text: input.translator.t("common.save"), type: "plain_text" },
+    title: { text: input.translator.t("modelRouting.title.thread"), type: "plain_text" },
+    type: "modal",
+  };
+}
+
 async function handleModelRoutingModalSubmission(
   { ack, body, client, logger, view }: SlackViewArgs,
   options: AgentSlackHandlerOptions,
@@ -742,6 +1128,34 @@ async function handleModelRoutingModalSubmission(
     bodyTeamId;
   const translator = createTranslator(options.defaultLocale ?? FALLBACK_LOCALE);
   const slackUserId = readSlackUserId(body);
+  if (metadata?.source === "channel") {
+    await handleChannelModelRoutingModalSubmission({
+      ack,
+      body,
+      client,
+      logger,
+      metadata,
+      options,
+      slackUserId,
+      translator,
+      view,
+    });
+    return;
+  }
+  if (metadata?.source === "thread") {
+    await handleThreadModelRoutingModalSubmission({
+      ack,
+      body,
+      client,
+      logger,
+      metadata,
+      options,
+      slackUserId,
+      translator,
+      view,
+    });
+    return;
+  }
   if (
     selectedTeamId === undefined ||
     slackUserId === undefined ||
@@ -770,6 +1184,19 @@ async function handleModelRoutingModalSubmission(
   const unknownModelIds = [...enabledModelIds, defaultModelId].filter(
     (modelId): modelId is string => modelId !== undefined && !modelRegistry.has(modelId),
   );
+  const credentialedProviders = await listWorkspaceCredentialedLlmProviders(
+    selectedTeamId,
+    options,
+    logger,
+  );
+  const uncredentialedModelIds = [...enabledModelIds, defaultModelId].filter(
+    (modelId): modelId is string => {
+      if (modelId === undefined || !modelRegistry.has(modelId)) {
+        return false;
+      }
+      return !credentialedProviders.includes(modelRegistry.get(modelId).provider);
+    },
+  );
   if (enabledModelIds.length === 0 || defaultModelId === undefined) {
     await ack({
       errors: {
@@ -781,7 +1208,11 @@ async function handleModelRoutingModalSubmission(
     });
     return;
   }
-  if (unknownModelIds.length > 0 || !enabledModelIds.includes(defaultModelId)) {
+  if (
+    unknownModelIds.length > 0 ||
+    uncredentialedModelIds.length > 0 ||
+    !enabledModelIds.includes(defaultModelId)
+  ) {
     await ack({
       errors: {
         [MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID]: translator.t(
@@ -814,8 +1245,21 @@ async function handleModelRoutingModalSubmission(
   }
   try {
     const existing = await options.routingRepository.findWorkspaceSettings(selectedTeamId);
+    const defaultAgentId = stringField(existing, "default_agent_id") ?? DEFAULT_AGENT_OPTION.id;
+    if (defaultAgentId === DEFAULT_AGENT_OPTION.id) {
+      await options.routingRepository.saveAgent?.({
+        agentId: DEFAULT_AGENT_OPTION.id,
+        enabled: true,
+        payload: {
+          agent_id: DEFAULT_AGENT_OPTION.id,
+          description: DEFAULT_AGENT_OPTION.description,
+          name: DEFAULT_AGENT_OPTION.displayName,
+        },
+        updatedAt: new Date(),
+      });
+    }
     await options.routingRepository.saveWorkspaceSettings({
-      defaultAgentId: stringField(existing, "default_agent_id"),
+      defaultAgentId,
       defaultModelId,
       enabledModelIds,
       payload: existing ?? {},
@@ -824,6 +1268,7 @@ async function handleModelRoutingModalSubmission(
       updatedAt: new Date(),
     });
     logInfo(logger, "Saved workspace model routing settings.", {
+      defaultAgentId,
       defaultModelId,
       enabledModelCount: enabledModelIds.length,
       enterpriseId: metadata?.enterpriseId,
@@ -856,7 +1301,374 @@ async function handleModelRoutingModalSubmission(
   }
 }
 
-function buildModelRoutingOpeningModal(translator: Translator): Record<string, unknown> {
+async function handleChannelModelRoutingModalSubmission(input: {
+  ack: SlackViewArgs["ack"];
+  body: SlackViewArgs["body"];
+  client: SlackViewArgs["client"];
+  logger: SlackViewArgs["logger"];
+  metadata: ModelRoutingActionValue;
+  options: AgentSlackHandlerOptions;
+  slackUserId?: string;
+  translator: Translator;
+  view: SlackViewArgs["view"];
+}): Promise<void> {
+  const selectedTeamId =
+    input.metadata.teamId ?? input.metadata.selectedTeamId ?? readTeamId(input.body, {});
+  const channelId = input.metadata.channelId;
+  if (
+    selectedTeamId === undefined ||
+    channelId === undefined ||
+    input.slackUserId === undefined ||
+    input.options.routingRepository?.saveChannelSettings === undefined ||
+    input.options.routingRepository.findChannelSettings === undefined ||
+    input.options.routingRepository.findWorkspaceSettings === undefined
+  ) {
+    await input.ack({
+      errors: {
+        [MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID]: input.translator.t(
+          "modelRouting.error.notConfigured",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+
+  const defaultModelId = readSelectedOptionValue(
+    input.view,
+    MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+    MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
+  );
+  const [channelSettings, workspaceSettings, credentialedProviders] = await Promise.all([
+    input.options.routingRepository.findChannelSettings(selectedTeamId, channelId),
+    input.options.routingRepository.findWorkspaceSettings(selectedTeamId),
+    listWorkspaceCredentialedLlmProviders(selectedTeamId, input.options, input.logger),
+  ]);
+  const availableModelIds = new Set(
+    channelModelOptions({
+      credentialedProviders,
+      workspaceSettings,
+    }).map((option) => option.value),
+  );
+  if (defaultModelId === undefined || !availableModelIds.has(defaultModelId)) {
+    await input.ack({
+      errors: {
+        [MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID]: input.translator.t(
+          "modelRouting.error.channelModelRequired",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+
+  await input.ack({
+    response_action: "update",
+    view: buildModelRoutingResultModal(
+      input.translator.t("modelRouting.result.saving"),
+      input.translator,
+      input.translator.t("modelRouting.title.channel"),
+    ) as never,
+  });
+  const userContext = await resolveSlackUserContext(
+    input.client,
+    input.slackUserId,
+    input.translator,
+    input.logger,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    await updateModelRoutingModal(
+      input.client,
+      input.view,
+      buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.error.unauthorized"),
+        userContext.translator,
+        userContext.translator.t("modelRouting.title.channel"),
+      ),
+      input.logger,
+    );
+    return;
+  }
+
+  try {
+    const defaultAgentId =
+      stringField(channelSettings, "default_agent_id") ??
+      stringField(workspaceSettings, "default_agent_id") ??
+      DEFAULT_AGENT_OPTION.id;
+    if (defaultAgentId === DEFAULT_AGENT_OPTION.id) {
+      await input.options.routingRepository.saveAgent?.({
+        agentId: DEFAULT_AGENT_OPTION.id,
+        enabled: true,
+        payload: {
+          agent_id: DEFAULT_AGENT_OPTION.id,
+          description: DEFAULT_AGENT_OPTION.description,
+          name: DEFAULT_AGENT_OPTION.displayName,
+        },
+        updatedAt: new Date(),
+      });
+    }
+    await input.options.routingRepository.saveChannelSettings({
+      channelId,
+      defaultAgentId,
+      defaultModelId,
+      payload: channelSettings ?? {},
+      teamId: selectedTeamId,
+      threadAutoReply: booleanField(channelSettings, "thread_auto_reply"),
+      updatedAt: new Date(),
+    });
+    logInfo(input.logger, "Saved channel model routing settings.", {
+      channelId,
+      defaultAgentId,
+      defaultModelId,
+      enterpriseId: input.metadata.enterpriseId,
+      teamId: selectedTeamId,
+    });
+    await updateModelRoutingModal(
+      input.client,
+      input.view,
+      buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.result.channelSaved"),
+        userContext.translator,
+        userContext.translator.t("modelRouting.title.channel"),
+      ),
+      input.logger,
+    );
+  } catch (error) {
+    input.logger.error("Failed to save channel model routing settings.", {
+      channelId,
+      error,
+      enterpriseId: input.metadata.enterpriseId,
+      teamId: selectedTeamId,
+    });
+    await updateModelRoutingModal(
+      input.client,
+      input.view,
+      buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.error.saveFailed"),
+        userContext.translator,
+        userContext.translator.t("modelRouting.title.channel"),
+      ),
+      input.logger,
+    );
+  }
+}
+
+async function handleThreadModelRoutingModalSubmission(input: {
+  ack: SlackViewArgs["ack"];
+  body: SlackViewArgs["body"];
+  client: SlackViewArgs["client"];
+  logger: SlackViewArgs["logger"];
+  metadata: ModelRoutingActionValue;
+  options: AgentSlackHandlerOptions;
+  slackUserId?: string;
+  translator: Translator;
+  view: SlackViewArgs["view"];
+}): Promise<void> {
+  const selectedTeamId =
+    input.metadata.teamId ?? input.metadata.selectedTeamId ?? readTeamId(input.body, {});
+  const channelId = input.metadata.channelId;
+  const threadTs = input.metadata.threadTs;
+  if (
+    selectedTeamId === undefined ||
+    channelId === undefined ||
+    threadTs === undefined ||
+    input.slackUserId === undefined ||
+    input.options.routingRepository?.activateThreadAgent === undefined ||
+    input.options.routingRepository.findSlackThread === undefined ||
+    input.options.routingRepository.findWorkspaceSettings === undefined
+  ) {
+    await input.ack({
+      errors: {
+        [MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID]: input.translator.t(
+          "modelRouting.error.notConfigured",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+
+  const defaultModelId = readSelectedOptionValue(
+    input.view,
+    MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+    MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
+  );
+  const [threadSettings, channelSettings, workspaceSettings, credentialedProviders] =
+    await Promise.all([
+      input.options.routingRepository.findSlackThread(selectedTeamId, channelId, threadTs),
+      input.options.routingRepository.findChannelSettings?.(selectedTeamId, channelId) ??
+        Promise.resolve(undefined),
+      input.options.routingRepository.findWorkspaceSettings(selectedTeamId),
+      listWorkspaceCredentialedLlmProviders(selectedTeamId, input.options, input.logger),
+    ]);
+  const availableModelIds = new Set(
+    channelModelOptions({
+      credentialedProviders,
+      workspaceSettings,
+    }).map((option) => option.value),
+  );
+  if (defaultModelId === undefined || !availableModelIds.has(defaultModelId)) {
+    await input.ack({
+      errors: {
+        [MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID]: input.translator.t(
+          "modelRouting.error.threadModelRequired",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+
+  await input.ack({
+    response_action: "update",
+    view: buildModelRoutingResultModal(
+      input.translator.t("modelRouting.result.saving"),
+      input.translator,
+      input.translator.t("modelRouting.title.thread"),
+    ) as never,
+  });
+  const userContext = await resolveSlackUserContext(
+    input.client,
+    input.slackUserId,
+    input.translator,
+    input.logger,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    await updateModelRoutingModal(
+      input.client,
+      input.view,
+      buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.error.unauthorized"),
+        userContext.translator,
+        userContext.translator.t("modelRouting.title.thread"),
+      ),
+      input.logger,
+    );
+    return;
+  }
+
+  try {
+    const defaultAgentId =
+      stringField(threadSettings, "agent_id") ??
+      stringField(channelSettings, "default_agent_id") ??
+      stringField(workspaceSettings, "default_agent_id") ??
+      DEFAULT_AGENT_OPTION.id;
+    if (defaultAgentId === DEFAULT_AGENT_OPTION.id) {
+      await input.options.routingRepository.saveAgent?.({
+        agentId: DEFAULT_AGENT_OPTION.id,
+        enabled: true,
+        payload: {
+          agent_id: DEFAULT_AGENT_OPTION.id,
+          description: DEFAULT_AGENT_OPTION.description,
+          name: DEFAULT_AGENT_OPTION.displayName,
+        },
+        updatedAt: new Date(),
+      });
+    }
+    await input.options.routingRepository.activateThreadAgent({
+      agentId: defaultAgentId,
+      channelId,
+      lastMessageTs: stringField(threadSettings, "last_message_ts") ?? threadTs,
+      modelId: defaultModelId,
+      rootMessageTs: stringField(threadSettings, "root_message_ts") ?? threadTs,
+      teamId: selectedTeamId,
+      threadTs,
+    });
+    logInfo(input.logger, "Saved thread model routing settings.", {
+      channelId,
+      defaultAgentId,
+      defaultModelId,
+      enterpriseId: input.metadata.enterpriseId,
+      teamId: selectedTeamId,
+      threadTs,
+    });
+    await updateModelRoutingModal(
+      input.client,
+      input.view,
+      buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.result.threadSaved"),
+        userContext.translator,
+        userContext.translator.t("modelRouting.title.thread"),
+      ),
+      input.logger,
+    );
+  } catch (error) {
+    input.logger.error("Failed to save thread model routing settings.", {
+      channelId,
+      error,
+      enterpriseId: input.metadata.enterpriseId,
+      teamId: selectedTeamId,
+      threadTs,
+    });
+    await updateModelRoutingModal(
+      input.client,
+      input.view,
+      buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.error.saveFailed"),
+        userContext.translator,
+        userContext.translator.t("modelRouting.title.thread"),
+      ),
+      input.logger,
+    );
+  }
+}
+
+async function listWorkspaceCredentialedLlmProviders(
+  teamId: string,
+  options: AgentSlackHandlerOptions,
+  logger: unknown,
+): Promise<LlmProvider[]> {
+  if (options.workspaceCredentialSettings?.listActiveProviderKinds === undefined) {
+    return [];
+  }
+  try {
+    const providerKinds = await options.workspaceCredentialSettings.listActiveProviderKinds({
+      teamId,
+    });
+    return providerKinds.filter((providerKind): providerKind is LlmProvider =>
+      llmProviders.includes(providerKind as LlmProvider),
+    );
+  } catch (error) {
+    logWarn(logger, "Failed to list active workspace credential providers.", {
+      error,
+      teamId,
+    });
+    return [];
+  }
+}
+
+function channelModelOptions(input: {
+  credentialedProviders: readonly LlmProvider[];
+  workspaceSettings?: JsonObject;
+}): SlackOption[] {
+  const registry = createDefaultModelRegistry();
+  const workspaceEnabledModelIds = stringArrayField(input.workspaceSettings, "enabled_model_ids");
+  const workspaceEnabledModelIdSet = new Set(workspaceEnabledModelIds);
+  return registry
+    .list()
+    .filter((model) => {
+      if (!model.capabilities.includes("text")) {
+        return false;
+      }
+      if (workspaceEnabledModelIdSet.size > 0) {
+        return workspaceEnabledModelIdSet.has(model.id);
+      }
+      return input.credentialedProviders.includes(model.provider);
+    })
+    .map((model) => ({
+      text: {
+        text: model.displayName ?? model.id,
+        type: "plain_text" as const,
+      },
+      value: model.id,
+    }))
+    .slice(0, 100);
+}
+
+function buildModelRoutingOpeningModal(
+  translator: Translator,
+  title = translator.t("modelRouting.title"),
+): Record<string, unknown> {
   return {
     blocks: [
       {
@@ -869,7 +1681,7 @@ function buildModelRoutingOpeningModal(translator: Translator): Record<string, u
         type: "context",
       },
     ],
-    title: { text: translator.t("modelRouting.title"), type: "plain_text" },
+    title: { text: title, type: "plain_text" },
     type: "modal",
   };
 }
@@ -877,6 +1689,7 @@ function buildModelRoutingOpeningModal(translator: Translator): Record<string, u
 function buildModelRoutingResultModal(
   message: string,
   translator: Translator,
+  title = translator.t("modelRouting.title"),
 ): Record<string, unknown> {
   return {
     blocks: [
@@ -889,7 +1702,7 @@ function buildModelRoutingResultModal(
       },
     ],
     close: { text: translator.t("common.close"), type: "plain_text" },
-    title: { text: translator.t("modelRouting.title"), type: "plain_text" },
+    title: { text: title, type: "plain_text" },
     type: "modal",
   };
 }
@@ -915,12 +1728,9 @@ async function updateModelRoutingModal(
   }
 }
 
-function parseModelRoutingActionValue(value: string | undefined):
-  | {
-      enterpriseId?: string;
-      selectedTeamId?: string;
-    }
-  | undefined {
+function parseModelRoutingActionValue(
+  value: string | undefined,
+): ModelRoutingActionValue | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -930,12 +1740,20 @@ function parseModelRoutingActionValue(value: string | undefined):
       return undefined;
     }
     return {
+      channelId: readOptionalString(parsed.channelId),
       enterpriseId: readOptionalString(parsed.enterpriseId),
       selectedTeamId: readOptionalString(parsed.selectedTeamId),
+      source: parseModelRoutingSource(parsed.source),
+      teamId: readOptionalString(parsed.teamId),
+      threadTs: readOptionalString(parsed.threadTs),
     };
   } catch {
     return undefined;
   }
+}
+
+function parseModelRoutingSource(value: unknown): ModelRoutingActionValue["source"] | undefined {
+  return value === "app_home" || value === "channel" || value === "thread" ? value : undefined;
 }
 
 function buildSalesforcePdfWorkflowBlocks(
@@ -1518,6 +2336,7 @@ async function handleMention(
     logger,
   );
   const threadTs = readString(event, "thread_ts") ?? event.ts;
+  const mentionText = stripBotMention(readString(event, "text") ?? "", context.botUserId);
   if (options.agentJobQueue !== undefined) {
     if (
       options.routingRepository !== undefined &&
@@ -1525,11 +2344,31 @@ async function handleMention(
     ) {
       return;
     }
+    if (mentionText.length === 0) {
+      await postMentionMenuMessage({
+        channelId: event.channel,
+        client,
+        enterpriseId,
+        teamId,
+        threadTs,
+        translator,
+      });
+      await activateMentionMenuThread({
+        channelId: event.channel,
+        logger,
+        messageTs: event.ts,
+        routingRepository: options.routingRepository,
+        teamId,
+        threadTs,
+      });
+      return;
+    }
     await enqueueSlackAgentJob({
       body,
       client,
       eventType: "app_mention",
       job: {
+        apiAppId: readSlackApiAppId(body),
         botUserId: context.botUserId,
         channelId: event.channel,
         enterpriseId: readSlackEnterpriseId(body),
@@ -1540,7 +2379,7 @@ async function handleMention(
         retryNum: readOptionalContextValue(context.retryNum),
         retryReason: readOptionalContextValue(context.retryReason),
         teamId,
-        text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
+        text: mentionText,
         threadTs,
         userId: event.user,
       },
@@ -1561,6 +2400,25 @@ async function handleMention(
     ) {
       return;
     }
+    if (mentionText.length === 0) {
+      await postMentionMenuMessage({
+        channelId: event.channel,
+        client,
+        enterpriseId,
+        teamId,
+        threadTs,
+        translator,
+      });
+      await activateMentionMenuThread({
+        channelId: event.channel,
+        logger,
+        messageTs: event.ts,
+        routingRepository: options.routingRepository,
+        teamId,
+        threadTs,
+      });
+      return;
+    }
     const route = await resolveSlackAgentRoute(options.routingRepository, {
       channelId: event.channel,
       teamId,
@@ -1568,10 +2426,14 @@ async function handleMention(
     });
     if (options.routingRepository?.resolveAgent !== undefined && route === undefined) {
       text = translator.t("slack.error.noAgent");
-      await client.chat.postMessage({
-        channel: event.channel,
+      await postNoAgentConfiguredMessage({
+        channelId: event.channel,
+        enterpriseId,
+        teamId,
         text,
-        thread_ts: threadTs,
+        threadTs,
+        translator,
+        client,
       });
       return;
     }
@@ -1590,7 +2452,13 @@ async function handleMention(
       messageTs: event.ts,
       modelId: route?.modelId,
       teamId,
-      text: stripBotMention(readString(event, "text") ?? "", context.botUserId),
+      text: mentionText,
+      threadHistory: readThreadHistoryMessages(threadMessages, {
+        apiAppId: readSlackApiAppId(body),
+        botUserId: context?.botUserId,
+        currentMessageTs: event.ts,
+        teamId,
+      }),
       threadTs,
       transientAttachments: await resolveTransientAudioAttachmentsForInvocation({
         client,
@@ -1699,6 +2567,8 @@ async function handleMessage(
       client,
       eventType: "message_follow_up",
       job: {
+        apiAppId: readSlackApiAppId(body),
+        botUserId: context.botUserId,
         channelId: event.channel,
         enterpriseId: readSlackEnterpriseId(body),
         eventId: readSlackEventId(body),
@@ -1748,7 +2618,12 @@ async function handleMessage(
       modelId,
       teamId,
       text: readString(event, "text") ?? "",
-      threadMessages: readThreadTextMessages(threadMessages),
+      threadHistory: readThreadHistoryMessages(threadMessages, {
+        apiAppId: readSlackApiAppId(body),
+        botUserId: context?.botUserId,
+        currentMessageTs: event.ts,
+        teamId,
+      }),
       threadTs,
       transientAttachments: await resolveTransientAudioAttachmentsForInvocation({
         client,
@@ -1861,6 +2736,25 @@ async function processAppMentionJob(
     translator,
     threadTs: job.threadTs,
   });
+  if (job.text.trim().length === 0) {
+    await postMentionMenuMessage({
+      channelId: job.channelId,
+      client: input.client,
+      enterpriseId: job.enterpriseId,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+      translator,
+    });
+    await activateMentionMenuThread({
+      channelId: job.channelId,
+      logger: input.logger,
+      messageTs: job.messageTs,
+      routingRepository: input.routingRepository,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    return;
+  }
 
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
@@ -1871,10 +2765,14 @@ async function processAppMentionJob(
       threadTs: job.threadTs,
     });
     if (input.routingRepository?.resolveAgent !== undefined && route === undefined) {
-      await input.client.chat.postMessage({
-        channel: job.channelId,
+      await postNoAgentConfiguredMessage({
+        channelId: job.channelId,
+        enterpriseId: job.enterpriseId,
+        teamId: job.teamId,
         text: translator.t("slack.error.noAgent"),
-        thread_ts: job.threadTs,
+        threadTs: job.threadTs,
+        translator,
+        client: input.client,
       });
       return;
     }
@@ -1894,6 +2792,12 @@ async function processAppMentionJob(
       modelId: route?.modelId,
       teamId: job.teamId,
       text: job.text,
+      threadHistory: readThreadHistoryMessages(threadMessages, {
+        apiAppId: job.apiAppId,
+        botUserId: job.botUserId,
+        currentMessageTs: job.messageTs,
+        teamId: job.teamId,
+      }),
       threadTs: job.threadTs,
       transientAttachments: await resolveTransientAudioAttachmentsForInvocation({
         client: input.client,
@@ -2023,7 +2927,12 @@ async function processFollowUpMessageJob(
       modelId,
       teamId: job.teamId,
       text: job.text,
-      threadMessages: readThreadTextMessages(threadMessages),
+      threadHistory: readThreadHistoryMessages(threadMessages, {
+        apiAppId: job.apiAppId,
+        botUserId: job.botUserId,
+        currentMessageTs: job.messageTs,
+        teamId: job.teamId,
+      }),
       threadTs: job.threadTs,
       transientAttachments: await resolveTransientAudioAttachmentsForInvocation({
         client: input.client,
@@ -2086,6 +2995,148 @@ async function processFollowUpMessageJob(
     text,
     threadTs: job.threadTs,
   });
+}
+
+async function activateMentionMenuThread(input: {
+  channelId: string;
+  logger: unknown;
+  messageTs: string;
+  routingRepository?: SlackAgentRoutingRepository;
+  teamId: string;
+  threadTs: string;
+}): Promise<void> {
+  const route = await resolveSlackAgentRoute(input.routingRepository, {
+    channelId: input.channelId,
+    teamId: input.teamId,
+    threadTs: input.threadTs,
+  });
+  if (input.routingRepository === undefined || route === undefined) {
+    return;
+  }
+  try {
+    await input.routingRepository.activateThreadAgent({
+      agentId: route.agentId,
+      channelId: input.channelId,
+      lastMessageTs: input.messageTs,
+      modelId: threadScopedModelId(route),
+      rootMessageTs: input.threadTs,
+      teamId: input.teamId,
+      threadTs: input.threadTs,
+    });
+  } catch (error) {
+    logWarn(input.logger, "Failed to persist Slack thread routing state after mention menu.", {
+      channelId: input.channelId,
+      error,
+      teamId: input.teamId,
+      threadTs: input.threadTs,
+    });
+  }
+}
+
+async function postNoAgentConfiguredMessage(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  enterpriseId?: string;
+  teamId: string;
+  text: string;
+  threadTs: string;
+  translator: Translator;
+}): Promise<void> {
+  await input.client.chat.postMessage({
+    blocks: [
+      {
+        text: {
+          text: input.text,
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+      {
+        elements: [
+          {
+            action_id: MODEL_ROUTING_CONFIGURE_ACTION_ID,
+            text: {
+              text: input.translator.t("channelSettings.configure"),
+              type: "plain_text",
+            },
+            type: "button",
+            value: JSON.stringify({
+              channelId: input.channelId,
+              enterpriseId: input.enterpriseId,
+              source: "channel",
+              teamId: input.teamId,
+            }),
+          },
+        ],
+        type: "actions",
+      },
+    ],
+    channel: input.channelId,
+    metadata: modelRoutingControlMessageMetadata("no_agent_configured"),
+    text: input.text,
+    thread_ts: input.threadTs,
+  });
+}
+
+async function postMentionMenuMessage(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  enterpriseId?: string;
+  teamId: string;
+  threadTs: string;
+  translator: Translator;
+}): Promise<void> {
+  await input.client.chat.postMessage({
+    blocks: [
+      {
+        elements: [
+          {
+            action_id: MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID,
+            text: {
+              text: input.translator.t("threadSettings.configure"),
+              type: "plain_text",
+            },
+            type: "button",
+            value: JSON.stringify({
+              channelId: input.channelId,
+              enterpriseId: input.enterpriseId,
+              source: "thread",
+              teamId: input.teamId,
+              threadTs: input.threadTs,
+            }),
+          },
+          {
+            action_id: MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID,
+            text: {
+              text: input.translator.t("channelSettings.configure"),
+              type: "plain_text",
+            },
+            type: "button",
+            value: JSON.stringify({
+              channelId: input.channelId,
+              enterpriseId: input.enterpriseId,
+              source: "channel",
+              teamId: input.teamId,
+            }),
+          },
+        ],
+        type: "actions",
+      },
+    ],
+    channel: input.channelId,
+    metadata: modelRoutingControlMessageMetadata("mention_menu"),
+    text: input.translator.t("modelRouting.title"),
+    thread_ts: input.threadTs,
+  });
+}
+
+function modelRoutingControlMessageMetadata(kind: string) {
+  return {
+    event_payload: {
+      kind,
+    },
+    event_type: AGENTS_PARTY_CONTROL_EVENT_TYPE,
+  };
 }
 
 async function setSlackAssistantThreadStatus(input: {
@@ -2307,7 +3358,7 @@ function isSupportedFollowUpMessage(event: StringIndexed, threadTs: string | und
     return false;
   }
   const subtype = readString(event, "subtype");
-  if (subtype !== undefined) {
+  if (!isThreadHistoryConversationSubtype(subtype)) {
     return false;
   }
   if (threadTs === undefined || threadTs === event.ts) {
@@ -2324,6 +3375,7 @@ async function readThreadMessages(
   try {
     const response = await client.conversations.replies({
       channel: channelId,
+      include_all_metadata: true,
       limit: 20,
       ts: threadTs,
     });
@@ -2334,10 +3386,170 @@ async function readThreadMessages(
   }
 }
 
-function readThreadTextMessages(messages: readonly StringIndexed[]): string[] {
-  return messages
-    .map((message) => readString(message, "text"))
-    .filter((text): text is string => text !== undefined);
+function readThreadHistoryMessages(
+  messages: readonly StringIndexed[],
+  input: {
+    apiAppId?: string;
+    botUserId?: string;
+    currentMessageTs?: string;
+    teamId: string;
+  },
+): SlackThreadHistoryMessage[] {
+  return messages.flatMap((message): SlackThreadHistoryMessage[] => {
+    if (shouldExcludeThreadHistoryMessage(message, input)) {
+      return [];
+    }
+    const text = readString(message, "text");
+    if (text === undefined || text.trim().length === 0) {
+      return [];
+    }
+    const messageTs = readString(message, "ts");
+    const messageTeamId = readSlackMessageTeamId(message) ?? input.teamId;
+    const userId = readString(message, "user");
+    const botId = readString(message, "bot_id");
+    if (
+      isAssistantThreadHistoryMessage(message, {
+        apiAppId: input.apiAppId,
+        botUserId: input.botUserId,
+        messageTeamId,
+        teamId: input.teamId,
+        userId,
+      })
+    ) {
+      return [
+        {
+          botId,
+          messageTs,
+          role: "assistant",
+          teamId: messageTeamId,
+          text,
+          userId,
+        },
+      ];
+    }
+    if (userId === undefined) {
+      return [];
+    }
+    return [
+      {
+        messageTs,
+        role: "user",
+        teamId: messageTeamId,
+        text,
+        userId,
+      },
+    ];
+  });
+}
+
+function shouldExcludeThreadHistoryMessage(
+  message: StringIndexed,
+  input: {
+    botUserId?: string;
+    currentMessageTs?: string;
+  },
+): boolean {
+  const messageTs = readString(message, "ts");
+  if (messageTs !== undefined && messageTs === input.currentMessageTs) {
+    return true;
+  }
+  const messageType = readString(message, "type");
+  if (messageType !== undefined && messageType !== "message") {
+    return true;
+  }
+  if (readSlackMessageMetadataEventType(message) === AGENTS_PARTY_CONTROL_EVENT_TYPE) {
+    return true;
+  }
+  if (containsModelRoutingAction(message)) {
+    return true;
+  }
+  const subtype = readString(message, "subtype");
+  return !isThreadHistoryConversationSubtype(subtype);
+}
+
+function isThreadHistoryConversationSubtype(subtype: string | undefined): boolean {
+  return subtype === undefined || THREAD_HISTORY_CONVERSATION_SUBTYPES.has(subtype);
+}
+
+function isAssistantThreadHistoryMessage(
+  message: StringIndexed,
+  input: {
+    apiAppId?: string;
+    botUserId?: string;
+    messageTeamId: string;
+    teamId: string;
+    userId?: string;
+  },
+): boolean {
+  if (
+    input.botUserId !== undefined &&
+    input.userId === input.botUserId &&
+    input.messageTeamId === input.teamId
+  ) {
+    return true;
+  }
+  if (input.apiAppId === undefined) {
+    return false;
+  }
+  const botProfile = isRecord(message.bot_profile) ? message.bot_profile : undefined;
+  return (
+    isSlackMessageFromTeam(message, input.teamId) &&
+    (readString(message, "app_id") === input.apiAppId ||
+      (botProfile !== undefined &&
+        readString(botProfile as StringIndexed, "app_id") === input.apiAppId))
+  );
+}
+
+function isSlackMessageFromTeam(message: StringIndexed, teamId: string): boolean {
+  const messageTeamId = readSlackMessageTeamId(message);
+  return messageTeamId === undefined || messageTeamId === teamId;
+}
+
+function readSlackMessageTeamId(message: StringIndexed): string | undefined {
+  const botProfile = isRecord(message.bot_profile) ? message.bot_profile : undefined;
+  return (
+    readString(message, "team") ??
+    (botProfile === undefined ? undefined : readString(botProfile as StringIndexed, "team_id"))
+  );
+}
+
+function readSlackMessageMetadataEventType(message: StringIndexed): string | undefined {
+  const metadata = message.metadata;
+  if (!isRecord(metadata)) {
+    return undefined;
+  }
+  return readString(metadata as StringIndexed, "event_type");
+}
+
+function containsModelRoutingAction(message: StringIndexed): boolean {
+  const blocks = message.blocks;
+  if (!Array.isArray(blocks)) {
+    return false;
+  }
+  return blocks.some((block) => blockContainsModelRoutingAction(block));
+}
+
+function blockContainsModelRoutingAction(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const actionId = readString(value, "action_id");
+  if (
+    actionId === MODEL_ROUTING_CONFIGURE_ACTION_ID ||
+    actionId === MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID ||
+    actionId === MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID
+  ) {
+    return true;
+  }
+  const elements = value.elements;
+  if (
+    Array.isArray(elements) &&
+    elements.some((element) => blockContainsModelRoutingAction(element))
+  ) {
+    return true;
+  }
+  const accessory = value.accessory;
+  return accessory !== undefined && blockContainsModelRoutingAction(accessory);
 }
 
 async function resolveTransientAudioAttachmentsForInvocation(input: {
@@ -2408,8 +3620,9 @@ export async function postAgentResult(input: {
   }
 
   const suffix = media?.uri ?? media?.operationName;
-  await input.client.chat.postMessage({
+  await postFormattedAgentMessage({
     channel: input.channel,
+    client: input.client,
     text: suffix === undefined ? input.text : `${input.text}\n${suffix}`,
     thread_ts: input.threadTs,
   });
@@ -2421,6 +3634,86 @@ export async function postAgentResult(input: {
       threadTs: input.threadTs,
     });
   }
+}
+
+async function postFormattedAgentMessage(input: {
+  channel: string;
+  client: SlackAgentClient;
+  text: string;
+  thread_ts: string;
+}): Promise<void> {
+  const mrkdwn = markdownToSlackMrkdwn(input.text);
+  if (mrkdwn.length > 0 && mrkdwn.length <= SLACK_SECTION_TEXT_LIMIT) {
+    await input.client.chat.postMessage({
+      blocks: [
+        {
+          text: {
+            text: mrkdwn,
+            type: "mrkdwn",
+            verbatim: true,
+          },
+          type: "section",
+        },
+      ],
+      channel: input.channel,
+      text: input.text,
+      thread_ts: input.thread_ts,
+      unfurl_links: false,
+      unfurl_media: false,
+    });
+    return;
+  }
+
+  await input.client.chat.postMessage({
+    channel: input.channel,
+    text: input.text,
+    thread_ts: input.thread_ts,
+    unfurl_links: false,
+    unfurl_media: false,
+  });
+}
+
+function markdownToSlackMrkdwn(markdown: string): string {
+  const tokens = splitCodeFences(markdown);
+  return tokens
+    .map((token) => (token.kind === "code" ? token.text : markdownTextToSlackMrkdwn(token.text)))
+    .join("");
+}
+
+function splitCodeFences(markdown: string): { kind: "code" | "text"; text: string }[] {
+  const tokens: { kind: "code" | "text"; text: string }[] = [];
+  let cursor = 0;
+  const fencePattern = /```[\s\S]*?```/g;
+  for (const match of markdown.matchAll(fencePattern)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      tokens.push({ kind: "text", text: markdown.slice(cursor, index) });
+    }
+    tokens.push({ kind: "code", text: match[0] });
+    cursor = index + match[0].length;
+  }
+  if (cursor < markdown.length) {
+    tokens.push({ kind: "text", text: markdown.slice(cursor) });
+  }
+  return tokens;
+}
+
+function markdownTextToSlackMrkdwn(text: string): string {
+  return text
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g, (_match, label: string, url: string) => {
+      return `<${escapeSlackMrkdwnUrl(url)}|${escapeSlackMrkdwnLinkLabel(label)}>`;
+    })
+    .replace(/^#{1,6}\s+(.+)$/gm, "*$1*")
+    .replace(/\*\*([^*\n]+)\*\*/g, "*$1*")
+    .replace(/__([^_\n]+)__/g, "_$1_");
+}
+
+function escapeSlackMrkdwnUrl(url: string): string {
+  return url.replaceAll("&", "&amp;").replaceAll("<", "%3C").replaceAll(">", "%3E");
+}
+
+function escapeSlackMrkdwnLinkLabel(label: string): string {
+  return label.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
 function logAgentRunnerSuccess(
@@ -3556,6 +4849,13 @@ function readSlackUserId(body: unknown): string | undefined {
   return undefined;
 }
 
+function readSlackApiAppId(body: unknown): string | undefined {
+  if (!isRecord(body)) {
+    return undefined;
+  }
+  return readString(body as StringIndexed, "api_app_id");
+}
+
 function readActionValue(body: unknown): string | undefined {
   if (!isRecord(body) || !Array.isArray(body.actions)) {
     return undefined;
@@ -3796,9 +5096,16 @@ const FLAG_REACTION_LANGUAGE_CODES: Record<string, string> = {
 
 function stripBotMention(text: string, botUserId: string | undefined): string {
   if (botUserId === undefined) {
-    return text.trim();
+    return stripMentionOnlyText(text);
   }
-  return text.replace(new RegExp(`<@${escapeRegExp(botUserId)}>\\s*`, "u"), "").trim();
+  return stripMentionOnlyText(
+    text.replace(new RegExp(`<@${escapeRegExp(botUserId)}>\\s*`, "gu"), "").trim(),
+  );
+}
+
+function stripMentionOnlyText(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.replace(/<@[A-Z0-9]+>\s*/gu, "").trim().length === 0 ? "" : trimmed;
 }
 
 function escapeRegExp(value: string): string {

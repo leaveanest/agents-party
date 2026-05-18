@@ -6,6 +6,7 @@ import {
   AiSdkLlmAdapter,
   createAiSdkAdapters,
   createAiSdkModelResolver,
+  createAiSdkProviderToolResolver,
   LlmProviderError,
 } from "../../src/providers/aiSdkAdapter.js";
 import {
@@ -85,6 +86,96 @@ describe("AiSdkLlmAdapter", () => {
       },
     });
     expect(languageModel.doGenerateCalls[0]?.tools).toHaveLength(1);
+  });
+
+  it("enables provider web search tools by default for web-search capable models", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            text: "Searched answer",
+            type: "text",
+          },
+        ],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        ...model,
+        capabilities: [...model.capabilities, "web_search"],
+      },
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.tools?.map((candidate) => candidate.name)).toContain(
+      "web_search",
+    );
+  });
+
+  it("does not expose provider-executed web search calls as repository agent tools", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            providerExecuted: true,
+            toolCallId: "search-1",
+            toolName: "web_search",
+            input: JSON.stringify({ query: "latest AI SDK web search" }),
+            type: "tool-call",
+          },
+          {
+            text: "Searched answer",
+            type: "text",
+          },
+        ],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    const result = await adapter.generate({
+      history,
+      model: {
+        ...model,
+        capabilities: [...model.capabilities, "web_search"],
+      },
+    });
+
+    expect(result.toolCalls).toEqual([]);
+  });
+
+  it("uses AI SDK provider-specific web search tool names", () => {
+    const resolveTools = createAiSdkProviderToolResolver();
+    const providers = [
+      ["openai", "web_search"],
+      ["azure_openai", "web_search_preview"],
+      ["anthropic", "web_search"],
+      ["google", "google_search"],
+    ] as const;
+
+    for (const [provider, toolName] of providers) {
+      expect(
+        Object.keys(
+          resolveTools({
+            capabilities: ["text", "web_search"],
+            id: `${provider}:test-model`,
+            provider,
+            providerModelId: "test-model",
+          }) ?? {},
+        ),
+      ).toEqual([toolName]);
+    }
   });
 
   it("passes workspace credentials into the model resolver", async () => {
@@ -441,8 +532,18 @@ describe("AiSdkLlmAdapter", () => {
       "azure_openai",
       "anthropic",
       "google",
+      "bedrock",
       "groq",
       "xai",
+      "mistral",
+      "togetherai",
+      "cohere",
+      "fireworks",
+      "deepinfra",
+      "deepseek",
+      "cerebras",
+      "perplexity",
+      "baseten",
       "plamo",
       "nvidia",
       "litellm",
@@ -450,15 +551,15 @@ describe("AiSdkLlmAdapter", () => {
   });
 
   it("does not read OpenAI-compatible provider settings from process environment", async () => {
-    const previousApiKey = process.env.XAI_API_KEY;
-    const previousBaseUrl = process.env.XAI_BASE_URL;
-    process.env.XAI_API_KEY = "env-key";
-    process.env.XAI_BASE_URL = "https://env.example/v1";
+    const previousApiKey = process.env.NVIDIA_API_KEY;
+    const previousBaseUrl = process.env.NVIDIA_BASE_URL;
+    process.env.NVIDIA_API_KEY = "env-key";
+    process.env.NVIDIA_BASE_URL = "https://env.example/v1";
     const requests: Array<{ authorization: string | null; url: string }> = [];
     try {
       const adapter = createAiSdkAdapters({
         openAICompatible: {
-          xai: {
+          nvidia: {
             fetch: async (input, init) => {
               const headers = new Headers(init?.headers);
               requests.push({
@@ -469,9 +570,9 @@ describe("AiSdkLlmAdapter", () => {
             },
           },
         },
-      }).find((candidate) => candidate.provider === "xai");
+      }).find((candidate) => candidate.provider === "nvidia");
       if (adapter === undefined) {
-        throw new Error("xAI adapter was not registered.");
+        throw new Error("NVIDIA adapter was not registered.");
       }
 
       await expect(
@@ -479,9 +580,9 @@ describe("AiSdkLlmAdapter", () => {
           history,
           model: {
             capabilities: ["text"],
-            id: "xai:grok-2-latest",
-            provider: "xai",
-            providerModelId: "grok-2-latest",
+            id: "nvidia:meta/llama-3.1-70b-instruct",
+            provider: "nvidia",
+            providerModelId: "meta/llama-3.1-70b-instruct",
           },
         }),
       ).resolves.toMatchObject({ content: "configured path" });
@@ -489,12 +590,12 @@ describe("AiSdkLlmAdapter", () => {
       expect(requests).toEqual([
         {
           authorization: null,
-          url: "https://api.x.ai/v1/chat/completions",
+          url: "https://integrate.api.nvidia.com/v1/chat/completions",
         },
       ]);
     } finally {
-      restoreEnv("XAI_API_KEY", previousApiKey);
-      restoreEnv("XAI_BASE_URL", previousBaseUrl);
+      restoreEnv("NVIDIA_API_KEY", previousApiKey);
+      restoreEnv("NVIDIA_BASE_URL", previousBaseUrl);
     }
   });
 
@@ -503,7 +604,7 @@ describe("AiSdkLlmAdapter", () => {
     const adapter = createAiSdkAdapters(
       {
         openAICompatible: {
-          xai: {
+          nvidia: {
             baseURL: "https://configured.example/v1",
             fetch: async (input, init) => {
               const headers = new Headers(init?.headers);
@@ -521,7 +622,7 @@ describe("AiSdkLlmAdapter", () => {
           async resolveProviderCredential(input) {
             expect(input).toEqual({
               credentialName: "api_key",
-              provider: "xai",
+              provider: "nvidia",
               workspaceId: "T1",
             });
             return {
@@ -531,9 +632,9 @@ describe("AiSdkLlmAdapter", () => {
           },
         },
       },
-    ).find((candidate) => candidate.provider === "xai");
+    ).find((candidate) => candidate.provider === "nvidia");
     if (adapter === undefined) {
-      throw new Error("xAI adapter was not registered.");
+      throw new Error("NVIDIA adapter was not registered.");
     }
 
     await expect(
@@ -542,9 +643,9 @@ describe("AiSdkLlmAdapter", () => {
         history,
         model: {
           capabilities: ["text"],
-          id: "xai:grok-2-latest",
-          provider: "xai",
-          providerModelId: "grok-2-latest",
+          id: "nvidia:meta/llama-3.1-70b-instruct",
+          provider: "nvidia",
+          providerModelId: "meta/llama-3.1-70b-instruct",
         },
       }),
     ).resolves.toMatchObject({ content: "workspace credential path" });
@@ -563,7 +664,7 @@ describe("AiSdkLlmAdapter", () => {
     });
 
     expect(adapter.supports({ history, model }, ["text"])).toBe(true);
-    expect(adapter.supports({ history, model }, ["text", "web_search"])).toBe(false);
+    expect(adapter.supports({ history, model }, ["text", "web_search"])).toBe(true);
     expect(adapter.supports({ history, model }, ["image_generation"])).toBe(false);
   });
 
@@ -573,8 +674,8 @@ describe("AiSdkLlmAdapter", () => {
     expect(() =>
       resolveModel({
         capabilities: ["text"],
-        id: "bedrock:test-model",
-        provider: "bedrock",
+        id: "dify:test-model",
+        provider: "dify",
         providerModelId: "test-model",
       }),
     ).toThrow(LlmProviderError);

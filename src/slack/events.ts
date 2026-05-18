@@ -11,8 +11,10 @@ import type {
 import type { SlackEventDeduplicator } from "./idempotency.js";
 import { readSlackEventId } from "./idempotency.js";
 import {
+  MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_MODAL_CALLBACK_ID,
+  MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
   WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
@@ -83,6 +85,12 @@ export function registerSlackEventHandlers(
     handlers.handleWorkspaceCredentialConfigureAction(args),
   );
   app.action(MODEL_ROUTING_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleModelRoutingConfigureAction(args),
+  );
+  app.action(MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleModelRoutingConfigureAction(args),
+  );
+  app.action(MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID, async (args) =>
     handlers.handleModelRoutingConfigureAction(args),
   );
   app.action(WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID, async (args) =>

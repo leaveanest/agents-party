@@ -32,6 +32,7 @@ describe("Postgres app repositories", () => {
       expect.stringContaining('insert into "workspace_app_settings"'),
       expect.stringContaining('insert into "google_oauth_states"'),
     ]);
+    expect(JSON.parse(String(pool.queries[0]?.values?.[3]))).toEqual(["google:gemini-2.5-flash"]);
     expect(JSON.parse(String(pool.queries[0]?.values?.at(-1)))).toMatchObject({
       default_agent_id: "triage",
       default_model_id: "google:gemini-2.5-flash",

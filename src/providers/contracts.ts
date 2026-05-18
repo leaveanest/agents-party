@@ -3,14 +3,23 @@ import type { ConversationHistory, JsonValue } from "../domain/messageHistory.js
 export const LlmProviderId = {
   Anthropic: "anthropic",
   AzureOpenAI: "azure_openai",
+  Baseten: "baseten",
   Bedrock: "bedrock",
+  Cerebras: "cerebras",
+  Cohere: "cohere",
+  DeepInfra: "deepinfra",
+  DeepSeek: "deepseek",
   Dify: "dify",
+  Fireworks: "fireworks",
   Google: "google",
   Groq: "groq",
   LiteLLM: "litellm",
+  Mistral: "mistral",
   Nvidia: "nvidia",
   OpenAI: "openai",
   PLaMo: "plamo",
+  Perplexity: "perplexity",
+  TogetherAI: "togetherai",
   XAI: "xai",
 } as const;
 

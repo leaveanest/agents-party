@@ -25,6 +25,8 @@ export const englishTranslations = {
   "common.enabled": "Enabled",
   "common.enabledStatus": "enabled",
   "common.save": "Save",
+  "channelSettings.configure": "Channel settings",
+  "threadSettings.configure": "Thread model",
   "credential.error.apiKeyRequired": "Enter an API key.",
   "credential.error.authKeyIdRequired": "Enter an AuthKey ID.",
   "credential.error.authKeySecretRequired": "Enter an AuthKey Secret.",
@@ -58,6 +60,10 @@ export const englishTranslations = {
   "credential.unavailable": "API key storage is not configured for this app process.",
   "modelRouting.modal.intro":
     "Model routing controls are being prepared for this workspace. The selected workspace context is preserved for save.",
+  "modelRouting.channelModal.intro": "Choose the default model for this channel.",
+  "modelRouting.channelModal.defaultModel": "Channel default model",
+  "modelRouting.threadModal.intro": "Choose the model for this thread.",
+  "modelRouting.threadModal.defaultModel": "Thread model",
   "modelRouting.modal.defaultModel": "Workspace default model",
   "modelRouting.modal.defaultModelPlaceholder": "Choose a default model",
   "modelRouting.modal.enabledModels": "Enabled models",
@@ -67,6 +73,10 @@ export const englishTranslations = {
   "modelRouting.error.defaultNotEnabled": "Choose a default model from the enabled models.",
   "modelRouting.error.enabledModelsRequired":
     "Choose at least one enabled model and a default model.",
+  "modelRouting.error.channelModelRequired": "Choose an available model for this channel.",
+  "modelRouting.error.threadModelRequired": "Choose an available model for this thread.",
+  "modelRouting.error.noCredentialedModels":
+    "Register an API key or required credential before enabling models for this workspace.",
   "modelRouting.error.notConfigured": "Model routing settings are not configured.",
   "modelRouting.error.saveFailed": "Could not save model routing settings. Try again later.",
   "modelRouting.error.unauthorized":
@@ -74,8 +84,12 @@ export const englishTranslations = {
   "modelRouting.fallback.notice":
     "The previously selected {{fromScope}} model {{fromModelId}} is no longer enabled. This thread is now using the {{toScope}} model {{toModelId}}.",
   "modelRouting.result.loading": "Loading model routing settings...",
+  "modelRouting.result.channelSaved": "Channel settings were saved.",
+  "modelRouting.result.threadSaved": "Thread settings were saved.",
   "modelRouting.result.saved": "Model routing settings were saved.",
   "modelRouting.result.saving": "Saving model routing settings...",
+  "modelRouting.title.channel": "Channel settings",
+  "modelRouting.title.thread": "Thread settings",
   "modelRouting.title": "Model routing",
   "rss.parent": "RSS updates: {{feedUrl}}",
   "salesforcePdf.attachTarget.both": "Quote and Opportunity",
@@ -152,6 +166,8 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "common.enabled": "有効",
   "common.enabledStatus": "有効",
   "common.save": "保存",
+  "channelSettings.configure": "チャンネル設定",
+  "threadSettings.configure": "スレッドモデル設定",
   "credential.error.apiKeyRequired": "APIキーを入力してください。",
   "credential.error.authKeyIdRequired": "AuthKey IDを入力してください。",
   "credential.error.authKeySecretRequired": "AuthKey Secretを入力してください。",
@@ -188,6 +204,10 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "credential.unavailable": "このアプリプロセスではAPIキー保存が設定されていません。",
   "modelRouting.modal.intro":
     "このワークスペース向けのモデルルーティング設定を準備中です。保存に使うワークスペース文脈は保持されています。",
+  "modelRouting.channelModal.intro": "このチャンネルで使うデフォルトモデルを選択します。",
+  "modelRouting.channelModal.defaultModel": "チャンネルのデフォルトモデル",
+  "modelRouting.threadModal.intro": "このスレッドで使うモデルを選択します。",
+  "modelRouting.threadModal.defaultModel": "スレッドのモデル",
   "modelRouting.modal.defaultModel": "ワークスペースのデフォルトモデル",
   "modelRouting.modal.defaultModelPlaceholder": "デフォルトモデルを選択",
   "modelRouting.modal.enabledModels": "有効なモデル",
@@ -197,6 +217,10 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "modelRouting.error.defaultNotEnabled": "デフォルトモデルは有効モデルの中から選択してください。",
   "modelRouting.error.enabledModelsRequired":
     "少なくとも1つの有効モデルとデフォルトモデルを選択してください。",
+  "modelRouting.error.channelModelRequired": "このチャンネルで利用できるモデルを選択してください。",
+  "modelRouting.error.threadModelRequired": "このスレッドで利用できるモデルを選択してください。",
+  "modelRouting.error.noCredentialedModels":
+    "このワークスペースでモデルを有効にする前に、APIキーまたは必要な認証情報を登録してください。",
   "modelRouting.error.notConfigured": "モデルルーティング設定は構成されていません。",
   "modelRouting.error.saveFailed":
     "モデルルーティング設定を保存できませんでした。時間をおいて再試行してください。",
@@ -205,8 +229,12 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "modelRouting.fallback.notice":
     "以前選択されていた{{fromScope}}モデル {{fromModelId}} は無効になっています。このスレッドでは{{toScope}}モデル {{toModelId}} を使用します。",
   "modelRouting.result.loading": "モデルルーティング設定を読み込んでいます...",
+  "modelRouting.result.channelSaved": "チャンネル設定を保存しました。",
+  "modelRouting.result.threadSaved": "スレッド設定を保存しました。",
   "modelRouting.result.saved": "モデルルーティング設定を保存しました。",
   "modelRouting.result.saving": "モデルルーティング設定を保存しています...",
+  "modelRouting.title.channel": "チャンネル設定",
+  "modelRouting.title.thread": "スレッド設定",
   "modelRouting.title": "モデルルーティング",
   "rss.parent": "RSS更新: {{feedUrl}}",
   "salesforcePdf.attachTarget.both": "QuoteとOpportunity",

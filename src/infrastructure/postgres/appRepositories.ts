@@ -773,7 +773,7 @@ function settingsValues(document: WorkspaceSettingsDocument): PostgresColumnValu
 function workspaceSettingsValues(document: WorkspaceSettingsDocument): PostgresColumnValues {
   return {
     ...settingsValues(document),
-    enabled_model_ids: document.enabledModelIds ?? [],
+    enabled_model_ids: JSON.stringify(document.enabledModelIds ?? []),
   };
 }
 

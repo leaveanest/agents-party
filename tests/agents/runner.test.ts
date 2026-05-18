@@ -88,6 +88,29 @@ describe("AgentRunner", () => {
     expect(router.requests[0]?.model.id).toBe(explicitModel.id);
   });
 
+  it("returns a user-facing fallback when the provider returns no text after search", async () => {
+    const router = new FakeProviderRouter({
+      content: "",
+      sources: [{ title: "Source", url: "https://example.com" }],
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "search",
+      userId: "U1",
+    });
+
+    expect(result.message).toBe(
+      "検索は実行されましたが、回答本文が返されませんでした。もう一度お試しください。",
+    );
+  });
+
   it("adds transient audio transcripts to provider history without persistence types", async () => {
     const router = new FakeProviderRouter({
       content: "heard it",
@@ -300,6 +323,52 @@ describe("AgentRunner", () => {
     ).rejects.toMatchObject({
       model: { id: "missing:default-model" },
     });
+  });
+
+  it("preserves Slack thread history roles before provider invocation", async () => {
+    const router = new FakeProviderRouter({
+      content: "thread aware",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "2.0",
+      teamId: "T1",
+      text: "continue",
+      threadHistory: [
+        {
+          messageTs: "1.0",
+          role: "user",
+          teamId: "T1",
+          text: "root question",
+          userId: "U1",
+        },
+        {
+          botId: "BAPP",
+          messageTs: "1.1",
+          role: "assistant",
+          teamId: "T1",
+          text: "previous answer",
+        },
+      ],
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.history.messages.slice(1, 3)).toEqual([
+      expect.objectContaining({
+        author: { id: "slack:T1:U1", kind: "user" },
+        role: "user",
+        content: [{ text: "root question", type: "text" }],
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ text: "previous answer", type: "text" }],
+      }),
+    ]);
   });
 });
 

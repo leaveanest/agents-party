@@ -98,6 +98,14 @@ describe("createAgentSlackHandlers", () => {
           };
         },
       } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds(input) {
+          operations.push("listActiveProviderKinds");
+          expect(input).toEqual({ teamId: "T2" });
+          return ["openai", "anthropic"];
+        },
+        async saveProviderApiKey() {},
+      },
     });
 
     await handlers.handleModelRoutingConfigureAction({
@@ -140,6 +148,7 @@ describe("createAgentSlackHandlers", () => {
       "users.info",
       "listInstalledWorkspaces",
       "findWorkspaceSettings",
+      "listActiveProviderKinds",
       "views.update",
     ]);
     expect(openedViews).toEqual([
@@ -166,6 +175,255 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain("Enabled models");
     expect(serialized).toContain("Workspace default model");
     expect(serialized).toContain("anthropic:claude-3-5-sonnet-latest");
+    expect(serialized).not.toContain("google:gemini-2.5-flash");
+  });
+
+  it("does not open model routing selectors when no model provider credentials are registered", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return [];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T1" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updatedViews[0]);
+    expect(serialized).toContain("Register an API key");
+    expect(serialized).not.toContain("enabled_models");
+  });
+
+  it("opens channel-only settings modal from channel mention configure actions", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findChannelSettings(teamId: string, channelId: string) {
+          expect(teamId).toBe("T1");
+          expect(channelId).toBe("C1");
+          return {
+            default_agent_id: "assistant",
+            default_model_id: "openai:gpt-4o",
+          };
+        },
+        async findWorkspaceSettings(teamId: string) {
+          expect(teamId).toBe("T1");
+          return {
+            enabled_model_ids: ["openai:gpt-4o"],
+          };
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds(input) {
+          expect(input).toEqual({ teamId: "T1" });
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              channelId: "C1",
+              source: "channel",
+              teamId: "T1",
+            }),
+          },
+        ],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updatedViews[0]);
+    expect(serialized).toContain("Channel settings");
+    expect(serialized).toContain("Channel default model");
+    expect(serialized).toContain('\\"channelId\\":\\"C1\\"');
+    expect(serialized).toContain('\\"teamId\\":\\"T1\\"');
+    expect(serialized).not.toContain("Channel default agent");
+    expect(serialized).not.toContain("Workspace default model");
+    expect(serialized).not.toContain("Enabled models");
+    expect(serialized).not.toContain("model_routing_workspace_select");
+  });
+
+  it("shows channel model selection when no agents are stored yet", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findChannelSettings() {
+          return {};
+        },
+        async findWorkspaceSettings() {
+          return {
+            enabled_model_ids: ["openai:gpt-4o"],
+          };
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              channelId: "C1",
+              source: "channel",
+              teamId: "T1",
+            }),
+          },
+        ],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updatedViews[0]);
+    expect(serialized).toContain("Channel default model");
+    expect(serialized).toContain("openai:gpt-4o");
+    expect(serialized).not.toContain("Channel default agent");
+  });
+
+  it("opens thread model settings modal from mention menu actions", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findSlackThread(teamId: string, channelId: string, threadTs: string) {
+          expect(teamId).toBe("T1");
+          expect(channelId).toBe("C1");
+          expect(threadTs).toBe("1712345678.000100");
+          return {
+            model_id: "openai:gpt-4o",
+            model_scope: "thread",
+          };
+        },
+        async findChannelSettings() {
+          return {
+            default_model_id: "anthropic:claude-3-5-sonnet-latest",
+          };
+        },
+        async findWorkspaceSettings(teamId: string) {
+          expect(teamId).toBe("T1");
+          return {
+            enabled_model_ids: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
+          };
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds(input) {
+          expect(input).toEqual({ teamId: "T1" });
+          return ["openai", "anthropic"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              channelId: "C1",
+              source: "thread",
+              teamId: "T1",
+              threadTs: "1712345678.000100",
+            }),
+          },
+        ],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updatedViews[0]);
+    expect(serialized).toContain("Thread settings");
+    expect(serialized).toContain("Thread model");
+    expect(serialized).toContain("openai:gpt-4o");
+    expect(serialized).toContain('\\"source\\":\\"thread\\"');
+    expect(serialized).toContain('\\"threadTs\\":\\"1712345678.000100\\"');
+    expect(serialized).not.toContain("Workspace default model");
+    expect(serialized).not.toContain("Enabled models");
   });
 
   it("saves workspace model routing settings from modal submissions", async () => {
@@ -190,6 +448,13 @@ describe("createAgentSlackHandlers", () => {
           saves.push(input);
         },
       } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds(input) {
+          expect(input).toEqual({ teamId: "T2" });
+          return ["openai", "anthropic"];
+        },
+        async saveProviderApiKey() {},
+      },
     });
 
     await handlers.handleModelRoutingModalSubmission({
@@ -262,6 +527,322 @@ describe("createAgentSlackHandlers", () => {
       }),
     ]);
     expect(JSON.stringify(updates[0])).toContain("Model routing settings were saved.");
+  });
+
+  it("creates the built-in assistant agent when saving workspace settings from an empty agent table", async () => {
+    const savedAgents: unknown[] = [];
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findWorkspaceSettings() {
+          return {
+            enabled_model_ids: ["openai:gpt-4o"],
+          };
+        },
+        async saveAgent(input: unknown) {
+          savedAgents.push(input);
+        },
+        async saveWorkspaceSettings(input: unknown) {
+          saves.push(input);
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async () => undefined,
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          source: "app_home",
+          teamId: "T1",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+            model_routing_enabled_models: {
+              enabled_models: {
+                selected_options: [{ value: "openai:gpt-4o" }],
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(savedAgents).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        enabled: true,
+      }),
+    ]);
+    expect(saves).toEqual([
+      expect.objectContaining({
+        defaultAgentId: "assistant",
+        defaultModelId: "openai:gpt-4o",
+        enabledModelIds: ["openai:gpt-4o"],
+        teamId: "T1",
+      }),
+    ]);
+  });
+
+  it("saves channel settings from channel-only modal submissions", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findChannelSettings(teamId: string, channelId: string) {
+          expect(teamId).toBe("T1");
+          expect(channelId).toBe("C1");
+          return {
+            thread_auto_reply: true,
+          };
+        },
+        async findWorkspaceSettings(teamId: string) {
+          expect(teamId).toBe("T1");
+          return {
+            enabled_model_ids: ["openai:gpt-4o"],
+          };
+        },
+        async saveChannelSettings(input: unknown) {
+          saves.push(input);
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds(input) {
+          expect(input).toEqual({ teamId: "T1" });
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          channelId: "C1",
+          source: "channel",
+          teamId: "T1",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(acks).toEqual([expect.objectContaining({ response_action: "update" })]);
+    expect(saves).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        defaultAgentId: "assistant",
+        defaultModelId: "openai:gpt-4o",
+        teamId: "T1",
+        threadAutoReply: true,
+      }),
+    ]);
+    expect(JSON.stringify(updates[0])).toContain("Channel settings were saved.");
+  });
+
+  it("creates the built-in assistant agent when saving channel settings from an empty agent table", async () => {
+    const savedAgents: unknown[] = [];
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findChannelSettings() {
+          return {};
+        },
+        async findWorkspaceSettings() {
+          return {
+            enabled_model_ids: ["openai:gpt-4o"],
+          };
+        },
+        async saveAgent(input: unknown) {
+          savedAgents.push(input);
+        },
+        async saveChannelSettings(input: unknown) {
+          saves.push(input);
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async () => undefined,
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          channelId: "C1",
+          source: "channel",
+          teamId: "T1",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(savedAgents).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        enabled: true,
+      }),
+    ]);
+    expect(saves).toEqual([
+      expect.objectContaining({
+        defaultAgentId: "assistant",
+        defaultModelId: "openai:gpt-4o",
+      }),
+    ]);
+  });
+
+  it("saves thread model settings from thread-only modal submissions", async () => {
+    const acks: unknown[] = [];
+    const activations: unknown[] = [];
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async activateThreadAgent(input: unknown) {
+          activations.push(input);
+          return {};
+        },
+        async findSlackThread() {
+          return {
+            agent_id: "assistant",
+            last_message_ts: "1712345678.000200",
+            root_message_ts: "1712345678.000100",
+          };
+        },
+        async findChannelSettings() {
+          return {};
+        },
+        async findWorkspaceSettings() {
+          return {
+            enabled_model_ids: ["openai:gpt-4o"],
+          };
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          channelId: "C1",
+          source: "thread",
+          teamId: "T1",
+          threadTs: "1712345678.000100",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(acks).toEqual([expect.objectContaining({ response_action: "update" })]);
+    expect(activations).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        channelId: "C1",
+        lastMessageTs: "1712345678.000200",
+        modelId: "openai:gpt-4o",
+        rootMessageTs: "1712345678.000100",
+        teamId: "T1",
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+    expect(JSON.stringify(updates[0])).toContain("Thread settings were saved.");
   });
 
   it("publishes Salesforce connection status and connect entry points on App Home", async () => {
@@ -1589,6 +2170,215 @@ describe("createAgentSlackHandlers", () => {
         text: "No agent is configured for this channel or workspace.",
       }),
     ]);
+    expect(JSON.stringify(posts[0])).toContain("model_routing_configure");
+    expect(JSON.stringify(posts[0])).toContain('\\"channelId\\":\\"C1\\"');
+    expect(JSON.stringify(posts[0])).toContain('\\"source\\":\\"channel\\"');
+    expect(JSON.stringify(posts[0])).toContain('\\"teamId\\":\\"T1\\"');
+    expect(JSON.stringify(posts[0])).toContain("Channel settings");
+    expect(JSON.stringify(posts[0])).toContain('"event_type":"agents_party_control"');
+  });
+
+  it("posts a settings menu for mention-only app mentions", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { action: "respond", reason: "empty_invocation" },
+          message: "unexpected",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        modelId: "openai:gpt-4o",
+        modelScope: "workspace",
+        scope: "workspace",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1>\n<@B1>",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(posts[0]);
+    expect(runs).toBe(0);
+    expect(posts).toHaveLength(1);
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        channelId: "C1",
+        lastMessageTs: "1712345678.000100",
+        modelId: undefined,
+        rootMessageTs: "1712345678.000100",
+        teamId: "T1",
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+    expect(serialized).toContain("Thread model");
+    expect(serialized).toContain("Channel settings");
+    expect(serialized).toContain("model_routing_thread_configure");
+    expect(serialized).toContain("model_routing_channel_configure");
+    expect(serialized).toContain('"event_type":"agents_party_control"');
+    expect(serialized).toContain('"kind":"mention_menu"');
+    expect(serialized).toContain('\\"source\\":\\"thread\\"');
+    expect(serialized).toContain('\\"threadTs\\":\\"1712345678.000100\\"');
+    expect(serialized).not.toContain("No agent is configured");
+    const blocks = (posts[0] as { blocks: { elements?: { action_id?: string }[] }[] }).blocks;
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.elements).toHaveLength(2);
+    for (const block of blocks) {
+      const actionIds = block.elements?.map((element) => element.action_id).filter(Boolean) ?? [];
+      expect(new Set(actionIds).size).toBe(actionIds.length);
+    }
+  });
+
+  it("posts a settings menu for mention-only app mentions when bot user id is unavailable", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { action: "respond", reason: "empty_invocation" },
+          message: "unexpected",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const queue = new MemorySlackAgentJobQueue();
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        modelId: "openai:gpt-4o",
+        modelScope: "workspace",
+        scope: "workspace",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, {
+      agentJobQueue: queue,
+      routingRepository: repository,
+    });
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+      },
+      context: {},
+      event: {
+        channel: "C1",
+        text: "<@UAPP>",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(runs).toBe(0);
+    expect(queue.jobs).toEqual([]);
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        channelId: "C1",
+        lastMessageTs: "1712345678.000100",
+        teamId: "T1",
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+    expect(JSON.stringify(posts[0])).toContain("model_routing_thread_configure");
+    expect(JSON.stringify(posts[0])).toContain("model_routing_channel_configure");
+  });
+
+  it("posts a model routing configure button for queued mentions with no configured agent", async () => {
+    let runs = 0;
+    const runner = {
+      async run() {
+        runs += 1;
+        return {
+          decision: { action: "respond", reason: "unrouted_invocation" },
+          message: "unexpected fallback",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        enterpriseId: "E1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000100",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: { threads: { setStatus: async () => ({ ok: true }) } },
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: { replies: async () => ({ messages: [] }) },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(runs).toBe(0);
+    expect(JSON.stringify(posts[0])).toContain("model_routing_thread_configure");
+    expect(JSON.stringify(posts[0])).toContain("model_routing_channel_configure");
+    expect(JSON.stringify(posts[0])).toContain('\\"enterpriseId\\":\\"E1\\"');
+    expect(JSON.stringify(posts[0])).toContain('\\"channelId\\":\\"C1\\"');
+    expect(JSON.stringify(posts[0])).toContain('\\"teamId\\":\\"T1\\"');
+    expect(JSON.stringify(posts[0])).toContain('\\"source\\":\\"thread\\"');
+    expect(JSON.stringify(posts[0])).toContain('\\"threadTs\\":\\"1712345678.000100\\"');
+    expect(JSON.stringify(posts[0])).toContain("Thread model");
+    expect(JSON.stringify(posts[0])).toContain("Channel settings");
+    expect(JSON.stringify(posts[0])).not.toContain("No agent is configured");
   });
 
   it("runs resolved agents without validating legacy specialist metadata", async () => {
@@ -1892,6 +2682,78 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("formats short agent Markdown output as Slack mrkdwn blocks", async () => {
+    const posts: unknown[] = [];
+
+    await postAgentResult({
+      channel: "C1",
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return { ok: true };
+          },
+        },
+      } as never,
+      logger: { info() {} },
+      result: undefined,
+      text: "**Important**: see [docs](https://docs.slack.dev/?a=1&b=2)",
+      threadTs: "1712345678.000100",
+    });
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        blocks: [
+          {
+            text: {
+              text: "*Important*: see <https://docs.slack.dev/?a=1&amp;b=2|docs>",
+              type: "mrkdwn",
+              verbatim: true,
+            },
+            type: "section",
+          },
+        ],
+        channel: "C1",
+        text: "**Important**: see [docs](https://docs.slack.dev/?a=1&b=2)",
+        thread_ts: "1712345678.000100",
+        unfurl_links: false,
+        unfurl_media: false,
+      }),
+    ]);
+  });
+
+  it("falls back to top-level text for agent output over the Block Kit text limit", async () => {
+    const posts: unknown[] = [];
+    const longText = "a".repeat(3001);
+
+    await postAgentResult({
+      channel: "C1",
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return { ok: true };
+          },
+        },
+      } as never,
+      logger: { info() {} },
+      result: undefined,
+      text: longText,
+      threadTs: "1712345678.000100",
+    });
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: longText,
+        thread_ts: "1712345678.000100",
+        unfurl_links: false,
+        unfurl_media: false,
+      }),
+    ]);
+    expect(posts[0]).not.toHaveProperty("blocks");
+  });
+
   it("posts native video operation handoffs when generated media bytes are pending", async () => {
     const runner = {
       async run() {
@@ -1978,7 +2840,7 @@ describe("createAgentSlackHandlers", () => {
     const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
 
     await handlers.handleMessage({
-      body: { team_id: "T1" },
+      body: { api_app_id: "AAPP", team_id: "T1" },
       client: {
         chat: {
           postMessage: async (payload: unknown) => {
@@ -1987,9 +2849,73 @@ describe("createAgentSlackHandlers", () => {
           },
         },
         conversations: {
-          replies: async () => ({
-            messages: [{ text: "root text" }, { text: "follow-up" }],
-          }),
+          replies: async (request: unknown) => {
+            expect(request).toEqual(
+              expect.objectContaining({
+                include_all_metadata: true,
+              }),
+            );
+            return {
+              messages: [
+                { team: "T1", text: "root text", ts: "1712345678.000100", user: "Uroot" },
+                {
+                  metadata: {
+                    event_payload: {
+                      kind: "mention_menu",
+                    },
+                    event_type: "agents_party_control",
+                  },
+                  text: "Model routing metadata fallback",
+                  ts: "1712345678.000120",
+                },
+                {
+                  blocks: [
+                    {
+                      elements: [
+                        {
+                          action_id: "model_routing_thread_configure",
+                          text: { text: "Thread model", type: "plain_text" },
+                          type: "button",
+                        },
+                      ],
+                      type: "actions",
+                    },
+                  ],
+                  bot_id: "BAPP",
+                  text: "Model routing",
+                  ts: "1712345678.000150",
+                },
+                {
+                  bot_profile: { app_id: "AAPP", id: "BAPP", team_id: "T1" },
+                  subtype: "bot_message",
+                  team: "T1",
+                  text: "previous bot reply",
+                  ts: "1712345678.000180",
+                },
+                {
+                  app_id: "AOTHER",
+                  bot_id: "BOTHER",
+                  team: "T2",
+                  text: "external bot update",
+                  ts: "1712345678.000185",
+                },
+                {
+                  subtype: "file_share",
+                  team: "T1",
+                  text: "shared context file",
+                  ts: "1712345678.000190",
+                  user: "U2",
+                },
+                {
+                  subtype: "message_changed",
+                  text: "edited system event",
+                  ts: "1712345678.000195",
+                  user: "U2",
+                },
+                { text: "follow-up", ts: "1712345678.000200", user: "U1" },
+              ],
+            };
+          },
         },
       },
       event: {
@@ -2007,7 +2933,28 @@ describe("createAgentSlackHandlers", () => {
         channelId: "C1",
         teamId: "T1",
         text: "follow-up",
-        threadMessages: ["root text", "follow-up"],
+        threadHistory: [
+          {
+            messageTs: "1712345678.000100",
+            role: "user",
+            teamId: "T1",
+            text: "root text",
+            userId: "Uroot",
+          },
+          {
+            messageTs: "1712345678.000180",
+            role: "assistant",
+            teamId: "T1",
+            text: "previous bot reply",
+          },
+          {
+            messageTs: "1712345678.000190",
+            role: "user",
+            teamId: "T1",
+            text: "shared context file",
+            userId: "U2",
+          },
+        ],
         threadTs: "1712345678.000100",
       }),
     ]);
@@ -2081,7 +3028,7 @@ describe("createAgentSlackHandlers", () => {
         conversations: {
           replies: async () => ({
             messages: [
-              { text: "root text", ts: "1712345678.000100" },
+              { text: "root text", ts: "1712345678.000100", user: "U1" },
               {
                 files: [
                   {
@@ -2123,7 +3070,15 @@ describe("createAgentSlackHandlers", () => {
     expect(invocations).toEqual([
       expect.objectContaining({
         text: "",
-        threadMessages: ["root text"],
+        threadHistory: [
+          {
+            messageTs: "1712345678.000100",
+            role: "user",
+            teamId: "T1",
+            text: "root text",
+            userId: "U1",
+          },
+        ],
         transientAttachments: [
           {
             filename: "voice.mp3",
@@ -2206,8 +3161,9 @@ describe("createAgentSlackHandlers", () => {
                   ],
                   text: "root text",
                   ts: "1712345678.000100",
+                  user: "U1",
                 },
-                { text: "follow-up", ts: "1712345678.000200" },
+                { text: "follow-up", ts: "1712345678.000200", user: "U1" },
               ],
             }),
           },
@@ -2235,7 +3191,15 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         channelId: "C1",
         text: "follow-up",
-        threadMessages: ["root text", "follow-up"],
+        threadHistory: [
+          {
+            messageTs: "1712345678.000100",
+            role: "user",
+            teamId: "T1",
+            text: "root text",
+            userId: "U1",
+          },
+        ],
         transientAttachments: [
           {
             filename: "root-voice.mp3",

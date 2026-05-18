@@ -18,6 +18,8 @@ export const WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_BLOCK_ID =
 export const WORKSPACE_CREDENTIAL_SORACOM_OPERATOR_ACTION_ID = "operator_id";
 
 export const MODEL_ROUTING_CONFIGURE_ACTION_ID = "model_routing_configure";
+export const MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID = "model_routing_channel_configure";
+export const MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID = "model_routing_thread_configure";
 export const MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID = "model_routing_workspace_select";
 export const MODEL_ROUTING_MODAL_CALLBACK_ID = "model_routing_modal";
 export const MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID = "model_routing_default_model";

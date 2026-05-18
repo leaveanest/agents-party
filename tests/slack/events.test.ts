@@ -72,7 +72,9 @@ describe("registerSlackEventHandlers", () => {
       "reaction_added",
     ]);
     expect([...app.actions.keys()].sort()).toEqual([
+      "model_routing_channel_configure",
       "model_routing_configure",
+      "model_routing_thread_configure",
       "provider_kind",
       "salesforce_pdf_workflow_configure",
       "workspace_credential_configure",

@@ -160,11 +160,6 @@ export const nativeProviderAdapterSpecs: readonly NativeProviderAdapterSpec[] = 
     reason: "Use a future Gemini native adapter for file APIs.",
   },
   {
-    capabilities: ["image_input", "streaming", "text", "thinking"],
-    provider: "bedrock",
-    reason: "Use a future AWS Bedrock Claude adapter with AWS credential and region handling.",
-  },
-  {
     capabilities: ["streaming", "text", "tool_calling"],
     provider: "dify",
     reason: "Use a future Dify endpoint adapter with workspace endpoint and credential lookup.",
