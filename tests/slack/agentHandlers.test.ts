@@ -94,7 +94,7 @@ describe("createAgentSlackHandlers", () => {
           expect(teamId).toBe("T2");
           return {
             default_model_id: "openai:gpt-4o",
-            enabled_model_ids: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
+            enabled_model_ids: ["openai:gpt-4o", "anthropic:claude-sonnet-4-20250514"],
           };
         },
       } as never,
@@ -177,7 +177,7 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain('"dispatch_action":true');
     expect(serialized).not.toContain("Reasoning effort");
     expect(serialized).not.toContain("Provider default");
-    expect(serialized).toContain("anthropic:claude-3-5-sonnet-latest");
+    expect(serialized).toContain("anthropic:claude-sonnet-4-20250514");
     expect(serialized).not.toContain("google:gemini-2.5-flash");
   });
 
@@ -622,13 +622,13 @@ describe("createAgentSlackHandlers", () => {
         },
         async findChannelSettings() {
           return {
-            default_model_id: "anthropic:claude-3-5-sonnet-latest",
+            default_model_id: "anthropic:claude-sonnet-4-20250514",
           };
         },
         async findWorkspaceSettings(teamId: string) {
           expect(teamId).toBe("T1");
           return {
-            enabled_model_ids: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
+            enabled_model_ids: ["openai:gpt-4o", "anthropic:claude-sonnet-4-20250514"],
           };
         },
       } as never,
@@ -754,7 +754,7 @@ describe("createAgentSlackHandlers", () => {
               enabled_models: {
                 selected_options: [
                   { value: "openai:gpt-4o" },
-                  { value: "anthropic:claude-3-5-sonnet-latest" },
+                  { value: "anthropic:claude-sonnet-4-20250514" },
                 ],
               },
             },
@@ -778,7 +778,7 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         defaultAgentId: "assistant",
         defaultModelId: "openai:gpt-4o",
-        enabledModelIds: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
+        enabledModelIds: ["openai:gpt-4o", "anthropic:claude-sonnet-4-20250514"],
         teamId: "T2",
         threadAutoReply: true,
       }),
@@ -1334,6 +1334,82 @@ describe("createAgentSlackHandlers", () => {
     ]);
     expect((activations[0] as { reasoningEffort?: unknown }).reasoningEffort).toBeUndefined();
     expect(JSON.stringify(updates[0])).toContain("Thread settings were saved.");
+  });
+
+  it("does not persist an inherited channel model as a thread override", async () => {
+    const activations: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async activateThreadAgent(input: unknown) {
+          activations.push(input);
+          return {};
+        },
+        async findSlackThread() {
+          return {
+            agent_id: "assistant",
+            last_message_ts: "1712345678.000200",
+            root_message_ts: "1712345678.000100",
+          };
+        },
+        async findChannelSettings() {
+          return {
+            default_model_id: "openai:gpt-4o",
+          };
+        },
+        async findWorkspaceSettings() {
+          return {
+            enabled_model_ids: ["openai:gpt-4o"],
+          };
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async () => undefined,
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          channelId: "C1",
+          source: "thread",
+          teamId: "T1",
+          threadTs: "1712345678.000100",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(activations).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        modelId: undefined,
+        teamId: "T1",
+        threadTs: "1712345678.000100",
+      }),
+    ]);
   });
 
   it("does not persist inherited channel reasoning as a thread override", async () => {
@@ -2652,7 +2728,7 @@ describe("createAgentSlackHandlers", () => {
         return {
           decision: { action: "respond", reason: "forced_invocation" },
           message: "configured route",
-          model: { id: "anthropic:claude-3-5-sonnet-latest", provider: "anthropic" },
+          model: { id: "anthropic:claude-sonnet-4-20250514", provider: "anthropic" },
           toolResults: [],
         };
       },
@@ -2662,7 +2738,7 @@ describe("createAgentSlackHandlers", () => {
       route: {
         agent: { name: "translation-agent" },
         agentId: "configured-translator",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "anthropic:claude-sonnet-4-20250514",
         modelScope: "channel",
         scope: "channel",
       },
@@ -2693,7 +2769,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(invocations).toEqual([
       expect.objectContaining({
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "anthropic:claude-sonnet-4-20250514",
       }),
     ]);
     expect(repository.activations).toEqual([
@@ -4592,22 +4668,23 @@ describe("createAgentSlackHandlers", () => {
   it("translates flag reactions through the AgentRunner and replies in-thread", async () => {
     const invocations: unknown[] = [];
     const runner = {
-      async run(invocation: unknown) {
+      async runStructured(invocation: unknown, responseFormat: unknown) {
         invocations.push(invocation);
+        invocations.push(responseFormat);
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          model: { id: "anthropic:claude-sonnet-4-20250514", provider: "anthropic" },
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };
     const posts: unknown[] = [];
+    const statuses: unknown[] = [];
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
         agent: { name: "translation-agent" },
         agentId: "translation",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "anthropic:claude-sonnet-4-20250514",
         modelScope: "channel",
         scope: "channel",
       },
@@ -4618,6 +4695,14 @@ describe("createAgentSlackHandlers", () => {
     await handlers.handleReactionAdded({
       body: { team_id: "T1" },
       client: {
+        assistant: {
+          threads: {
+            setStatus: async (payload: unknown) => {
+              statuses.push(payload);
+              return { ok: true };
+            },
+          },
+        },
         chat: {
           postMessage: async (payload: unknown) => {
             posts.push(payload);
@@ -4647,12 +4732,20 @@ describe("createAgentSlackHandlers", () => {
     expect(invocations).toEqual([
       expect.objectContaining({
         channelId: "C1",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "anthropic:claude-sonnet-4-20250514",
         teamId: "T1",
-        text: "Translate the following Slack message to ja:\n\nhello",
+        text: expect.stringContaining("Translate the following Slack message to ja."),
         threadTs: "1712345678.000100",
         userId: "U1",
       }),
+      expect.objectContaining({ type: "json" }),
+    ]);
+    expect(statuses).toEqual([
+      {
+        channel_id: "C1",
+        status: "is working on your request...",
+        thread_ts: "1712345678.000100",
+      },
     ]);
     expect(posts).toEqual([
       expect.objectContaining({
@@ -4663,15 +4756,334 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("sets Slack assistant thread status when queued reaction translation starts", async () => {
+    const statuses: unknown[] = [];
+    const runner = {
+      async runStructured() {
+        return {
+          structuredOutput: { translatedText: "こんにちは" },
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "translation-agent" },
+        agentId: "translation",
+        modelId: "anthropic:claude-sonnet-4-20250514",
+        modelScope: "channel",
+        scope: "channel",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "reaction_added",
+        messageTs: "1712345678.000200",
+        targetLanguage: "ja",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000200",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: {
+            threads: {
+              setStatus: async (payload: unknown) => {
+                statuses.push(payload);
+                return { ok: true };
+              },
+            },
+          },
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            history: async () => ({
+              messages: [
+                {
+                  text: "hello",
+                  thread_ts: "1712345678.000100",
+                  ts: "1712345678.000200",
+                },
+              ],
+            }),
+          },
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(statuses).toEqual([
+      {
+        channel_id: "C1",
+        status: "is working on your request...",
+        thread_ts: "1712345678.000100",
+      },
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        text: "こんにちは",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("does not set Slack assistant thread status when direct reaction routing has no agent", async () => {
+    const statuses: unknown[] = [];
+    const runner = {
+      async runStructured() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        assistant: {
+          threads: {
+            setStatus: async (payload: unknown) => {
+              statuses.push(payload);
+              return { ok: true };
+            },
+          },
+        },
+        chat: { postMessage: async () => ({}) },
+        conversations: {
+          history: async () => ({
+            messages: [
+              {
+                text: "hello",
+                thread_ts: "1712345678.000100",
+                ts: "1712345678.000100",
+              },
+            ],
+          }),
+        },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-jp",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(statuses).toEqual([]);
+  });
+
+  it("does not set Slack assistant thread status when queued reaction routing has no agent", async () => {
+    const statuses: unknown[] = [];
+    const runner = {
+      async runStructured() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "reaction_added",
+        messageTs: "1712345678.000100",
+        targetLanguage: "ja",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: {
+            threads: {
+              setStatus: async (payload: unknown) => {
+                statuses.push(payload);
+                return { ok: true };
+              },
+            },
+          },
+          chat: { postMessage: async () => ({}) },
+          conversations: {
+            history: async () => ({
+              messages: [
+                {
+                  text: "hello",
+                  thread_ts: "1712345678.000100",
+                  ts: "1712345678.000100",
+                },
+              ],
+            }),
+          },
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(statuses).toEqual([]);
+  });
+
+  it("does not set Slack assistant thread status when queued reaction source fetch fails", async () => {
+    const statuses: unknown[] = [];
+    const posts: unknown[] = [];
+    const runner = {
+      async runStructured() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "translation-agent" },
+        agentId: "translation",
+        modelId: "anthropic:claude-sonnet-4-20250514",
+        modelScope: "channel",
+        scope: "channel",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "reaction_added",
+        messageTs: "1712345678.000200",
+        targetLanguage: "ja",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000200",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: {
+            threads: {
+              setStatus: async (payload: unknown) => {
+                statuses.push(payload);
+                return { ok: true };
+              },
+            },
+          },
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            history: async () => ({ messages: [] }),
+            replies: async () => ({ messages: [] }),
+          },
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(statuses).toEqual([]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        text: "I couldn't read text from the reacted message.",
+        thread_ts: "1712345678.000200",
+      }),
+    ]);
+  });
+
+  it("preserves Slack rich-text mentions when translating flag reactions", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async runStructured(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          structuredOutput: { translatedText: "確認しました" },
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "translation-agent" },
+        agentId: "translation",
+        modelId: "anthropic:claude-sonnet-4-20250514",
+        modelScope: "channel",
+        scope: "channel",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        conversations: {
+          history: async () => ({
+            messages: [
+              {
+                blocks: [
+                  {
+                    elements: [
+                      {
+                        elements: [
+                          { text: "Please ask ", type: "text" },
+                          { type: "user", user_id: "U123" },
+                          { text: " in ", type: "text" },
+                          { channel_id: "C999", type: "channel" },
+                        ],
+                        type: "rich_text_section",
+                      },
+                    ],
+                    type: "rich_text",
+                  },
+                ],
+                thread_ts: "1712345678.000100",
+                ts: "1712345678.000100",
+              },
+            ],
+          }),
+        },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-jp",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining("Please ask <@U123> in <#C999>"),
+      }),
+    ]);
+  });
+
   it("does not translate reactions in disabled channels", async () => {
     let runs = 0;
     const runner = {
-      async run() {
+      async runStructured() {
         runs += 1;
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };
@@ -4701,12 +5113,10 @@ describe("createAgentSlackHandlers", () => {
   it("translates reactions through resolved agents without specialist validation", async () => {
     let runs = 0;
     const runner = {
-      async run() {
+      async runStructured() {
         runs += 1;
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };
@@ -4715,7 +5125,7 @@ describe("createAgentSlackHandlers", () => {
       route: {
         agent: { name: "legacy-agent" },
         agentId: "bad-agent",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "anthropic:claude-sonnet-4-20250514",
         modelScope: "channel",
         scope: "channel",
       },
@@ -4743,7 +5153,7 @@ describe("createAgentSlackHandlers", () => {
   it("posts source-text errors for reaction routes before invoking the runner", async () => {
     const posts: unknown[] = [];
     const runner = {
-      async run() {
+      async runStructured() {
         throw new Error("Unexpected runner call.");
       },
     };
@@ -4787,12 +5197,10 @@ describe("createAgentSlackHandlers", () => {
   it("translates reactions through any resolved agent route", async () => {
     let runs = 0;
     const runner = {
-      async run() {
+      async runStructured() {
         runs += 1;
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };
@@ -4801,7 +5209,7 @@ describe("createAgentSlackHandlers", () => {
       route: {
         agent: { name: "assistant-agent" },
         agentId: "assistant",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "anthropic:claude-sonnet-4-20250514",
         modelScope: "channel",
         scope: "channel",
       },
@@ -4829,12 +5237,10 @@ describe("createAgentSlackHandlers", () => {
   it("does not translate reactions without repository-backed channel policy", async () => {
     let runs = 0;
     const runner = {
-      async run() {
+      async runStructured() {
         runs += 1;
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };

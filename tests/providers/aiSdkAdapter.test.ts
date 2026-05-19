@@ -830,10 +830,10 @@ describe("AiSdkLlmAdapter", () => {
     });
   });
 
-  it("rejects structured response formats until the adapter enforces them", async () => {
+  it("maps structured response formats through AI SDK output parsing", async () => {
     const languageModel = new MockLanguageModelV3({
       doGenerate: {
-        content: [{ text: "{}", type: "text" }],
+        content: [{ text: '{"translatedText":"こんにちは"}', type: "text" }],
         finishReason: { raw: "stop", unified: "stop" },
         usage: usage(1, 1),
         warnings: [],
@@ -846,13 +846,27 @@ describe("AiSdkLlmAdapter", () => {
     await expect(
       adapter.generate({
         history,
-        model,
+        model: { ...model, capabilities: [...model.capabilities, "structured_output"] },
         responseFormat: {
+          jsonSchema: {
+            additionalProperties: false,
+            properties: {
+              translatedText: { type: "string" },
+            },
+            required: ["translatedText"],
+            type: "object",
+          },
+          jsonSchemaName: "translation",
           type: "json",
         },
       }),
-    ).rejects.toThrow("supports text response format only");
-    expect(languageModel.doGenerateCalls).toHaveLength(0);
+    ).resolves.toMatchObject({
+      structuredOutput: { translatedText: "こんにちは" },
+    });
+    expect(languageModel.doGenerateCalls[0]?.responseFormat).toMatchObject({
+      name: "translation",
+      type: "json",
+    });
   });
 
   it("normalizes provider errors", async () => {

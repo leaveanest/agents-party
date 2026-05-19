@@ -30,6 +30,7 @@ import { createXai, xai, type XaiProviderSettings } from "@ai-sdk/xai";
 import {
   generateText,
   jsonSchema,
+  Output,
   stepCountIs,
   streamText,
   tool,
@@ -43,6 +44,7 @@ import {
   convertHistoryToAiSdkMessages,
   aiSdkMessageConversionCapabilitiesForModel,
 } from "./aiSdkMessageConverter.js";
+import type { JsonValue } from "../domain/messageHistory.js";
 import type {
   LlmAdapter,
   LlmCapability,
@@ -156,6 +158,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           aiSdkMessageConversionCapabilitiesForModel(request.model),
         ),
         model: this.resolveModel(request.model, credential),
+        output: toAiSdkOutput(request.responseFormat),
         providerOptions: mergeReasoningProviderOptions({
           model: request.model,
           providerOptions: request.providerOptions,
@@ -172,6 +175,8 @@ export class AiSdkLlmAdapter implements LlmAdapter {
         finishReason: mapFinishReason(result.finishReason),
         raw: result,
         sources: mapSources(result.sources),
+        structuredOutput:
+          request.responseFormat?.type === "json" ? toJsonValue(result.output) : undefined,
         toolCalls: result.toolCalls
           .filter((toolCall) => !isProviderToolCall(toolCall, providerToolNames))
           .map(mapToolCall),
@@ -204,7 +209,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
 
   private async *streamResponse(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
     try {
-      assertSupportedResponseFormat(request);
+      assertSupportedStreamResponseFormat(request);
       const credential = await this.resolveCredential(request);
       const providerTools = this.resolveProviderTools(request.model, credential);
       const providerToolNames = providerToolNamesForRequest(request, providerTools);
@@ -349,11 +354,25 @@ const OPENAI_COMPATIBLE_DEFAULT_BASE_URLS = {
 } as const satisfies Record<OpenAICompatibleProvider, string>;
 
 function assertSupportedResponseFormat(request: LlmRequest): void {
+  if (
+    request.responseFormat !== undefined &&
+    request.responseFormat.type !== "text" &&
+    request.responseFormat.type !== "json"
+  ) {
+    throw new LlmProviderError(
+      request.model.provider,
+      request.model.id,
+      "AI SDK common adapter currently supports text and JSON response formats only.",
+    );
+  }
+}
+
+function assertSupportedStreamResponseFormat(request: LlmRequest): void {
   if (request.responseFormat !== undefined && request.responseFormat.type !== "text") {
     throw new LlmProviderError(
       request.model.provider,
       request.model.id,
-      "AI SDK common adapter currently supports text response format only.",
+      "AI SDK streaming adapter currently supports text response format only.",
     );
   }
 }
@@ -829,6 +848,45 @@ function toAiSdkTools(tools: LlmRequest["tools"]): ToolSet | undefined {
       }),
     ]),
   ) as ToolSet;
+}
+
+function toAiSdkOutput(responseFormat: LlmRequest["responseFormat"]) {
+  if (responseFormat === undefined || responseFormat.type === "text") {
+    return undefined;
+  }
+  if (responseFormat.jsonSchema === undefined) {
+    return Output.json({
+      description: responseFormat.jsonSchemaDescription,
+      name: responseFormat.jsonSchemaName,
+    });
+  }
+  return Output.object({
+    description: responseFormat.jsonSchemaDescription,
+    name: responseFormat.jsonSchemaName,
+    schema: jsonSchema(responseFormat.jsonSchema),
+  });
+}
+
+function toJsonValue(value: unknown): JsonValue | undefined {
+  return isJsonValue(value) ? value : undefined;
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  if (isRecord(value)) {
+    return Object.values(value).every(isJsonValue);
+  }
+  return false;
 }
 
 function toolsForRequest(
