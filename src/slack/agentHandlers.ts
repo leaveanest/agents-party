@@ -3479,14 +3479,6 @@ async function processReactionAddedJob(
       threadTs,
     });
   }
-  await setSlackAssistantThreadStatus({
-    channelId: job.channelId,
-    client: input.client,
-    logger: input.logger,
-    translator,
-    threadTs,
-  });
-
   let text: string;
   try {
     const route = await resolveSlackAgentRoute(input.routingRepository, {
@@ -3514,6 +3506,13 @@ async function processReactionAddedJob(
       });
       return;
     }
+    await setSlackAssistantThreadStatus({
+      channelId: job.channelId,
+      client: input.client,
+      logger: input.logger,
+      translator,
+      threadTs,
+    });
     const result = await input.runner.runStructured(
       {
         channelId: job.channelId,
@@ -3876,14 +3875,6 @@ async function handleReactionAdded(
       threadTs,
     });
   }
-  await setSlackAssistantThreadStatus({
-    channelId,
-    client,
-    logger,
-    translator,
-    threadTs,
-  });
-
   let text: string;
   try {
     const route = await resolveSlackAgentRoute(options.routingRepository, {
@@ -3911,6 +3902,13 @@ async function handleReactionAdded(
       });
       return;
     }
+    await setSlackAssistantThreadStatus({
+      channelId,
+      client,
+      logger,
+      translator,
+      threadTs,
+    });
     const result = await runner.runStructured(
       {
         channelId,
