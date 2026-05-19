@@ -4678,6 +4678,7 @@ describe("createAgentSlackHandlers", () => {
       },
     };
     const posts: unknown[] = [];
+    const statuses: unknown[] = [];
     const repository = new MemoryRoutingRepository({
       channelEnabled: true,
       route: {
@@ -4694,6 +4695,14 @@ describe("createAgentSlackHandlers", () => {
     await handlers.handleReactionAdded({
       body: { team_id: "T1" },
       client: {
+        assistant: {
+          threads: {
+            setStatus: async (payload: unknown) => {
+              statuses.push(payload);
+              return { ok: true };
+            },
+          },
+        },
         chat: {
           postMessage: async (payload: unknown) => {
             posts.push(payload);
@@ -4731,9 +4740,98 @@ describe("createAgentSlackHandlers", () => {
       }),
       expect.objectContaining({ type: "json" }),
     ]);
+    expect(statuses).toEqual([
+      {
+        channel_id: "C1",
+        status: "is working on your request...",
+        thread_ts: "1712345678.000100",
+      },
+    ]);
     expect(posts).toEqual([
       expect.objectContaining({
         channel: "C1",
+        text: "こんにちは",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("sets Slack assistant thread status when queued reaction translation starts", async () => {
+    const statuses: unknown[] = [];
+    const runner = {
+      async runStructured() {
+        return {
+          structuredOutput: { translatedText: "こんにちは" },
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "translation-agent" },
+        agentId: "translation",
+        modelId: "anthropic:claude-sonnet-4-20250514",
+        modelScope: "channel",
+        scope: "channel",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "reaction_added",
+        messageTs: "1712345678.000200",
+        targetLanguage: "ja",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000200",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: {
+            threads: {
+              setStatus: async (payload: unknown) => {
+                statuses.push(payload);
+                return { ok: true };
+              },
+            },
+          },
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            history: async () => ({
+              messages: [
+                {
+                  text: "hello",
+                  thread_ts: "1712345678.000100",
+                  ts: "1712345678.000200",
+                },
+              ],
+            }),
+          },
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(statuses).toEqual([
+      {
+        channel_id: "C1",
+        status: "is working on your request...",
+        thread_ts: "1712345678.000100",
+      },
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
         text: "こんにちは",
         thread_ts: "1712345678.000100",
       }),

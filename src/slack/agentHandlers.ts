@@ -3479,6 +3479,13 @@ async function processReactionAddedJob(
       threadTs,
     });
   }
+  await setSlackAssistantThreadStatus({
+    channelId: job.channelId,
+    client: input.client,
+    logger: input.logger,
+    translator,
+    threadTs,
+  });
 
   let text: string;
   try {
@@ -3869,6 +3876,13 @@ async function handleReactionAdded(
       threadTs,
     });
   }
+  await setSlackAssistantThreadStatus({
+    channelId,
+    client,
+    logger,
+    translator,
+    threadTs,
+  });
 
   let text: string;
   try {
