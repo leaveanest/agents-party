@@ -139,5 +139,7 @@ class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsReposit
 
   async replaceAllowedChannels(): Promise<void> {}
 
+  async saveWorkspaceFeatureConfiguration(): Promise<void> {}
+
   async saveWorkspaceFeatureSetting(): Promise<void> {}
 }

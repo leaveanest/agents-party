@@ -26,6 +26,7 @@ import type { CredentialProviderKind } from "../providers/credentials.js";
 import {
   LlmReasoningEffortId,
   llmProviders,
+  type ModelInfo,
   type LlmResponseFormat,
   type LlmProvider,
   type LlmReasoningEffort,
@@ -631,14 +632,24 @@ async function buildFeatureSettingsAppHomeBlocks(input: {
   if (selectedTeamId === undefined) {
     return [];
   }
-  const imageProvider = resolveImageGenerationProvider(
+  const workspaceSetting =
+    await input.options.featureSettingsHome.repository.findWorkspaceFeatureSetting({
+      featureKey: "image_generation",
+      teamId: selectedTeamId,
+    });
+  const imageModel = resolveImageGenerationModel(
     input.options.featureSettingsHome.imageGenerationModelId,
     input.logger,
   );
-  if (
-    imageProvider === undefined ||
-    !(await hasWorkspaceProviderApiKey(selectedTeamId, imageProvider, input.options, input.logger))
-  ) {
+  const hasImageCredential =
+    imageModel !== undefined &&
+    (await hasWorkspaceProviderApiKey(
+      selectedTeamId,
+      imageModel.provider,
+      input.options,
+      input.logger,
+    ));
+  if (!hasImageCredential && workspaceSetting?.enabled !== true) {
     return [];
   }
   return [
@@ -773,7 +784,13 @@ async function handleModelRoutingConfigureAction(
     options,
     logger,
   );
-  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
+  const userContext = await resolveSlackUserContext(
+    client,
+    slackUserId,
+    translator,
+    logger,
+    selectedTeamId,
+  );
   if (!userContext.isWorkspaceAdmin) {
     await updateModelRoutingModal(
       client,
@@ -1355,6 +1372,24 @@ async function handleModelRoutingModalSubmission(
   const unknownModelIds = [...enabledModelIds, defaultModelId].filter(
     (modelId): modelId is string => modelId !== undefined && !modelRegistry.has(modelId),
   );
+  const userContext = await resolveSlackUserContext(
+    client,
+    slackUserId,
+    translator,
+    logger,
+    selectedTeamId,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    await ack({
+      errors: {
+        [MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID]: userContext.translator.t(
+          "modelRouting.error.unauthorized",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
   const credentialedProviders = await listWorkspaceCredentialedLlmProviders(
     selectedTeamId,
     options,
@@ -1401,19 +1436,6 @@ async function handleModelRoutingModalSubmission(
       translator,
     ) as never,
   });
-  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
-  if (!userContext.isWorkspaceAdmin) {
-    await updateModelRoutingModal(
-      client,
-      view,
-      buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-      ),
-      logger,
-    );
-    return;
-  }
   try {
     const existing = await options.routingRepository.findWorkspaceSettings(selectedTeamId);
     const defaultAgentId = stringField(existing, "default_agent_id") ?? DEFAULT_AGENT_OPTION.id;
@@ -1512,6 +1534,24 @@ async function handleChannelModelRoutingModalSubmission(input: {
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
   const reasoningEffort = readReasoningEffortValue(input.view, defaultModelId);
+  const userContext = await resolveSlackUserContext(
+    input.client,
+    input.slackUserId,
+    input.translator,
+    input.logger,
+    selectedTeamId,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    await input.ack({
+      errors: {
+        [MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID]: userContext.translator.t(
+          "modelRouting.error.unauthorized",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
   const [channelSettings, workspaceSettings, credentialedProviders] = await Promise.all([
     input.options.routingRepository.findChannelSettings(selectedTeamId, channelId),
     input.options.routingRepository.findWorkspaceSettings(selectedTeamId),
@@ -1543,26 +1583,6 @@ async function handleChannelModelRoutingModalSubmission(input: {
       input.translator.t("modelRouting.title.channel"),
     ) as never,
   });
-  const userContext = await resolveSlackUserContext(
-    input.client,
-    input.slackUserId,
-    input.translator,
-    input.logger,
-  );
-  if (!userContext.isWorkspaceAdmin) {
-    await updateModelRoutingModal(
-      input.client,
-      input.view,
-      buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-        userContext.translator.t("modelRouting.title.channel"),
-      ),
-      input.logger,
-    );
-    return;
-  }
-
   try {
     const defaultAgentId =
       stringField(channelSettings, "default_agent_id") ??
@@ -1676,6 +1696,24 @@ async function handleThreadModelRoutingModalSubmission(input: {
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
   const reasoningEffort = readReasoningEffortValue(input.view, defaultModelId);
+  const userContext = await resolveSlackUserContext(
+    input.client,
+    input.slackUserId,
+    input.translator,
+    input.logger,
+    selectedTeamId,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    await input.ack({
+      errors: {
+        [MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID]: userContext.translator.t(
+          "modelRouting.error.unauthorized",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
   const [threadSettings, channelSettings, workspaceSettings, credentialedProviders] =
     await Promise.all([
       input.options.routingRepository.findSlackThread(selectedTeamId, channelId, threadTs),
@@ -1710,26 +1748,6 @@ async function handleThreadModelRoutingModalSubmission(input: {
       input.translator.t("modelRouting.title.thread"),
     ) as never,
   });
-  const userContext = await resolveSlackUserContext(
-    input.client,
-    input.slackUserId,
-    input.translator,
-    input.logger,
-  );
-  if (!userContext.isWorkspaceAdmin) {
-    await updateModelRoutingModal(
-      input.client,
-      input.view,
-      buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-        userContext.translator.t("modelRouting.title.thread"),
-      ),
-      input.logger,
-    );
-    return;
-  }
-
   try {
     const defaultAgentId =
       stringField(threadSettings, "agent_id") ??
@@ -2245,15 +2263,28 @@ function stringRecordField(value: Record<string, unknown>, field: string): strin
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
 }
 
-function resolveImageGenerationProvider(
+function resolveImageGenerationModel(
   imageGenerationModelId: string,
   logger: unknown,
-): CredentialProviderKind | undefined {
+): ModelInfo | undefined {
   try {
     const model = createDefaultModelRegistry().get(imageGenerationModelId);
-    return model.provider === "openai" || model.provider === "google" ? model.provider : undefined;
+    if (model.provider !== "openai" && model.provider !== "google") {
+      logWarn(logger, "Image generation model provider is not supported.", {
+        imageGenerationModelId,
+        provider: model.provider,
+      });
+      return undefined;
+    }
+    if (!model.capabilities.includes("image_generation")) {
+      logWarn(logger, "Image generation model is missing image_generation capability.", {
+        imageGenerationModelId,
+      });
+      return undefined;
+    }
+    return model;
   } catch (error) {
-    logWarn(logger, "Failed to resolve image generation model provider.", {
+    logWarn(logger, "Failed to resolve image generation model.", {
       error,
       imageGenerationModelId,
     });
@@ -2467,7 +2498,13 @@ async function handleFeatureSettingsConfigureAction(
     logger.warn("Ignoring feature settings configuration action with missing Slack context.");
     return;
   }
-  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
+  const userContext = await resolveSlackUserContext(
+    client,
+    slackUserId,
+    translator,
+    logger,
+    selectedTeamId,
+  );
   if (!userContext.isWorkspaceAdmin) {
     await client.views.open({
       trigger_id: triggerId,
@@ -2488,23 +2525,6 @@ async function handleFeatureSettingsConfigureAction(
     });
     return;
   }
-  const imageProvider = resolveImageGenerationProvider(
-    options.featureSettingsHome.imageGenerationModelId,
-    logger,
-  );
-  if (
-    imageProvider === undefined ||
-    !(await hasWorkspaceProviderApiKey(selectedTeamId, imageProvider, options, logger))
-  ) {
-    await client.views.open({
-      trigger_id: triggerId,
-      view: buildFeatureSettingsResultModal(
-        userContext.translator.t("featureSettings.error.missingImageCredential"),
-        userContext.translator,
-      ) as never,
-    });
-    return;
-  }
   const [workspaceSetting, allowedChannels] = await Promise.all([
     options.featureSettingsHome.repository.findWorkspaceFeatureSetting({
       featureKey: "image_generation",
@@ -2515,6 +2535,25 @@ async function handleFeatureSettingsConfigureAction(
       teamId: selectedTeamId,
     }),
   ]);
+  const imageModel = resolveImageGenerationModel(
+    options.featureSettingsHome.imageGenerationModelId,
+    logger,
+  );
+  const hasImageCredential =
+    imageModel !== undefined &&
+    (await hasWorkspaceProviderApiKey(selectedTeamId, imageModel.provider, options, logger));
+  if (!hasImageCredential && workspaceSetting?.enabled !== true) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildFeatureSettingsResultModal(
+        imageModel === undefined
+          ? userContext.translator.t("featureSettings.error.notConfigured")
+          : userContext.translator.t("featureSettings.error.missingImageCredential"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
   await client.views.open({
     trigger_id: triggerId,
     view: buildFeatureSettingsModal({
@@ -2536,7 +2575,10 @@ async function handleFeatureSettingsModalSubmission(
   );
   const metadataTeamId = metadata?.teamId ?? metadata?.selectedTeamId;
   const bodyTeamId = readTeamId(body, {});
-  const teamId = metadataTeamId ?? bodyTeamId;
+  const teamId =
+    metadata?.enterpriseId === undefined
+      ? (bodyTeamId ?? metadataTeamId)
+      : (metadataTeamId ?? bodyTeamId);
   const slackUserId = readSlackUserId(body);
   const translator = await resolveHandlerTranslator(
     { enterpriseId: metadata?.enterpriseId ?? readSlackEnterpriseId(body), teamId },
@@ -2553,6 +2595,22 @@ async function handleFeatureSettingsModalSubmission(
       errors: {
         [FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID]: translator.t(
           "featureSettings.error.notConfigured",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  if (
+    metadata?.enterpriseId === undefined &&
+    metadataTeamId !== undefined &&
+    bodyTeamId !== undefined &&
+    metadataTeamId !== bodyTeamId
+  ) {
+    await ack({
+      errors: {
+        [FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID]: translator.t(
+          "featureSettings.error.contextMismatch",
         ),
       },
       response_action: "errors",
@@ -2587,7 +2645,13 @@ async function handleFeatureSettingsModalSubmission(
       translator,
     ) as never,
   });
-  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
+  const userContext = await resolveSlackUserContext(
+    client,
+    slackUserId,
+    translator,
+    logger,
+    teamId,
+  );
   if (!userContext.isWorkspaceAdmin) {
     await updateFeatureSettingsModal(
       client,
@@ -2600,13 +2664,26 @@ async function handleFeatureSettingsModalSubmission(
     );
     return;
   }
-  const imageProvider = resolveImageGenerationProvider(
+  const imageModel = resolveImageGenerationModel(
     options.featureSettingsHome.imageGenerationModelId,
     logger,
   );
+  if (enabled && imageModel === undefined) {
+    await updateFeatureSettingsModal(
+      client,
+      view,
+      buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.notConfigured"),
+        userContext.translator,
+      ),
+      logger,
+    );
+    return;
+  }
   if (
-    imageProvider === undefined ||
-    !(await hasWorkspaceProviderApiKey(teamId, imageProvider, options, logger))
+    enabled &&
+    imageModel !== undefined &&
+    !(await hasWorkspaceProviderApiKey(teamId, imageModel.provider, options, logger))
   ) {
     await updateFeatureSettingsModal(
       client,
@@ -2621,23 +2698,19 @@ async function handleFeatureSettingsModalSubmission(
   }
   try {
     const now = new Date();
-    await options.featureSettingsHome.repository.saveWorkspaceFeatureSetting({
-      enabled,
-      featureKey: "image_generation",
-      payload: {
-        feature_key: "image_generation",
-        image_generation_model_id: options.featureSettingsHome.imageGenerationModelId,
+    await options.featureSettingsHome.repository.saveWorkspaceFeatureConfiguration({
+      allowedChannelIds: channelIds,
+      workspaceSetting: {
+        enabled,
+        featureKey: "image_generation",
+        payload: {
+          feature_key: "image_generation",
+          image_generation_model_id: options.featureSettingsHome.imageGenerationModelId,
+        },
+        teamId,
+        updatedAt: now,
+        updatedByUserId: slackUserId,
       },
-      teamId,
-      updatedAt: now,
-      updatedByUserId: slackUserId,
-    });
-    await options.featureSettingsHome.repository.replaceAllowedChannels({
-      channelIds,
-      featureKey: "image_generation",
-      teamId,
-      updatedAt: now,
-      updatedByUserId: slackUserId,
     });
     await updateFeatureSettingsModal(
       client,
@@ -4908,13 +4981,17 @@ async function resolveSlackUserContext(
   userId: string | undefined,
   translator: Translator,
   logger: unknown,
+  teamId?: string,
 ): Promise<{ isWorkspaceAdmin: boolean; translator: Translator }> {
   const info = client.users?.info;
   if (info === undefined || userId === undefined) {
     return { isWorkspaceAdmin: false, translator };
   }
   try {
-    const response = await info({ user: userId });
+    const response = await info({
+      ...(teamId === undefined ? {} : { team_id: teamId }),
+      user: userId,
+    } as never);
     const user = isRecord(response) && isRecord(response.user) ? response.user : undefined;
     const isAdmin =
       user !== undefined &&

@@ -24,7 +24,6 @@ export type MediaGenerationToolOptions = {
 
 const generateImageInputSchema = z
   .object({
-    aspectRatio: z.enum(["1:1", "16:9", "9:16", "4:3", "3:4"]).optional(),
     prompt: z.string().trim().min(1).max(4000),
   })
   .strict();

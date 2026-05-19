@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 import type { JsonValue } from "../../domain/messageHistory.js";
 import type {
@@ -29,28 +29,31 @@ export class PostgresWorkspaceFeatureSettingsRepository implements WorkspaceFeat
   }
 
   async saveWorkspaceFeatureSetting(document: WorkspaceFeatureSettingDocument): Promise<void> {
-    await this.pool.query(
-      `
-        insert into workspace_feature_settings
-          (team_id, feature_key, enabled, updated_at, updated_by_user_id, payload)
-        values
-          ($1, $2, $3, $4, $5, $6)
-        on conflict (team_id, feature_key)
-        do update set
-          enabled = excluded.enabled,
-          updated_at = excluded.updated_at,
-          updated_by_user_id = excluded.updated_by_user_id,
-          payload = excluded.payload
-      `,
-      [
-        document.teamId,
-        document.featureKey,
-        document.enabled,
-        document.updatedAt,
-        document.updatedByUserId ?? null,
-        JSON.stringify(document.payload),
-      ],
-    );
+    await saveWorkspaceFeatureSettingQuery(this.pool, document);
+  }
+
+  async saveWorkspaceFeatureConfiguration(input: {
+    allowedChannelIds: readonly string[];
+    workspaceSetting: WorkspaceFeatureSettingDocument;
+  }): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("begin");
+      await saveWorkspaceFeatureSettingQuery(client, input.workspaceSetting);
+      await replaceAllowedChannelsQuery(client, {
+        channelIds: input.allowedChannelIds,
+        featureKey: input.workspaceSetting.featureKey,
+        teamId: input.workspaceSetting.teamId,
+        updatedAt: input.workspaceSetting.updatedAt,
+        updatedByUserId: input.workspaceSetting.updatedByUserId,
+      });
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async listAllowedChannels(input: {
@@ -97,37 +100,10 @@ export class PostgresWorkspaceFeatureSettingsRepository implements WorkspaceFeat
     updatedAt?: Date;
     updatedByUserId?: string;
   }): Promise<void> {
-    const uniqueChannelIds = [...new Set(input.channelIds.map((id) => id.trim()).filter(Boolean))];
-    const updatedAt = input.updatedAt ?? new Date();
     const client = await this.pool.connect();
     try {
       await client.query("begin");
-      await client.query(
-        `
-          delete from channel_feature_settings
-          where team_id = $1
-            and feature_key = $2
-        `,
-        [input.teamId, input.featureKey],
-      );
-      for (const channelId of uniqueChannelIds) {
-        await client.query(
-          `
-            insert into channel_feature_settings
-              (team_id, channel_id, feature_key, updated_at, updated_by_user_id, payload)
-            values
-              ($1, $2, $3, $4, $5, $6)
-          `,
-          [
-            input.teamId,
-            channelId,
-            input.featureKey,
-            updatedAt,
-            input.updatedByUserId ?? null,
-            JSON.stringify({ channel_id: channelId, feature_key: input.featureKey }),
-          ],
-        );
-      }
+      await replaceAllowedChannelsQuery(client, input);
       await client.query("commit");
     } catch (error) {
       await client.query("rollback");
@@ -135,6 +111,76 @@ export class PostgresWorkspaceFeatureSettingsRepository implements WorkspaceFeat
     } finally {
       client.release();
     }
+  }
+}
+
+type Queryable = Pick<Pool | PoolClient, "query">;
+
+async function saveWorkspaceFeatureSettingQuery(
+  queryable: Queryable,
+  document: WorkspaceFeatureSettingDocument,
+): Promise<void> {
+  await queryable.query(
+    `
+      insert into workspace_feature_settings
+        (team_id, feature_key, enabled, updated_at, updated_by_user_id, payload)
+      values
+        ($1, $2, $3, $4, $5, $6)
+      on conflict (team_id, feature_key)
+      do update set
+        enabled = excluded.enabled,
+        updated_at = excluded.updated_at,
+        updated_by_user_id = excluded.updated_by_user_id,
+        payload = excluded.payload
+    `,
+    [
+      document.teamId,
+      document.featureKey,
+      document.enabled,
+      document.updatedAt,
+      document.updatedByUserId ?? null,
+      JSON.stringify(document.payload),
+    ],
+  );
+}
+
+async function replaceAllowedChannelsQuery(
+  queryable: Queryable,
+  input: {
+    channelIds: readonly string[];
+    featureKey: WorkspaceFeatureKey;
+    teamId: string;
+    updatedAt?: Date;
+    updatedByUserId?: string;
+  },
+): Promise<void> {
+  const uniqueChannelIds = [...new Set(input.channelIds.map((id) => id.trim()).filter(Boolean))];
+  const updatedAt = input.updatedAt ?? new Date();
+  await queryable.query(
+    `
+      delete from channel_feature_settings
+      where team_id = $1
+        and feature_key = $2
+    `,
+    [input.teamId, input.featureKey],
+  );
+  for (const channelId of uniqueChannelIds) {
+    await queryable.query(
+      `
+        insert into channel_feature_settings
+          (team_id, channel_id, feature_key, updated_at, updated_by_user_id, payload)
+        values
+          ($1, $2, $3, $4, $5, $6)
+      `,
+      [
+        input.teamId,
+        channelId,
+        input.featureKey,
+        updatedAt,
+        input.updatedByUserId ?? null,
+        JSON.stringify({ channel_id: channelId, feature_key: input.featureKey }),
+      ],
+    );
   }
 }
 

@@ -41,5 +41,9 @@ export type WorkspaceFeatureSettingsRepository = {
     updatedAt?: Date;
     updatedByUserId?: string;
   }): Promise<void>;
+  saveWorkspaceFeatureConfiguration(input: {
+    allowedChannelIds: readonly string[];
+    workspaceSetting: WorkspaceFeatureSettingDocument;
+  }): Promise<void>;
   saveWorkspaceFeatureSetting(document: WorkspaceFeatureSettingDocument): Promise<void>;
 };
