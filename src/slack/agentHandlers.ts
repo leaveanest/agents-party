@@ -608,7 +608,10 @@ async function listAppHomeInstalledWorkspaces(input: {
   logger: SlackEventArgs<"app_home_opened">["logger"];
   options: AgentSlackHandlerOptions;
 }): Promise<SlackInstalledWorkspace[]> {
-  if (input.options.installedWorkspaceDirectory === undefined) {
+  if (
+    input.appHomeContext.mode !== "enterprise_grid" ||
+    input.options.installedWorkspaceDirectory === undefined
+  ) {
     return [];
   }
   try {
@@ -632,7 +635,10 @@ async function handleModelRoutingConfigureAction(
   const actionValue = parseModelRoutingActionValue(readActionValue(body));
   const enterpriseId = actionValue?.enterpriseId ?? readSlackEnterpriseId(body);
   const bodyTeamId = readTeamId(body, {});
-  const selectedTeamId = actionValue?.selectedTeamId ?? actionValue?.teamId ?? bodyTeamId;
+  const selectedTeamId =
+    enterpriseId === undefined
+      ? bodyTeamId
+      : (actionValue?.selectedTeamId ?? actionValue?.teamId ?? bodyTeamId);
   const isChannelSettings = actionValue?.source === "channel";
   const isThreadSettings = actionValue?.source === "thread";
   const slackUserId = readSlackUserId(body);
@@ -707,7 +713,7 @@ async function handleModelRoutingConfigureAction(
   }
 
   let installedWorkspaces: SlackInstalledWorkspace[] = [];
-  if (options.installedWorkspaceDirectory !== undefined) {
+  if (enterpriseId !== undefined && options.installedWorkspaceDirectory !== undefined) {
     try {
       installedWorkspaces = await options.installedWorkspaceDirectory.listInstalledWorkspaces({
         enterpriseId,
@@ -719,7 +725,10 @@ async function handleModelRoutingConfigureAction(
       });
     }
   }
-  const effectiveTeamId = selectedTeamId ?? installedWorkspaces[0]?.teamId ?? bodyTeamId;
+  const effectiveTeamId =
+    enterpriseId === undefined
+      ? bodyTeamId
+      : (selectedTeamId ?? installedWorkspaces[0]?.teamId ?? bodyTeamId);
   const workspaceSettings =
     effectiveTeamId === undefined
       ? undefined
@@ -1181,14 +1190,17 @@ async function handleModelRoutingModalSubmission(
     readString(view as unknown as StringIndexed, "private_metadata"),
   );
   const bodyTeamId = readTeamId(body, {});
+  const enterpriseId = metadata?.enterpriseId ?? readSlackEnterpriseId(body);
   const selectedTeamId =
-    readSelectedOptionValue(
-      view,
-      MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
-      MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
-    ) ??
-    metadata?.selectedTeamId ??
-    bodyTeamId;
+    enterpriseId === undefined
+      ? bodyTeamId
+      : (readSelectedOptionValue(
+          view,
+          MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
+          MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
+        ) ??
+        metadata?.selectedTeamId ??
+        bodyTeamId);
   const translator = createTranslator(options.defaultLocale ?? FALLBACK_LOCALE);
   const slackUserId = readSlackUserId(body);
   if (metadata?.source === "channel") {
@@ -1309,7 +1321,7 @@ async function handleModelRoutingModalSubmission(
   }
   const isSelectedWorkspaceAllowed = await canManageSelectedModelRoutingWorkspace(
     {
-      enterpriseId: metadata?.enterpriseId ?? readSlackEnterpriseId(body),
+      enterpriseId,
       installedWorkspaceDirectory: options.installedWorkspaceDirectory,
       selectedTeamId,
       sourceTeamId: bodyTeamId,
@@ -1357,7 +1369,7 @@ async function handleModelRoutingModalSubmission(
       defaultAgentId,
       defaultModelId,
       enabledModelCount: enabledModelIds.length,
-      enterpriseId: metadata?.enterpriseId,
+      enterpriseId,
       teamId: selectedTeamId,
     });
     await updateModelRoutingModal(
@@ -1372,7 +1384,7 @@ async function handleModelRoutingModalSubmission(
   } catch (error) {
     logger.error("Failed to save workspace model routing settings.", {
       error,
-      enterpriseId: metadata?.enterpriseId,
+      enterpriseId,
       teamId: selectedTeamId,
     });
     await updateModelRoutingModal(
@@ -1398,6 +1410,9 @@ async function canManageSelectedModelRoutingWorkspace(
 ): Promise<boolean> {
   if (input.selectedTeamId === input.sourceTeamId) {
     return true;
+  }
+  if (input.enterpriseId === undefined) {
+    return false;
   }
   if (input.installedWorkspaceDirectory === undefined) {
     return false;

@@ -69,6 +69,36 @@ describe("createAgentSlackHandlers", () => {
     });
   });
 
+  it("does not list all installed workspaces for standalone App Home", async () => {
+    const publishedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces() {
+          throw new Error("standalone App Home must not list all installed workspaces");
+        },
+      },
+    });
+
+    await handlers.handleAppHomeOpened({
+      body: { team_id: "T1" },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            publishedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { user: "U1" },
+      logger: { debug() {}, warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(publishedViews[0]);
+    expect(serialized).toContain("Model routing");
+    expect(serialized).toContain('\\"selectedTeamId\\":\\"T1\\"');
+    expect(serialized).not.toContain("workspaces");
+  });
+
   it("opens model routing modal with installed workspaces and stored model choices", async () => {
     const openedViews: unknown[] = [];
     const operations: string[] = [];
@@ -179,6 +209,60 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).not.toContain("Provider default");
     expect(serialized).toContain("anthropic:claude-3-5-sonnet-latest");
     expect(serialized).not.toContain("google:gemini-2.5-flash");
+  });
+
+  it("does not list all installed workspaces when standalone users open model routing", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces() {
+          throw new Error("standalone model routing must not list all installed workspaces");
+        },
+      },
+      routingRepository: {
+        async findWorkspaceSettings(teamId: string) {
+          expect(teamId).toBe("T1");
+          return {
+            enabled_model_ids: ["openai:gpt-4o"],
+          };
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds(input) {
+          expect(input).toEqual({ teamId: "T1" });
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T-other" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updatedViews[0]);
+    expect(serialized).toContain("Workspace default model");
+    expect(serialized).not.toContain("model_routing_workspace_select");
+    expect(serialized).not.toContain("T-other");
   });
 
   it("removes reasoning selector when default model changes to a non-reasoning model", async () => {
