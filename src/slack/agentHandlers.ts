@@ -984,6 +984,7 @@ function buildModelRoutingModal(input: {
     },
     {
       block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+      dispatch_action: true,
       element: {
         action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
         initial_option: defaultInitialOption,
@@ -1035,7 +1036,9 @@ function buildChannelModelRoutingModal(input: {
   translator: Translator;
   workspaceSettings?: JsonObject;
 }): Record<string, unknown> {
-  const defaultModelId = stringField(input.channelSettings, "default_model_id");
+  const defaultModelId =
+    stringField(input.channelSettings, "default_model_id") ??
+    stringField(input.workspaceSettings, "default_model_id");
   const blocks: Record<string, unknown>[] = [
     {
       text: {
@@ -1046,6 +1049,7 @@ function buildChannelModelRoutingModal(input: {
     },
     {
       block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+      dispatch_action: true,
       element: {
         action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
         initial_option: input.modelOptions.find((option) => option.value === defaultModelId),
@@ -1121,6 +1125,7 @@ function buildThreadModelRoutingModal(input: {
     },
     {
       block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+      dispatch_action: true,
       element: {
         action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
         initial_option: input.modelOptions.find((option) => option.value === defaultModelId),
@@ -1471,7 +1476,10 @@ async function handleChannelModelRoutingModalSubmission(input: {
     await input.options.routingRepository.saveChannelSettings({
       channelId,
       defaultAgentId,
-      defaultModelId,
+      defaultModelId: modelIdForScopedSave({
+        inheritedSettings: [workspaceSettings],
+        selectedModelId: defaultModelId,
+      }),
       payload: channelSettings ?? {},
       reasoningEffort: reasoningEffortForScopedSave({
         currentSettings: channelSettings,
@@ -1896,6 +1904,16 @@ function reasoningEffortForScopedSave(input: {
     return input.selectedEffort;
   }
   return input.selectedEffort === inheritedEffort ? undefined : input.selectedEffort;
+}
+
+function modelIdForScopedSave(input: {
+  inheritedSettings: readonly (JsonObject | undefined)[];
+  selectedModelId: string;
+}): string | undefined {
+  const inheritedModelId = input.inheritedSettings
+    .map((settings) => stringField(settings, "default_model_id"))
+    .find((modelId) => modelId !== undefined);
+  return input.selectedModelId === inheritedModelId ? undefined : input.selectedModelId;
 }
 
 function readReasoningEffortValue(

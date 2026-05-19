@@ -174,6 +174,7 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain("Workspace Two");
     expect(serialized).toContain("Enabled models");
     expect(serialized).toContain("Workspace default model");
+    expect(serialized).toContain('"dispatch_action":true');
     expect(serialized).not.toContain("Reasoning effort");
     expect(serialized).not.toContain("Provider default");
     expect(serialized).toContain("anthropic:claude-3-5-sonnet-latest");
@@ -384,6 +385,7 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain("Channel settings");
     expect(serialized).toContain("Channel default model");
     expect(serialized).toContain("Reasoning effort");
+    expect(serialized).toContain('"dispatch_action":true');
     expect(serialized).toContain('"value":"high"');
     expect(serialized).toContain('\\"channelId\\":\\"C1\\"');
     expect(serialized).toContain('\\"teamId\\":\\"T1\\"');
@@ -449,6 +451,67 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain("Channel default model");
     expect(serialized).toContain("openai:gpt-4o");
     expect(serialized).not.toContain("Channel default agent");
+  });
+
+  it("shows channel reasoning settings from the inherited workspace default model", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findChannelSettings() {
+          return {};
+        },
+        async findWorkspaceSettings() {
+          return {
+            default_model_id: "openai:gpt-5.5",
+            enabled_model_ids: ["openai:gpt-5.5", "openai:gpt-4o"],
+            reasoning_effort: "high",
+          };
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              channelId: "C1",
+              source: "channel",
+              teamId: "T1",
+            }),
+          },
+        ],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updatedViews[0]);
+    expect(serialized).toContain("Channel default model");
+    expect(serialized).toContain('"value":"openai:gpt-5.5"');
+    expect(serialized).toContain("Reasoning effort");
+    expect(serialized).toContain('"value":"high"');
   });
 
   it("does not show reasoning settings when workspace default model is unset", async () => {
@@ -614,6 +677,7 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain("Thread settings");
     expect(serialized).toContain("Thread model");
     expect(serialized).toContain("openai:gpt-4o");
+    expect(serialized).toContain('"dispatch_action":true');
     expect(serialized).toContain('\\"source\\":\\"thread\\"');
     expect(serialized).toContain('\\"threadTs\\":\\"1712345678.000100\\"');
     expect(serialized).not.toContain("Workspace default model");
@@ -959,6 +1023,79 @@ describe("createAgentSlackHandlers", () => {
         defaultModelId: "openai:gpt-5",
       }),
     ]);
+    expect((saves[0] as { reasoningEffort?: unknown }).reasoningEffort).toBeUndefined();
+  });
+
+  it("does not persist inherited workspace default model as a channel override", async () => {
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findChannelSettings() {
+          return {};
+        },
+        async findWorkspaceSettings() {
+          return {
+            default_agent_id: "assistant",
+            default_model_id: "openai:gpt-5.5",
+            enabled_model_ids: ["openai:gpt-5.5", "openai:gpt-4o"],
+            reasoning_effort: "high",
+          };
+        },
+        async saveChannelSettings(input: unknown) {
+          saves.push(input);
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async () => undefined,
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          channelId: "C1",
+          source: "channel",
+          teamId: "T1",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-5.5" },
+              },
+            },
+            model_routing_reasoning_effort: {
+              reasoning_effort: {
+                selected_option: { value: "high" },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(saves).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        teamId: "T1",
+      }),
+    ]);
+    expect((saves[0] as { defaultModelId?: unknown }).defaultModelId).toBeUndefined();
     expect((saves[0] as { reasoningEffort?: unknown }).reasoningEffort).toBeUndefined();
   });
 
