@@ -53,6 +53,14 @@ export const slackAgentInvocationSchema = z
         z.string().trim().min(1).optional(),
       )
       .optional(),
+    reasoningEffort: z
+      .preprocess(
+        (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+        z
+          .enum(["provider_default", "none", "minimal", "low", "medium", "high", "xhigh"])
+          .optional(),
+      )
+      .optional(),
     referenceImages: z.array(slackReferenceImageSchema).default([]),
     teamId: z.string().min(1),
     text: z.string().default(""),

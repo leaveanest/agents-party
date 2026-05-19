@@ -14,6 +14,7 @@ import {
   convertHistoryToAiSdkMessages,
 } from "./aiSdkMessageConverter.js";
 import { type ProviderCredentialResolver, resolveCredentialForRequest } from "./credentials.js";
+import { mergeReasoningProviderOptions } from "./reasoningOptions.js";
 
 export type NativeProviderAdapterSpec = {
   capabilities: readonly LlmCapability[];
@@ -103,7 +104,11 @@ export class GoogleWebSearchNativeAdapter implements LlmAdapter {
         aiSdkMessageConversionCapabilitiesForModel(request.model),
       ),
       model: googleProvider(request.model.providerModelId),
-      providerOptions: request.providerOptions,
+      providerOptions: mergeReasoningProviderOptions({
+        model: request.model,
+        providerOptions: request.providerOptions,
+        reasoningEffort: request.reasoningEffort,
+      }),
       system: request.system,
       temperature: request.temperature,
       tools: {
@@ -127,6 +132,7 @@ export class GoogleWebSearchNativeAdapter implements LlmAdapter {
           : {
               inputTokens: result.usage.inputTokens,
               outputTokens: result.usage.outputTokens,
+              reasoningTokens: result.usage.outputTokenDetails.reasoningTokens,
               totalTokens: result.usage.totalTokens,
             },
     };

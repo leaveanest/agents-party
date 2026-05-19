@@ -21,7 +21,17 @@ import {
   type Translator,
 } from "../i18n/index.js";
 import type { CredentialProviderKind } from "../providers/credentials.js";
-import { llmProviders, type LlmProvider } from "../providers/contracts.js";
+import {
+  LlmCapabilityId,
+  LlmReasoningEffortId,
+  llmProviders,
+  type LlmProvider,
+  type LlmReasoningEffort,
+} from "../providers/contracts.js";
+import {
+  modelDefaultReasoningEffort,
+  normalizeReasoningEffort,
+} from "../providers/reasoningOptions.js";
 import {
   salesforceAuthConfigSchema,
   salesforceConnectionSchema,
@@ -62,6 +72,8 @@ import {
   MODEL_ROUTING_ENABLED_MODELS_ACTION_ID,
   MODEL_ROUTING_ENABLED_MODELS_BLOCK_ID,
   MODEL_ROUTING_MODAL_CALLBACK_ID,
+  MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
+  MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
   MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_ACTION_ID,
@@ -149,6 +161,7 @@ const DEFAULT_AGENT_OPTION = {
   displayName: "Assistant",
   id: "assistant",
 } as const;
+const REASONING_EFFORT_FIELD = "reasoning_effort";
 const AGENTS_PARTY_CONTROL_EVENT_TYPE = "agents_party_control";
 const SLACK_SECTION_TEXT_LIMIT = 3000;
 const THREAD_HISTORY_CONVERSATION_SUBTYPES = new Set([
@@ -214,6 +227,7 @@ export type SlackResolvedAgentRoute = {
   };
   modelId?: string;
   modelScope?: string;
+  reasoningEffort?: string;
   scope: string;
 };
 
@@ -223,6 +237,7 @@ export type SlackAgentRoutingRepository = {
     channelId: string;
     lastMessageTs: string;
     modelId?: string;
+    reasoningEffort?: string;
     rootMessageTs: string;
     teamId: string;
     threadTs: string;
@@ -246,6 +261,7 @@ export type SlackAgentRoutingRepository = {
     defaultModelId?: string;
     enabledModelIds?: string[];
     payload: JsonObject;
+    reasoningEffort?: string;
     teamId: string;
     threadAutoReply?: boolean;
     updatedAt: Date;
@@ -255,6 +271,7 @@ export type SlackAgentRoutingRepository = {
     defaultAgentId?: string;
     defaultModelId?: string;
     payload: JsonObject;
+    reasoningEffort?: string;
     teamId: string;
     threadAutoReply?: boolean;
     updatedAt: Date;
@@ -792,6 +809,7 @@ async function updateChannelModelRoutingModal(input: {
       modelOptions,
       selectedTeamId,
       translator: input.translator,
+      workspaceSettings,
     }),
     input.logger,
   );
@@ -928,8 +946,8 @@ function buildModelRoutingModal(input: {
     )
     .map((model) => ({
       text: {
-        text: model.displayName,
-        type: "plain_text",
+        text: model.displayName ?? model.id,
+        type: "plain_text" as const,
       },
       value: model.id,
     }))
@@ -940,6 +958,7 @@ function buildModelRoutingModal(input: {
   );
   const defaultModelId = stringField(input.workspaceSettings, "default_model_id");
   const defaultInitialOption = modelOptions.find((option) => option.value === defaultModelId);
+  const shouldShowReasoningEffort = hasReasoningModel(modelOptions);
   blocks.push(
     {
       block_id: MODEL_ROUTING_ENABLED_MODELS_BLOCK_ID,
@@ -980,6 +999,14 @@ function buildModelRoutingModal(input: {
       type: "input",
     },
   );
+  if (shouldShowReasoningEffort) {
+    blocks.push(
+      buildReasoningEffortBlock({
+        initialEffort: selectedReasoningEffort(input.workspaceSettings, defaultModelId),
+        translator: input.translator,
+      }),
+    );
+  }
   return {
     blocks,
     callback_id: MODEL_ROUTING_MODAL_CALLBACK_ID,
@@ -1002,37 +1029,50 @@ function buildChannelModelRoutingModal(input: {
   modelOptions: readonly SlackOption[];
   selectedTeamId: string;
   translator: Translator;
+  workspaceSettings?: JsonObject;
 }): Record<string, unknown> {
   const defaultModelId = stringField(input.channelSettings, "default_model_id");
-  return {
-    blocks: [
-      {
-        text: {
-          text: input.translator.t("modelRouting.channelModal.intro"),
-          type: "mrkdwn",
-        },
-        type: "section",
+  const blocks: Record<string, unknown>[] = [
+    {
+      text: {
+        text: input.translator.t("modelRouting.channelModal.intro"),
+        type: "mrkdwn",
       },
-      {
-        block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
-        element: {
-          action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
-          initial_option: input.modelOptions.find((option) => option.value === defaultModelId),
-          options: input.modelOptions,
-          placeholder: {
-            text: input.translator.t("modelRouting.modal.defaultModelPlaceholder"),
-            type: "plain_text",
-          },
-          type: "static_select",
-        },
-        label: {
-          text: input.translator.t("modelRouting.channelModal.defaultModel"),
+      type: "section",
+    },
+    {
+      block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+      element: {
+        action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
+        initial_option: input.modelOptions.find((option) => option.value === defaultModelId),
+        options: input.modelOptions,
+        placeholder: {
+          text: input.translator.t("modelRouting.modal.defaultModelPlaceholder"),
           type: "plain_text",
         },
-        optional: false,
-        type: "input",
+        type: "static_select",
       },
-    ],
+      label: {
+        text: input.translator.t("modelRouting.channelModal.defaultModel"),
+        type: "plain_text",
+      },
+      optional: false,
+      type: "input",
+    },
+  ];
+  if (hasReasoningModel(input.modelOptions)) {
+    blocks.push(
+      buildReasoningEffortBlock({
+        initialEffort: selectedReasoningEffortFromSettings(
+          [input.channelSettings, input.workspaceSettings],
+          defaultModelId,
+        ),
+        translator: input.translator,
+      }),
+    );
+  }
+  return {
+    blocks,
     callback_id: MODEL_ROUTING_MODAL_CALLBACK_ID,
     close: { text: input.translator.t("common.close"), type: "plain_text" },
     private_metadata: JSON.stringify({
@@ -1066,35 +1106,47 @@ function buildThreadModelRoutingModal(input: {
     threadModelId ??
     stringField(input.channelSettings, "default_model_id") ??
     stringField(input.workspaceSettings, "default_model_id");
-  return {
-    blocks: [
-      {
-        text: {
-          text: input.translator.t("modelRouting.threadModal.intro"),
-          type: "mrkdwn",
-        },
-        type: "section",
+  const blocks: Record<string, unknown>[] = [
+    {
+      text: {
+        text: input.translator.t("modelRouting.threadModal.intro"),
+        type: "mrkdwn",
       },
-      {
-        block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
-        element: {
-          action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
-          initial_option: input.modelOptions.find((option) => option.value === defaultModelId),
-          options: input.modelOptions,
-          placeholder: {
-            text: input.translator.t("modelRouting.modal.defaultModelPlaceholder"),
-            type: "plain_text",
-          },
-          type: "static_select",
-        },
-        label: {
-          text: input.translator.t("modelRouting.threadModal.defaultModel"),
+      type: "section",
+    },
+    {
+      block_id: MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+      element: {
+        action_id: MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
+        initial_option: input.modelOptions.find((option) => option.value === defaultModelId),
+        options: input.modelOptions,
+        placeholder: {
+          text: input.translator.t("modelRouting.modal.defaultModelPlaceholder"),
           type: "plain_text",
         },
-        optional: false,
-        type: "input",
+        type: "static_select",
       },
-    ],
+      label: {
+        text: input.translator.t("modelRouting.threadModal.defaultModel"),
+        type: "plain_text",
+      },
+      optional: false,
+      type: "input",
+    },
+  ];
+  if (hasReasoningModel(input.modelOptions)) {
+    blocks.push(
+      buildReasoningEffortBlock({
+        initialEffort: selectedReasoningEffortFromSettings(
+          [input.threadSettings, input.channelSettings, input.workspaceSettings],
+          defaultModelId,
+        ),
+        translator: input.translator,
+      }),
+    );
+  }
+  return {
+    blocks,
     callback_id: MODEL_ROUTING_MODAL_CALLBACK_ID,
     close: { text: input.translator.t("common.close"), type: "plain_text" },
     private_metadata: JSON.stringify({
@@ -1180,6 +1232,13 @@ async function handleModelRoutingModalSubmission(
     MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
+  const reasoningEffort = normalizeReasoningEffort(
+    readSelectedOptionValue(
+      view,
+      MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
+      MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
+    ),
+  );
   const modelRegistry = createDefaultModelRegistry();
   const unknownModelIds = [...enabledModelIds, defaultModelId].filter(
     (modelId): modelId is string => modelId !== undefined && !modelRegistry.has(modelId),
@@ -1263,6 +1322,7 @@ async function handleModelRoutingModalSubmission(
       defaultModelId,
       enabledModelIds,
       payload: existing ?? {},
+      reasoningEffort,
       teamId: selectedTeamId,
       threadAutoReply: booleanField(existing, "thread_auto_reply"),
       updatedAt: new Date(),
@@ -1339,6 +1399,13 @@ async function handleChannelModelRoutingModalSubmission(input: {
     MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
+  const reasoningEffort = normalizeReasoningEffort(
+    readSelectedOptionValue(
+      input.view,
+      MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
+      MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
+    ),
+  );
   const [channelSettings, workspaceSettings, credentialedProviders] = await Promise.all([
     input.options.routingRepository.findChannelSettings(selectedTeamId, channelId),
     input.options.routingRepository.findWorkspaceSettings(selectedTeamId),
@@ -1412,6 +1479,12 @@ async function handleChannelModelRoutingModalSubmission(input: {
       defaultAgentId,
       defaultModelId,
       payload: channelSettings ?? {},
+      reasoningEffort: reasoningEffortForScopedSave({
+        currentSettings: channelSettings,
+        inheritedSettings: [workspaceSettings],
+        modelId: defaultModelId,
+        selectedEffort: reasoningEffort,
+      }),
       teamId: selectedTeamId,
       threadAutoReply: booleanField(channelSettings, "thread_auto_reply"),
       updatedAt: new Date(),
@@ -1493,6 +1566,13 @@ async function handleThreadModelRoutingModalSubmission(input: {
     MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
+  const reasoningEffort = normalizeReasoningEffort(
+    readSelectedOptionValue(
+      input.view,
+      MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
+      MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
+    ),
+  );
   const [threadSettings, channelSettings, workspaceSettings, credentialedProviders] =
     await Promise.all([
       input.options.routingRepository.findSlackThread(selectedTeamId, channelId, threadTs),
@@ -1570,6 +1650,12 @@ async function handleThreadModelRoutingModalSubmission(input: {
       channelId,
       lastMessageTs: stringField(threadSettings, "last_message_ts") ?? threadTs,
       modelId: defaultModelId,
+      reasoningEffort: reasoningEffortForScopedSave({
+        currentSettings: threadSettings,
+        inheritedSettings: [channelSettings, workspaceSettings],
+        modelId: defaultModelId,
+        selectedEffort: reasoningEffort,
+      }),
       rootMessageTs: stringField(threadSettings, "root_message_ts") ?? threadTs,
       teamId: selectedTeamId,
       threadTs,
@@ -1663,6 +1749,127 @@ function channelModelOptions(input: {
       value: model.id,
     }))
     .slice(0, 100);
+}
+
+function reasoningEffortOptions(translator: Translator): SlackOption[] {
+  return [
+    {
+      text: { text: translator.t("modelRouting.reasoning.providerDefault"), type: "plain_text" },
+      value: LlmReasoningEffortId.ProviderDefault,
+    },
+    {
+      text: { text: translator.t("modelRouting.reasoning.none"), type: "plain_text" },
+      value: LlmReasoningEffortId.None,
+    },
+    {
+      text: { text: translator.t("modelRouting.reasoning.minimal"), type: "plain_text" },
+      value: LlmReasoningEffortId.Minimal,
+    },
+    {
+      text: { text: translator.t("modelRouting.reasoning.low"), type: "plain_text" },
+      value: LlmReasoningEffortId.Low,
+    },
+    {
+      text: { text: translator.t("modelRouting.reasoning.medium"), type: "plain_text" },
+      value: LlmReasoningEffortId.Medium,
+    },
+    {
+      text: { text: translator.t("modelRouting.reasoning.high"), type: "plain_text" },
+      value: LlmReasoningEffortId.High,
+    },
+    {
+      text: { text: translator.t("modelRouting.reasoning.xhigh"), type: "plain_text" },
+      value: LlmReasoningEffortId.XHigh,
+    },
+  ];
+}
+
+function hasReasoningModel(modelOptions: readonly SlackOption[]): boolean {
+  const registry = createDefaultModelRegistry();
+  return modelOptions.some((option) => {
+    if (!registry.has(option.value)) {
+      return false;
+    }
+    return registry.get(option.value).capabilities.includes(LlmCapabilityId.Thinking);
+  });
+}
+
+function selectedReasoningEffort(
+  settings: JsonObject | undefined,
+  modelId: string | undefined,
+): LlmReasoningEffort {
+  return selectedReasoningEffortFromSettings([settings], modelId);
+}
+
+function selectedReasoningEffortFromSettings(
+  settingsList: readonly (JsonObject | undefined)[],
+  modelId: string | undefined,
+): LlmReasoningEffort {
+  const configured = settingsList
+    .map((settings) => normalizeReasoningEffort(stringField(settings, REASONING_EFFORT_FIELD)))
+    .find((effort): effort is LlmReasoningEffort => effort !== undefined);
+  if (configured !== undefined) {
+    return configured;
+  }
+  if (modelId !== undefined) {
+    const registry = createDefaultModelRegistry();
+    if (registry.has(modelId)) {
+      return (
+        modelDefaultReasoningEffort(registry.get(modelId)) ?? LlmReasoningEffortId.ProviderDefault
+      );
+    }
+  }
+  return LlmReasoningEffortId.ProviderDefault;
+}
+
+function reasoningEffortForScopedSave(input: {
+  inheritedSettings: readonly (JsonObject | undefined)[];
+  modelId: string;
+  currentSettings?: JsonObject;
+  selectedEffort?: LlmReasoningEffort;
+}): LlmReasoningEffort | undefined {
+  if (input.selectedEffort === undefined) {
+    return undefined;
+  }
+  const currentEffort = normalizeReasoningEffort(
+    stringField(input.currentSettings, REASONING_EFFORT_FIELD),
+  );
+  const inheritedEffort = selectedReasoningEffortFromSettings(
+    input.inheritedSettings,
+    input.modelId,
+  );
+  if (currentEffort !== undefined && input.selectedEffort !== inheritedEffort) {
+    return input.selectedEffort;
+  }
+  return input.selectedEffort === inheritedEffort ? undefined : input.selectedEffort;
+}
+
+function buildReasoningEffortBlock(input: {
+  initialEffort: LlmReasoningEffort;
+  translator: Translator;
+}): Record<string, unknown> {
+  const options = reasoningEffortOptions(input.translator);
+  const providerDefaultOption = options[0] as SlackOption;
+  return {
+    block_id: MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
+    element: {
+      action_id: MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
+      initial_option:
+        options.find((option) => option.value === input.initialEffort) ?? providerDefaultOption,
+      options,
+      placeholder: {
+        text: input.translator.t("modelRouting.reasoning.placeholder"),
+        type: "plain_text",
+      },
+      type: "static_select",
+    },
+    label: {
+      text: input.translator.t("modelRouting.reasoning.label"),
+      type: "plain_text",
+    },
+    optional: false,
+    type: "input",
+  };
 }
 
 function buildModelRoutingOpeningModal(
@@ -2451,6 +2658,7 @@ async function handleMention(
       channelId: event.channel,
       messageTs: event.ts,
       modelId: route?.modelId,
+      reasoningEffort: route?.reasoningEffort,
       teamId,
       text: mentionText,
       threadHistory: readThreadHistoryMessages(threadMessages, {
@@ -2487,6 +2695,7 @@ async function handleMention(
           channelId: event.channel,
           lastMessageTs: event.ts,
           modelId: threadScopedModelId(route),
+          reasoningEffort: threadScopedReasoningEffort(route),
           rootMessageTs: threadTs,
           teamId,
           threadTs,
@@ -2631,11 +2840,14 @@ async function handleMessage(
       userId: event.user,
     });
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
+    const reasoningEffort =
+      route === undefined ? stringField(thread, REASONING_EFFORT_FIELD) : route.reasoningEffort;
     const threadMessages = await readThreadMessages(client, event.channel, threadTs);
     const result = await runner.run({
       channelId: event.channel,
       messageTs: event.ts,
       modelId,
+      reasoningEffort,
       teamId,
       text: messageText,
       threadHistory: readThreadHistoryMessages(threadMessages, {
@@ -2671,6 +2883,10 @@ async function handleMessage(
         channelId: event.channel,
         lastMessageTs: event.ts,
         modelId: route === undefined ? stringField(thread, "model_id") : threadScopedModelId(route),
+        reasoningEffort:
+          route === undefined
+            ? stringField(thread, REASONING_EFFORT_FIELD)
+            : threadScopedReasoningEffort(route),
         rootMessageTs: stringField(thread, "root_message_ts") ?? threadTs,
         teamId,
         threadTs,
@@ -2810,6 +3026,7 @@ async function processAppMentionJob(
       channelId: job.channelId,
       messageTs: job.messageTs,
       modelId: route?.modelId,
+      reasoningEffort: route?.reasoningEffort,
       teamId: job.teamId,
       text: job.text,
       threadHistory: readThreadHistoryMessages(threadMessages, {
@@ -2845,6 +3062,7 @@ async function processAppMentionJob(
           channelId: job.channelId,
           lastMessageTs: job.messageTs,
           modelId: threadScopedModelId(route),
+          reasoningEffort: threadScopedReasoningEffort(route),
           rootMessageTs: job.threadTs,
           teamId: job.teamId,
           threadTs: job.threadTs,
@@ -2959,11 +3177,14 @@ async function processFollowUpMessageJob(
       threadTs: job.threadTs,
     });
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
+    const reasoningEffort =
+      route === undefined ? stringField(thread, REASONING_EFFORT_FIELD) : route.reasoningEffort;
     const threadMessages = await readThreadMessages(input.client, job.channelId, job.threadTs);
     const result = await input.runner.run({
       channelId: job.channelId,
       messageTs: job.messageTs,
       modelId,
+      reasoningEffort,
       teamId: job.teamId,
       text: job.text,
       threadHistory: readThreadHistoryMessages(threadMessages, {
@@ -2998,6 +3219,10 @@ async function processFollowUpMessageJob(
         channelId: job.channelId,
         lastMessageTs: job.messageTs,
         modelId: route === undefined ? stringField(thread, "model_id") : threadScopedModelId(route),
+        reasoningEffort:
+          route === undefined
+            ? stringField(thread, REASONING_EFFORT_FIELD)
+            : threadScopedReasoningEffort(route),
         rootMessageTs: stringField(thread, "root_message_ts") ?? job.threadTs,
         teamId: job.teamId,
         threadTs: job.threadTs,
@@ -3058,6 +3283,7 @@ async function activateMentionMenuThread(input: {
       channelId: input.channelId,
       lastMessageTs: input.messageTs,
       modelId: threadScopedModelId(route),
+      reasoningEffort: threadScopedReasoningEffort(route),
       rootMessageTs: input.threadTs,
       teamId: input.teamId,
       threadTs: input.threadTs,
@@ -3357,6 +3583,7 @@ async function handleReactionAdded(
       channelId,
       messageTs,
       modelId: route?.modelId,
+      reasoningEffort: route?.reasoningEffort,
       teamId,
       text: `Translate the following Slack message to ${targetLanguage}:\n\n${sourceText}`,
       threadTs,
@@ -5075,6 +5302,12 @@ async function resolveSlackAgentRoute(
 
 function threadScopedModelId(route: SlackResolvedAgentRoute | undefined): string | undefined {
   return route?.modelScope === "thread" ? route.modelId : undefined;
+}
+
+function threadScopedReasoningEffort(
+  route: SlackResolvedAgentRoute | undefined,
+): string | undefined {
+  return route?.modelScope === "thread" ? route.reasoningEffort : undefined;
 }
 
 function stringField(value: JsonObject | undefined, field: string): string | undefined {

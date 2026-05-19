@@ -156,6 +156,11 @@ const webSearchVisionStructuredTextCapabilities = [
   ...visionStructuredTextCapabilities,
   "web_search",
 ] as const satisfies readonly LlmCapability[];
+const webSearchVisionReasoningTextCapabilities = [
+  ...reasoningTextCapabilities,
+  "image_input",
+  "web_search",
+] as const satisfies readonly LlmCapability[];
 const webSearchReasoningTextCapabilities = [
   ...reasoningTextCapabilities,
   "web_search",
@@ -184,18 +189,18 @@ function textModelEntry(entry: TextModelEntry): ModelInfo {
 export const defaultModelRegistryEntries: readonly ModelInfo[] = [
   ...(
     [
-      ["openai", "gpt-5.5", "GPT-5.5", webSearchVisionStructuredTextCapabilities],
-      ["openai", "gpt-5.4-pro", "GPT-5.4 Pro", webSearchVisionStructuredTextCapabilities],
-      ["openai", "gpt-5.4", "GPT-5.4", webSearchVisionStructuredTextCapabilities],
-      ["openai", "gpt-5.4-mini", "GPT-5.4 Mini", webSearchVisionStructuredTextCapabilities],
-      ["openai", "gpt-5.4-nano", "GPT-5.4 Nano", webSearchVisionStructuredTextCapabilities],
+      ["openai", "gpt-5.5", "GPT-5.5", webSearchVisionReasoningTextCapabilities],
+      ["openai", "gpt-5.4-pro", "GPT-5.4 Pro", webSearchVisionReasoningTextCapabilities],
+      ["openai", "gpt-5.4", "GPT-5.4", webSearchVisionReasoningTextCapabilities],
+      ["openai", "gpt-5.4-mini", "GPT-5.4 Mini", webSearchVisionReasoningTextCapabilities],
+      ["openai", "gpt-5.4-nano", "GPT-5.4 Nano", webSearchVisionReasoningTextCapabilities],
       ["openai", "gpt-5.3-chat-latest", "GPT-5.3 Chat Latest", webSearchStructuredTextCapabilities],
-      ["openai", "gpt-5.2-pro", "GPT-5.2 Pro", webSearchVisionStructuredTextCapabilities],
+      ["openai", "gpt-5.2-pro", "GPT-5.2 Pro", webSearchVisionReasoningTextCapabilities],
       ["openai", "gpt-5.2-chat-latest", "GPT-5.2 Chat Latest", webSearchStructuredTextCapabilities],
-      ["openai", "gpt-5.1", "GPT-5.1", webSearchVisionStructuredTextCapabilities],
+      ["openai", "gpt-5.1", "GPT-5.1", webSearchVisionReasoningTextCapabilities],
       ["openai", "gpt-5.1-chat-latest", "GPT-5.1 Chat Latest", webSearchStructuredTextCapabilities],
-      ["openai", "gpt-5", "GPT-5", webSearchVisionStructuredTextCapabilities],
-      ["openai", "gpt-5-nano", "GPT-5 Nano", webSearchVisionStructuredTextCapabilities],
+      ["openai", "gpt-5", "GPT-5", webSearchVisionReasoningTextCapabilities],
+      ["openai", "gpt-5-nano", "GPT-5 Nano", webSearchVisionReasoningTextCapabilities],
       ["openai", "gpt-4.1", "GPT-4.1", webSearchVisionStructuredTextCapabilities],
       ["openai", "gpt-4.1-mini", "GPT-4.1 Mini", webSearchVisionStructuredTextCapabilities],
       ["openai", "gpt-4.1-nano", "GPT-4.1 Nano", webSearchVisionStructuredTextCapabilities],
@@ -411,6 +416,7 @@ export const defaultModelRegistryEntries: readonly ModelInfo[] = [
       "tool_calling",
       "structured_output",
       "web_search",
+      "thinking",
     ],
     displayName: "GPT-5.2",
     id: "openai:gpt-5.2",
@@ -426,6 +432,7 @@ export const defaultModelRegistryEntries: readonly ModelInfo[] = [
       "file_input",
       "tool_calling",
       "structured_output",
+      "thinking",
     ],
     displayName: "GPT-5 mini",
     id: "openai:gpt-5-mini",

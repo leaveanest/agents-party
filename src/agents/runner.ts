@@ -10,6 +10,7 @@ import type { LlmRequest, LlmResult, ModelInfo } from "../providers/contracts.js
 import type { ProviderCredentialResolver } from "../providers/credentials.js";
 import { createNativeProviderAdapters } from "../providers/nativeProviderAdapters.js";
 import { ProviderRouter } from "../providers/providerRouter.js";
+import { normalizeReasoningEffort } from "../providers/reasoningOptions.js";
 import {
   type AgentRouterDecision,
   type SlackAgentInvocation,
@@ -101,6 +102,7 @@ export class AgentRunner {
           slack_user_id: invocation.userId,
         },
         model,
+        reasoningEffort: normalizeReasoningEffort(invocation.reasoningEffort),
         system: this.systemPrompt(),
         tools: toolRegistry?.definitions(),
       };

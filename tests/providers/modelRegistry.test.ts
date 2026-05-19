@@ -125,6 +125,13 @@ describe("ModelRegistry", () => {
     expect(registry.get("openai:gpt-4o").capabilities).not.toContain("image_generation");
   });
 
+  it("marks OpenAI reasoning models with thinking capability", () => {
+    const registry = createDefaultModelRegistry();
+
+    expect(registry.get("openai:gpt-5.2").capabilities).toContain("thinking");
+    expect(registry.get("openai:gpt-5-mini").capabilities).toContain("thinking");
+  });
+
   it("advertises web search for models where AI SDK can enable it by default", () => {
     const registry = createDefaultModelRegistry();
 

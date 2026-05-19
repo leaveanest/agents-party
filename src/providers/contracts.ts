@@ -71,6 +71,18 @@ export type LlmResponseFormat =
       type: "json";
     };
 
+export const LlmReasoningEffortId = {
+  High: "high",
+  Low: "low",
+  Medium: "medium",
+  Minimal: "minimal",
+  None: "none",
+  ProviderDefault: "provider_default",
+  XHigh: "xhigh",
+} as const;
+
+export type LlmReasoningEffort = (typeof LlmReasoningEffortId)[keyof typeof LlmReasoningEffortId];
+
 export type LlmInvocationContext = {
   workspaceId?: string;
 };
@@ -82,6 +94,7 @@ export type LlmRequest = {
   metadata?: Record<string, JsonValue>;
   model: ModelInfo;
   providerOptions?: Record<string, Record<string, JsonValue>>;
+  reasoningEffort?: LlmReasoningEffort;
   requiredCapabilities?: readonly LlmCapability[];
   responseFormat?: LlmResponseFormat;
   system?: string;
@@ -92,6 +105,7 @@ export type LlmRequest = {
 export type LlmUsage = {
   inputTokens?: number;
   outputTokens?: number;
+  reasoningTokens?: number;
   totalTokens?: number;
 };
 

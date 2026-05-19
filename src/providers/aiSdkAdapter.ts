@@ -61,6 +61,7 @@ import {
   type ProviderCredentialResolver,
   stringPayloadField,
 } from "./credentials.js";
+import { mergeReasoningProviderOptions } from "./reasoningOptions.js";
 
 export type AiSdkModelResolver = (
   model: ModelInfo,
@@ -155,7 +156,11 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           aiSdkMessageConversionCapabilitiesForModel(request.model),
         ),
         model: this.resolveModel(request.model, credential),
-        providerOptions: request.providerOptions,
+        providerOptions: mergeReasoningProviderOptions({
+          model: request.model,
+          providerOptions: request.providerOptions,
+          reasoningEffort: request.reasoningEffort,
+        }),
         stopWhen: providerTools === undefined ? undefined : stepCountIs(10),
         system: request.system,
         temperature: request.temperature,
@@ -211,7 +216,11 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           aiSdkMessageConversionCapabilitiesForModel(request.model),
         ),
         model: this.resolveModel(request.model, credential),
-        providerOptions: request.providerOptions,
+        providerOptions: mergeReasoningProviderOptions({
+          model: request.model,
+          providerOptions: request.providerOptions,
+          reasoningEffort: request.reasoningEffort,
+        }),
         stopWhen: providerTools === undefined ? undefined : stepCountIs(10),
         system: request.system,
         temperature: request.temperature,
@@ -884,6 +893,7 @@ function mapUsage(usage: LanguageModelUsage): LlmUsage {
   return {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
+    reasoningTokens: usage.outputTokenDetails.reasoningTokens,
     totalTokens: usage.totalTokens,
   };
 }

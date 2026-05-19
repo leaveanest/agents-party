@@ -25,6 +25,12 @@ const textOnlyModel: ModelInfo = {
   provider: "plamo",
   providerModelId: "plamo-2.0-mini",
 };
+const thinkingModel: ModelInfo = {
+  capabilities: ["text", "thinking"],
+  id: "openai:gpt-5",
+  provider: "openai",
+  providerModelId: "gpt-5",
+};
 
 describe("AgentRunner", () => {
   it("uses a single agent action instead of specialist routing", () => {
@@ -92,6 +98,47 @@ describe("AgentRunner", () => {
       provider: "anthropic",
     });
     expect(router.requests[0]?.model.id).toBe(explicitModel.id);
+  });
+
+  it("leaves reasoning effort unset until routing settings choose one", async () => {
+    const router = new FakeProviderRouter({
+      content: "reasoned",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: thinkingModel.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "think",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.reasoningEffort).toBeUndefined();
+  });
+
+  it("uses explicit invocation reasoning effort before the model default", async () => {
+    const router = new FakeProviderRouter({
+      content: "reasoned",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: thinkingModel.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      reasoningEffort: "provider_default",
+      teamId: "T1",
+      text: "think",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.reasoningEffort).toBe("provider_default");
   });
 
   it("returns a user-facing fallback when the provider returns no text after search", async () => {
@@ -379,7 +426,7 @@ describe("AgentRunner", () => {
 });
 
 class FakeProviderRouter {
-  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel]);
+  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel, thinkingModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly result: LlmResult) {}
@@ -391,7 +438,7 @@ class FakeProviderRouter {
 }
 
 class SequencedProviderRouter {
-  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel]);
+  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel, thinkingModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly results: LlmResult[]) {}
