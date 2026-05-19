@@ -8,7 +8,7 @@ This is the implemented product direction. Slack routing decisions come from exp
 
 ## Policy
 
-Agent and model selection are configuration decisions, not prompt-text guesses.
+Agent and model resolution is a configuration decision, not a prompt-text guess.
 
 When a Slack event needs an AI response, the routing layer resolves:
 
@@ -20,6 +20,18 @@ When a Slack event needs an AI response, the routing layer resolves:
 Thread settings have the highest precedence because a thread is the active conversation boundary. A thread may be pinned to a specific agent/model after the first response, or changed later by an explicit management action.
 
 Channel defaults are used for new conversations in that channel. Workspace defaults are used only when the channel has no override.
+
+## Slack Configuration UI
+
+Slack configuration surfaces expose model selection to users.
+
+- Workspace settings choose the enabled model list and the workspace default model.
+- Channel settings choose the channel default model only.
+- Thread settings choose the thread model only.
+- Mention-only messages should show a settings menu, not an explanatory no-agent message.
+- Channel no-route fallback messages should label their button as channel settings and open only channel-scoped model settings.
+
+The primary agent is an internal execution and compatibility concept. The current Slack UI must not present an agent selector for channel or thread configuration. If a persisted route still requires `default_agent_id` or `agent_id`, Slack handlers may write the built-in assistant id as an internal default, but that value is not a user-facing setting.
 
 ## Responsibilities
 

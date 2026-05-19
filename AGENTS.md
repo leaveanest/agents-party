@@ -56,6 +56,14 @@ Repository-local Codex skills under `.agents/skills/` use TypeScript helper scri
 - Keep UI/application/domain/infrastructure boundaries explicit when a change crosses them.
 - New relational schema changes belong in the TypeScript migration stack.
 
+## Slack Identity And Scope
+
+- Treat Slack IDs as scoped identifiers. Do not persist, route, authorize, or compare `channel_id`, `user_id`, `thread_ts`, message timestamps, view metadata, shortcut payloads, or interaction state as globally unique without the Slack team/workspace id.
+- Use `team_id`/`teamId` with channel, user, thread, and message identifiers in repository keys, queue jobs, modal `private_metadata`, button values, logs, and idempotency checks.
+- Preserve `enterprise_id`/`enterpriseId` when handling Enterprise Grid context, but do not use it as a replacement for the concrete workspace `team_id` that owns a channel, user installation, credential, or setting.
+- For Slack UI actions opened from a channel or thread, carry both `teamId` and `channelId` through the action value or modal metadata, and validate both again at the server boundary before saving settings.
+- Avoid names that imply global uniqueness, such as a bare `channelId` state object, when the value is only valid together with `teamId`.
+
 ## Full-Stack Implementation Expectations
 
 - Start from the user-facing Slack flow and work inward through handlers, application logic, provider calls, repositories, and persistence.

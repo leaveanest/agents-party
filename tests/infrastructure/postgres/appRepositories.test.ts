@@ -32,6 +32,7 @@ describe("Postgres app repositories", () => {
       expect.stringContaining('insert into "workspace_app_settings"'),
       expect.stringContaining('insert into "google_oauth_states"'),
     ]);
+    expect(JSON.parse(String(pool.queries[0]?.values?.[3]))).toEqual(["google:gemini-2.5-flash"]);
     expect(JSON.parse(String(pool.queries[0]?.values?.at(-1)))).toMatchObject({
       default_agent_id: "triage",
       default_model_id: "google:gemini-2.5-flash",
@@ -244,6 +245,7 @@ describe("Postgres app repositories", () => {
               agent_id: "thread",
               model_id: "thread-model",
               model_scope: "thread",
+              reasoning_effort: "high",
               status: "active",
             },
           },
@@ -255,6 +257,7 @@ describe("Postgres app repositories", () => {
         agentId: "thread",
         modelId: "thread-model",
         modelScope: "thread",
+        reasoningEffort: "high",
         scope: "thread",
       }),
     );
@@ -263,8 +266,20 @@ describe("Postgres app repositories", () => {
       new PostgresAgentRoutingRepository(
         new RecordingPool([
           { payload: {} },
-          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
-          { payload: { default_agent_id: "channel", default_model_id: "channel-model" } },
+          {
+            payload: {
+              default_agent_id: "workspace",
+              default_model_id: "workspace-model",
+              reasoning_effort: "medium",
+            },
+          },
+          {
+            payload: {
+              default_agent_id: "channel",
+              default_model_id: "channel-model",
+              reasoning_effort: "low",
+            },
+          },
           { payload: {} },
           { payload: { agent_id: "channel", enabled: true } },
         ]) as never,
@@ -274,6 +289,7 @@ describe("Postgres app repositories", () => {
         agentId: "channel",
         modelId: "channel-model",
         modelScope: "channel",
+        reasoningEffort: "low",
         scope: "channel",
       }),
     );
@@ -282,7 +298,13 @@ describe("Postgres app repositories", () => {
       new PostgresAgentRoutingRepository(
         new RecordingPool([
           { payload: {} },
-          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
+          {
+            payload: {
+              default_agent_id: "workspace",
+              default_model_id: "workspace-model",
+              reasoning_effort: "medium",
+            },
+          },
           { payload: {} },
           { payload: {} },
           { payload: { agent_id: "workspace", enabled: true } },
@@ -293,6 +315,7 @@ describe("Postgres app repositories", () => {
         agentId: "workspace",
         modelId: "workspace-model",
         modelScope: "workspace",
+        reasoningEffort: "medium",
         scope: "workspace",
       }),
     );

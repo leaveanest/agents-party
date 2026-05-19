@@ -9,6 +9,22 @@ import {
 } from "../../src/providers/aiSdkMessageConverter.js";
 
 describe("convertHistoryToAiSdkMessages", () => {
+  it("rejects system instructions in conversation history", () => {
+    const history = {
+      messages: [
+        {
+          content: "You are helpful.",
+          id: "system-1",
+          role: "system",
+        },
+      ],
+    } as unknown as ConversationHistory;
+
+    expect(() => convertHistoryToAiSdkMessages(history, nativeMultimodalCapabilities)).toThrow(
+      "Pass system instructions via LlmRequest.system instead",
+    );
+  });
+
   it("converts native multimodal user parts into AI SDK model messages", () => {
     const messages = convertHistoryToAiSdkMessages(
       {

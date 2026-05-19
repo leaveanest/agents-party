@@ -51,6 +51,7 @@ const handlers: SlackEventFeatureHandlers = {
   async handleMessage() {},
   async handleReactionAdded() {},
   async handleModelRoutingConfigureAction() {},
+  async handleModelRoutingDefaultModelSelectAction() {},
   async handleModelRoutingModalSubmission() {},
   async handleSalesforcePdfWorkflowConfigureAction() {},
   async handleSalesforcePdfWorkflowModalSubmission() {},
@@ -72,7 +73,10 @@ describe("registerSlackEventHandlers", () => {
       "reaction_added",
     ]);
     expect([...app.actions.keys()].sort()).toEqual([
+      "default_model",
+      "model_routing_channel_configure",
       "model_routing_configure",
+      "model_routing_thread_configure",
       "provider_kind",
       "salesforce_pdf_workflow_configure",
       "workspace_credential_configure",

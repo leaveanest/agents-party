@@ -298,6 +298,8 @@ export class RssFeedProcessor {
       },
       model: input.model,
       requiredCapabilities: ["text"],
+      system:
+        "You write concise Slack mrkdwn updates for RSS articles. Summarize the article in Japanese, include why it matters, and keep the response under 900 characters.",
     } satisfies LlmRequest);
     return result.content.trim();
   }
@@ -310,12 +312,6 @@ export class RssFeedProcessor {
 function rssArticleHistory(article: RssArticle): ConversationHistory {
   return {
     messages: [
-      {
-        content:
-          "You write concise Slack mrkdwn updates for RSS articles. Summarize the article in Japanese, include why it matters, and keep the response under 900 characters.",
-        id: "rss-system",
-        role: "system",
-      },
       {
         author: { id: "rss-feed", kind: "system" },
         content: [

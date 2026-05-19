@@ -1,10 +1,16 @@
 import type { AppSettings } from "../config.js";
-import type { ConversationHistory, JsonValue, UserMessagePart } from "../domain/messageHistory.js";
+import type {
+  ConversationHistory,
+  ConversationMessage,
+  JsonValue,
+  UserMessagePart,
+} from "../domain/messageHistory.js";
 import { createAiSdkAdapters } from "../providers/aiSdkAdapter.js";
 import type { LlmRequest, LlmResult, ModelInfo } from "../providers/contracts.js";
 import type { ProviderCredentialResolver } from "../providers/credentials.js";
 import { createNativeProviderAdapters } from "../providers/nativeProviderAdapters.js";
 import { ProviderRouter } from "../providers/providerRouter.js";
+import { normalizeReasoningEffort } from "../providers/reasoningOptions.js";
 import {
   type AgentRouterDecision,
   type SlackAgentInvocation,
@@ -84,21 +90,20 @@ export class AgentRunner {
     try {
       let history = buildAgentHistory({
         invocation,
-        model,
-        prompt: this.systemPrompt(),
         toolResults,
       });
       const requestBase: Omit<LlmRequest, "history"> = {
         context: {
           workspaceId: invocation.teamId,
         },
-        maxOutputTokens: 1200,
         metadata: {
           slack_channel_id: invocation.channelId,
           slack_team_id: invocation.teamId,
           slack_user_id: invocation.userId,
         },
         model,
+        reasoningEffort: normalizeReasoningEffort(invocation.reasoningEffort),
+        system: this.systemPrompt(),
         tools: toolRegistry?.definitions(),
       };
       const maxToolRounds = this.options.maxToolRounds ?? 1;
@@ -117,8 +122,6 @@ export class AgentRunner {
         toolResults.push(...roundToolResults);
         history = buildAgentHistory({
           invocation,
-          model,
-          prompt: this.systemPrompt(),
           toolResults,
         });
       }
@@ -197,25 +200,51 @@ export function selectAgentAction(): AgentRouterDecision {
 
 function buildAgentHistory(input: {
   invocation: SlackAgentInvocation;
-  model: ModelInfo;
-  prompt: string;
   toolResults: AgentToolResult[];
 }): ConversationHistory {
+  const threadHistoryMessages =
+    input.invocation.threadHistory.length > 0
+      ? input.invocation.threadHistory.map(
+          (message, index): ConversationMessage =>
+            message.role === "assistant"
+              ? {
+                  content: [{ text: message.text, type: "text" }],
+                  id: message.messageTs ?? `thread-${index}`,
+                  provenance: {
+                    externalMessageId: message.messageTs,
+                    source: "slack",
+                    threadId: input.invocation.threadTs,
+                  },
+                  role: "assistant",
+                }
+              : {
+                  author: { id: slackScopedId(message.teamId, message.userId), kind: "user" },
+                  content: [{ text: message.text, type: "text" }],
+                  id: message.messageTs ?? `thread-${index}`,
+                  provenance: {
+                    externalMessageId: message.messageTs,
+                    source: "slack",
+                    threadId: input.invocation.threadTs,
+                  },
+                  role: "user",
+                },
+        )
+      : input.invocation.threadMessages.map(
+          (message, index): ConversationMessage => ({
+            author: { id: slackScopedId(input.invocation.teamId, "thread"), kind: "user" },
+            content: [{ text: message, type: "text" }],
+            id: `thread-${index}`,
+            role: "user",
+          }),
+        );
   return {
     messages: [
+      ...threadHistoryMessages,
       {
-        content: input.prompt,
-        id: "system",
-        role: "system",
-      },
-      ...input.invocation.threadMessages.map((message, index) => ({
-        author: { id: "slack-thread", kind: "user" as const },
-        content: [{ text: message, type: "text" as const }],
-        id: `thread-${index}`,
-        role: "user" as const,
-      })),
-      {
-        author: { id: input.invocation.userId, kind: "user" },
+        author: {
+          id: slackScopedId(input.invocation.teamId, input.invocation.userId),
+          kind: "user",
+        },
         content: [
           { text: input.invocation.text, type: "text" },
           ...input.invocation.transientAttachments.flatMap((attachment): UserMessagePart[] =>
@@ -279,6 +308,10 @@ function buildAgentHistory(input: {
   };
 }
 
+function slackScopedId(teamId: string, id: string): string {
+  return `slack:${teamId}:${id}`;
+}
+
 function renderTransientAudioTranscript(attachment: {
   filename?: string;
   id: string;
@@ -297,11 +330,21 @@ function normalizeRunnerResult(
   const modelSummary = modelTrace(model);
   return {
     decision,
-    message: agentTextResultSchema.parse({ message: result.content }).message,
+    message: agentTextResultSchema.parse({ message: nonEmptyAgentMessage(result) }).message,
     model: modelSummary,
     raw: result.raw,
     toolResults,
   };
+}
+
+function nonEmptyAgentMessage(result: LlmResult): string {
+  if (result.content.trim().length > 0) {
+    return result.content;
+  }
+  if ((result.sources?.length ?? 0) > 0) {
+    return "検索は実行されましたが、回答本文が返されませんでした。もう一度お試しください。";
+  }
+  return "回答本文を生成できませんでした。もう一度お試しください。";
 }
 
 function modelTrace(model: ModelInfo): AgentRunnerModelTrace {

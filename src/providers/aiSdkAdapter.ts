@@ -1,5 +1,16 @@
 import { anthropic, createAnthropic, type AnthropicProviderSettings } from "@ai-sdk/anthropic";
+import {
+  bedrock,
+  createAmazonBedrock,
+  type AmazonBedrockProviderSettings,
+} from "@ai-sdk/amazon-bedrock";
 import { azure, createAzure, type AzureOpenAIProviderSettings } from "@ai-sdk/azure";
+import { baseten, createBaseten, type BasetenProviderSettings } from "@ai-sdk/baseten";
+import { cerebras, createCerebras, type CerebrasProviderSettings } from "@ai-sdk/cerebras";
+import { cohere, createCohere, type CohereProviderSettings } from "@ai-sdk/cohere";
+import { deepinfra, createDeepInfra, type DeepInfraProviderSettings } from "@ai-sdk/deepinfra";
+import { deepseek, createDeepSeek, type DeepSeekProviderSettings } from "@ai-sdk/deepseek";
+import { fireworks, createFireworks, type FireworksProviderSettings } from "@ai-sdk/fireworks";
 import {
   createGoogleGenerativeAI,
   google,
@@ -7,14 +18,19 @@ import {
 } from "@ai-sdk/google";
 import { createVertex, type GoogleVertexProviderSettings } from "@ai-sdk/google-vertex";
 import { createGroq, groq, type GroqProviderSettings } from "@ai-sdk/groq";
+import { createMistral, mistral, type MistralProviderSettings } from "@ai-sdk/mistral";
 import { createOpenAI, openai, type OpenAIProviderSettings } from "@ai-sdk/openai";
 import {
   createOpenAICompatible,
   type OpenAICompatibleProviderSettings,
 } from "@ai-sdk/openai-compatible";
+import { createPerplexity, perplexity, type PerplexityProviderSettings } from "@ai-sdk/perplexity";
+import { createTogetherAI, togetherai, type TogetherAIProviderSettings } from "@ai-sdk/togetherai";
+import { createXai, xai, type XaiProviderSettings } from "@ai-sdk/xai";
 import {
   generateText,
   jsonSchema,
+  stepCountIs,
   streamText,
   tool,
   type FinishReason,
@@ -45,27 +61,44 @@ import {
   type ProviderCredentialResolver,
   stringPayloadField,
 } from "./credentials.js";
+import { mergeReasoningProviderOptions } from "./reasoningOptions.js";
 
 export type AiSdkModelResolver = (
   model: ModelInfo,
   credential?: ProviderCredential,
 ) => LanguageModel;
 
+export type AiSdkProviderToolResolver = (
+  model: ModelInfo,
+  credential?: ProviderCredential,
+) => ToolSet | undefined;
+
 export type AiSdkAdapterSettings = {
   anthropic?: AnthropicProviderSettings;
+  baseten?: BasetenProviderSettings;
+  bedrock?: AmazonBedrockProviderSettings;
+  cerebras?: CerebrasProviderSettings;
+  cohere?: CohereProviderSettings;
+  deepinfra?: DeepInfraProviderSettings;
+  deepseek?: DeepSeekProviderSettings;
   azureOpenAI?: AzureOpenAIProviderSettings;
+  fireworks?: FireworksProviderSettings;
   google?: GoogleGenerativeAIProviderSettings;
   googleVertex?: GoogleVertexProviderSettings;
   groq?: GroqProviderSettings;
+  mistral?: MistralProviderSettings;
   openAI?: OpenAIProviderSettings;
   openAICompatible?: Partial<Record<OpenAICompatibleProvider, OpenAICompatibleProviderConfig>>;
+  perplexity?: PerplexityProviderSettings;
+  togetherai?: TogetherAIProviderSettings;
+  xai?: XaiProviderSettings;
 };
 
 export type AiSdkAdapterOptions = {
   credentialResolver?: ProviderCredentialResolver;
 };
 
-export type OpenAICompatibleProvider = "litellm" | "nvidia" | "plamo" | "xai";
+export type OpenAICompatibleProvider = "litellm" | "nvidia" | "plamo";
 
 export type OpenAICompatibleProviderConfig = Omit<
   OpenAICompatibleProviderSettings,
@@ -88,16 +121,34 @@ export class LlmProviderError extends Error {
 }
 
 export class AiSdkLlmAdapter implements LlmAdapter {
+  private readonly credentialResolver?: ProviderCredentialResolver;
+  private readonly resolveProviderTools: AiSdkProviderToolResolver;
+
   constructor(
     readonly provider: LlmProvider,
     private readonly resolveModel: AiSdkModelResolver,
-    private readonly credentialResolver?: ProviderCredentialResolver,
-  ) {}
+    resolveProviderToolsOrCredentialResolver:
+      | AiSdkProviderToolResolver
+      | ProviderCredentialResolver
+      | undefined = createAiSdkProviderToolResolver(),
+    credentialResolver?: ProviderCredentialResolver,
+  ) {
+    if (typeof resolveProviderToolsOrCredentialResolver === "function") {
+      this.resolveProviderTools = resolveProviderToolsOrCredentialResolver;
+      this.credentialResolver = credentialResolver;
+      return;
+    }
+    this.resolveProviderTools = createAiSdkProviderToolResolver();
+    this.credentialResolver = resolveProviderToolsOrCredentialResolver;
+  }
 
   async generate(request: LlmRequest): Promise<LlmResult> {
     try {
       assertSupportedResponseFormat(request);
       const credential = await this.resolveCredential(request);
+      const providerTools = this.resolveProviderTools(request.model, credential);
+      const providerToolNames = providerToolNamesForRequest(request, providerTools);
+      const tools = toolsForRequest(request, providerTools);
       const result = await generateText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
@@ -105,16 +156,25 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           aiSdkMessageConversionCapabilitiesForModel(request.model),
         ),
         model: this.resolveModel(request.model, credential),
-        providerOptions: request.providerOptions,
+        providerOptions: mergeReasoningProviderOptions({
+          model: request.model,
+          providerOptions: request.providerOptions,
+          reasoningEffort: request.reasoningEffort,
+        }),
+        stopWhen: providerTools === undefined ? undefined : stepCountIs(10),
+        system: request.system,
         temperature: request.temperature,
-        tools: toAiSdkTools(request.tools),
+        tools,
       });
 
       return {
         content: result.text,
         finishReason: mapFinishReason(result.finishReason),
         raw: result,
-        toolCalls: result.toolCalls.map(mapToolCall),
+        sources: mapSources(result.sources),
+        toolCalls: result.toolCalls
+          .filter((toolCall) => !isProviderToolCall(toolCall, providerToolNames))
+          .map(mapToolCall),
         usage: mapUsage(result.usage),
       };
     } catch (error) {
@@ -146,6 +206,9 @@ export class AiSdkLlmAdapter implements LlmAdapter {
     try {
       assertSupportedResponseFormat(request);
       const credential = await this.resolveCredential(request);
+      const providerTools = this.resolveProviderTools(request.model, credential);
+      const providerToolNames = providerToolNamesForRequest(request, providerTools);
+      const tools = toolsForRequest(request, providerTools);
       const result = streamText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
@@ -153,9 +216,15 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           aiSdkMessageConversionCapabilitiesForModel(request.model),
         ),
         model: this.resolveModel(request.model, credential),
-        providerOptions: request.providerOptions,
+        providerOptions: mergeReasoningProviderOptions({
+          model: request.model,
+          providerOptions: request.providerOptions,
+          reasoningEffort: request.reasoningEffort,
+        }),
+        stopWhen: providerTools === undefined ? undefined : stepCountIs(10),
+        system: request.system,
         temperature: request.temperature,
-        tools: toAiSdkTools(request.tools),
+        tools,
       });
 
       let text = "";
@@ -174,6 +243,9 @@ export class AiSdkLlmAdapter implements LlmAdapter {
             };
             break;
           case "tool-call": {
+            if (isProviderToolCall(part, providerToolNames)) {
+              break;
+            }
             const toolCall = mapToolCall(part);
             toolCalls.push(toolCall);
             yield {
@@ -266,7 +338,6 @@ const nativeOnlyCapabilities = new Set<LlmCapability>([
   "embeddings",
   "image_generation",
   "thinking",
-  "web_search",
 ]);
 
 const googleNativeOnlyCapabilities = new Set<LlmCapability>(["file_input"]);
@@ -275,7 +346,6 @@ const OPENAI_COMPATIBLE_DEFAULT_BASE_URLS = {
   litellm: "http://localhost:4000/v1",
   nvidia: "https://integrate.api.nvidia.com/v1",
   plamo: "https://api.platform.preferredai.jp/v1",
-  xai: "https://api.x.ai/v1",
 } as const satisfies Record<OpenAICompatibleProvider, string>;
 
 function assertSupportedResponseFormat(request: LlmRequest): void {
@@ -293,20 +363,32 @@ export function createAiSdkAdapters(
   options: AiSdkAdapterOptions = {},
 ): AiSdkLlmAdapter[] {
   const resolveModel = createAiSdkModelResolver(settings);
+  const resolveProviderTools = createAiSdkProviderToolResolver(settings);
   const commonLaneProviders = [
     "openai",
     "azure_openai",
     "anthropic",
     "google",
+    "bedrock",
     "groq",
     "xai",
+    "mistral",
+    "togetherai",
+    "cohere",
+    "fireworks",
+    "deepinfra",
+    "deepseek",
+    "cerebras",
+    "perplexity",
+    "baseten",
     "plamo",
     "nvidia",
     "litellm",
   ] as const satisfies readonly LlmProvider[];
 
   return commonLaneProviders.map(
-    (provider) => new AiSdkLlmAdapter(provider, resolveModel, options.credentialResolver),
+    (provider) =>
+      new AiSdkLlmAdapter(provider, resolveModel, resolveProviderTools, options.credentialResolver),
   );
 }
 
@@ -316,10 +398,30 @@ export function createAiSdkModelResolver(settings: AiSdkAdapterSettings = {}): A
     settings.azureOpenAI === undefined ? azure : createAzure(settings.azureOpenAI);
   const configuredAnthropic =
     settings.anthropic === undefined ? anthropic : createAnthropic(settings.anthropic);
+  const configuredBaseten =
+    settings.baseten === undefined ? baseten : createBaseten(settings.baseten);
+  const configuredBedrock =
+    settings.bedrock === undefined ? bedrock : createAmazonBedrock(settings.bedrock);
+  const configuredCerebras =
+    settings.cerebras === undefined ? cerebras : createCerebras(settings.cerebras);
+  const configuredCohere = settings.cohere === undefined ? cohere : createCohere(settings.cohere);
+  const configuredDeepInfra =
+    settings.deepinfra === undefined ? deepinfra : createDeepInfra(settings.deepinfra);
+  const configuredDeepSeek =
+    settings.deepseek === undefined ? deepseek : createDeepSeek(settings.deepseek);
+  const configuredFireworks =
+    settings.fireworks === undefined ? fireworks : createFireworks(settings.fireworks);
   const configuredGoogle =
     settings.google === undefined ? google : createGoogleGenerativeAI(settings.google);
   const configuredGroq = settings.groq === undefined ? groq : createGroq(settings.groq);
+  const configuredMistral =
+    settings.mistral === undefined ? mistral : createMistral(settings.mistral);
   const openAICompatibleProviders = createOpenAICompatibleProviders(settings.openAICompatible);
+  const configuredPerplexity =
+    settings.perplexity === undefined ? perplexity : createPerplexity(settings.perplexity);
+  const configuredTogetherAI =
+    settings.togetherai === undefined ? togetherai : createTogetherAI(settings.togetherai);
+  const configuredXAI = settings.xai === undefined ? xai : createXai(settings.xai);
 
   return (model: ModelInfo, credential?: ProviderCredential): LanguageModel => {
     switch (model.provider) {
@@ -394,6 +496,115 @@ export function createAiSdkModelResolver(settings: AiSdkAdapterSettings = {}): A
               })
         )(model.providerModelId);
       case "xai":
+        return (
+          credential === undefined
+            ? configuredXAI
+            : createXai({
+                ...settings.xai,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.xai?.baseURL,
+              })
+        )(model.providerModelId);
+      case "bedrock":
+        return (
+          credential === undefined
+            ? configuredBedrock
+            : createAmazonBedrock({
+                ...settings.bedrock,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.bedrock?.baseURL,
+              })
+        )(model.providerModelId);
+      case "mistral":
+        return (
+          credential === undefined
+            ? configuredMistral
+            : createMistral({
+                ...settings.mistral,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.mistral?.baseURL,
+              })
+        )(model.providerModelId);
+      case "togetherai":
+        return (
+          credential === undefined
+            ? configuredTogetherAI
+            : createTogetherAI({
+                ...settings.togetherai,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.togetherai?.baseURL,
+              })
+        )(model.providerModelId);
+      case "cohere":
+        return (
+          credential === undefined
+            ? configuredCohere
+            : createCohere({
+                ...settings.cohere,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.cohere?.baseURL,
+              })
+        )(model.providerModelId);
+      case "fireworks":
+        return (
+          credential === undefined
+            ? configuredFireworks
+            : createFireworks({
+                ...settings.fireworks,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.fireworks?.baseURL,
+              })
+        )(model.providerModelId);
+      case "deepinfra":
+        return (
+          credential === undefined
+            ? configuredDeepInfra
+            : createDeepInfra({
+                ...settings.deepinfra,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.deepinfra?.baseURL,
+              })
+        )(model.providerModelId);
+      case "deepseek":
+        return (
+          credential === undefined
+            ? configuredDeepSeek
+            : createDeepSeek({
+                ...settings.deepseek,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.deepseek?.baseURL,
+              })
+        )(model.providerModelId);
+      case "cerebras":
+        return (
+          credential === undefined
+            ? configuredCerebras
+            : createCerebras({
+                ...settings.cerebras,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.cerebras?.baseURL,
+              })
+        )(model.providerModelId);
+      case "perplexity":
+        return (
+          credential === undefined
+            ? configuredPerplexity
+            : createPerplexity({
+                ...settings.perplexity,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.perplexity?.baseURL,
+              })
+        )(model.providerModelId);
+      case "baseten":
+        return (
+          credential === undefined
+            ? configuredBaseten
+            : createBaseten({
+                ...settings.baseten,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.baseten?.baseURL,
+              })
+        )(model.providerModelId);
       case "plamo":
       case "nvidia":
       case "litellm":
@@ -409,13 +620,101 @@ export function createAiSdkModelResolver(settings: AiSdkAdapterSettings = {}): A
                 }),
               )
         )(model.providerModelId);
-      case "bedrock":
       case "dify":
         throw new LlmProviderError(
           model.provider,
           model.id,
           `Provider '${model.provider}' is not handled by the AI SDK common adapter lane.`,
         );
+    }
+  };
+}
+
+export function createAiSdkProviderToolResolver(
+  settings: AiSdkAdapterSettings = {},
+): AiSdkProviderToolResolver {
+  const configuredOpenAI = settings.openAI === undefined ? openai : createOpenAI(settings.openAI);
+  const configuredAzure =
+    settings.azureOpenAI === undefined ? azure : createAzure(settings.azureOpenAI);
+  const configuredAnthropic =
+    settings.anthropic === undefined ? anthropic : createAnthropic(settings.anthropic);
+  const configuredGoogle =
+    settings.google === undefined ? google : createGoogleGenerativeAI(settings.google);
+
+  return (model: ModelInfo, credential?: ProviderCredential): ToolSet | undefined => {
+    if (!model.capabilities.includes("web_search")) {
+      return undefined;
+    }
+
+    switch (model.provider) {
+      case "openai": {
+        const provider =
+          credential === undefined
+            ? configuredOpenAI
+            : createOpenAI({
+                ...settings.openAI,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.openAI?.baseURL,
+              });
+        return {
+          web_search: provider.tools.webSearch({}),
+        };
+      }
+      case "azure_openai": {
+        const provider =
+          credential === undefined
+            ? configuredAzure
+            : createAzure({
+                ...settings.azureOpenAI,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.azureOpenAI?.baseURL,
+              });
+        return {
+          web_search_preview: provider.tools.webSearchPreview({}),
+        };
+      }
+      case "anthropic": {
+        const provider =
+          credential === undefined
+            ? configuredAnthropic
+            : createAnthropic({
+                ...settings.anthropic,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.anthropic?.baseURL,
+              });
+        return {
+          web_search: provider.tools.webSearch_20250305({}),
+        };
+      }
+      case "google": {
+        if (credential?.credentialName === "service_account_json") {
+          const serviceAccountCredential = parseGoogleServiceAccountCredential(credential);
+          if (serviceAccountCredential === undefined) {
+            return undefined;
+          }
+          const vertexProvider = createVertexForServiceAccount(
+            settings.googleVertex,
+            credential,
+            serviceAccountCredential,
+          );
+          return {
+            google_search: vertexProvider.tools.googleSearch({}),
+          };
+        }
+        const provider =
+          credential === undefined
+            ? configuredGoogle
+            : createGoogleGenerativeAI({
+                ...settings.google,
+                apiKey: credential.apiKey,
+                baseURL: credential.baseURL ?? settings.google?.baseURL,
+              });
+        return {
+          google_search: provider.tools.googleSearch({}),
+        };
+      }
+      default:
+        return undefined;
     }
   };
 }
@@ -496,7 +795,6 @@ function createOpenAICompatibleProviders(
     ),
     nvidia: createOpenAICompatible(openAICompatibleSettings("nvidia", configuredProviders.nvidia)),
     plamo: createOpenAICompatible(openAICompatibleSettings("plamo", configuredProviders.plamo)),
-    xai: createOpenAICompatible(openAICompatibleSettings("xai", configuredProviders.xai)),
   };
 }
 
@@ -533,6 +831,40 @@ function toAiSdkTools(tools: LlmRequest["tools"]): ToolSet | undefined {
   ) as ToolSet;
 }
 
+function toolsForRequest(
+  request: LlmRequest,
+  providerTools: ToolSet | undefined,
+): ToolSet | undefined {
+  const requestTools = toAiSdkTools(request.tools);
+  if (providerTools === undefined) {
+    return requestTools;
+  }
+  if (requestTools === undefined) {
+    return providerTools;
+  }
+  return {
+    ...providerTools,
+    ...requestTools,
+  };
+}
+
+function providerToolNamesForRequest(
+  request: LlmRequest,
+  providerTools: ToolSet | undefined,
+): ReadonlySet<string> {
+  const requestToolNames = new Set((request.tools ?? []).map((definition) => definition.name));
+  return new Set(
+    Object.keys(providerTools ?? {}).filter((toolName) => !requestToolNames.has(toolName)),
+  );
+}
+
+function isProviderToolCall(
+  toolCall: { providerExecuted?: boolean; toolName: string },
+  providerToolNames: ReadonlySet<string>,
+): boolean {
+  return toolCall.providerExecuted === true || providerToolNames.has(toolCall.toolName);
+}
+
 function mapToolCall(toolCall: {
   input: unknown;
   toolCallId: string;
@@ -545,10 +877,23 @@ function mapToolCall(toolCall: {
   };
 }
 
+function mapSources(
+  sources: readonly { sourceType?: string; title?: string; url?: string }[] | undefined,
+): LlmResult["sources"] {
+  const mappedSources = (sources ?? [])
+    .filter((source) => source.sourceType === "url" && source.url !== undefined)
+    .map((source) => ({
+      title: source.title,
+      url: source.url as string,
+    }));
+  return mappedSources.length === 0 ? undefined : mappedSources;
+}
+
 function mapUsage(usage: LanguageModelUsage): LlmUsage {
   return {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
+    reasoningTokens: usage.outputTokenDetails.reasoningTokens,
     totalTokens: usage.totalTokens,
   };
 }

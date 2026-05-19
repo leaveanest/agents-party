@@ -22,6 +22,7 @@ export type WorkspaceSettingsDocument = PayloadDocument & {
   defaultAgentId?: string;
   defaultModelId?: string;
   enabledModelIds?: string[];
+  reasoningEffort?: string;
   teamId: string;
   threadAutoReply?: boolean;
   updatedAt: Date;
@@ -37,6 +38,7 @@ export type SlackThreadDocument = PayloadDocument & {
   createdAt: Date;
   lastMessageTs?: string;
   modelId?: string;
+  reasoningEffort?: string;
   rootMessageTs: string;
   status: string;
   teamId: string;
@@ -53,6 +55,7 @@ export type ResolvedAgentRouteDocument = {
   modelFallback?: ResolvedModelFallbackDocument;
   modelId?: string;
   modelScope?: AgentRouteScope;
+  reasoningEffort?: string;
   scope: AgentRouteScope;
   teamId: string;
   threadTs?: string;
@@ -271,6 +274,7 @@ export class PostgresAgentRoutingRepository {
     channelId: string;
     lastMessageTs: string;
     modelId?: string;
+    reasoningEffort?: string;
     rootMessageTs: string;
     teamId: string;
     threadTs: string;
@@ -285,6 +289,7 @@ export class PostgresAgentRoutingRepository {
       created_at: createdAt,
       last_message_ts: input.lastMessageTs,
       ...(input.modelId === undefined ? {} : { model_id: input.modelId }),
+      ...(input.reasoningEffort === undefined ? {} : { reasoning_effort: input.reasoningEffort }),
       root_message_ts: rootMessageTs,
       status: "active",
       team_id: input.teamId,
@@ -298,6 +303,7 @@ export class PostgresAgentRoutingRepository {
       lastMessageTs: input.lastMessageTs,
       modelId: input.modelId,
       payload,
+      reasoningEffort: input.reasoningEffort,
       rootMessageTs,
       status: "active",
       teamId: input.teamId,
@@ -377,6 +383,12 @@ export class PostgresAgentRoutingRepository {
       modelFallback: resolvedModel?.fallback,
       modelId: resolvedModel?.modelId,
       modelScope: resolvedModel?.scope,
+      reasoningEffort: resolveReasoningEffort({
+        channelSettings,
+        scope: resolvedModel?.scope,
+        thread: activeThread,
+        workspaceSettings,
+      }),
       scope: resolved.scope,
       teamId: input.teamId,
       threadTs: input.threadTs,
@@ -699,6 +711,31 @@ function resolveModelId(input: {
   return undefined;
 }
 
+function resolveReasoningEffort(input: {
+  channelSettings?: JsonObject;
+  scope?: AgentRouteScope;
+  thread?: JsonObject;
+  workspaceSettings?: JsonObject;
+}): string | undefined {
+  switch (input.scope) {
+    case "thread":
+      return (
+        optionalStringField(input.thread, "reasoning_effort") ??
+        optionalStringField(input.channelSettings, "reasoning_effort") ??
+        optionalStringField(input.workspaceSettings, "reasoning_effort")
+      );
+    case "channel":
+      return (
+        optionalStringField(input.channelSettings, "reasoning_effort") ??
+        optionalStringField(input.workspaceSettings, "reasoning_effort")
+      );
+    case "workspace":
+      return optionalStringField(input.workspaceSettings, "reasoning_effort");
+    default:
+      return undefined;
+  }
+}
+
 function stringField(
   payload: JsonObject | undefined,
   fieldName: string,
@@ -773,7 +810,7 @@ function settingsValues(document: WorkspaceSettingsDocument): PostgresColumnValu
 function workspaceSettingsValues(document: WorkspaceSettingsDocument): PostgresColumnValues {
   return {
     ...settingsValues(document),
-    enabled_model_ids: document.enabledModelIds ?? [],
+    enabled_model_ids: JSON.stringify(document.enabledModelIds ?? []),
   };
 }
 
@@ -793,10 +830,12 @@ function settingsPayload(document: WorkspaceSettingsDocument): JsonObject {
   delete payload.default_agent_id;
   delete payload.default_model_id;
   delete payload.enabled_model_ids;
+  delete payload.reasoning_effort;
   delete payload.thread_auto_reply;
   delete payload.updated_at;
   assignIfDefined(payload, "default_agent_id", document.defaultAgentId);
   assignIfDefined(payload, "default_model_id", document.defaultModelId);
+  assignIfDefined(payload, "reasoning_effort", document.reasoningEffort);
   assignIfDefined(payload, "thread_auto_reply", document.threadAutoReply);
   assignIfDefined(payload, "updated_at", document.updatedAt.toISOString());
   return payload;
@@ -816,6 +855,7 @@ function slackThreadPayload(document: SlackThreadDocument): JsonObject {
   delete payload.last_message_ts;
   delete payload.model_id;
   delete payload.model_scope;
+  delete payload.reasoning_effort;
   delete payload.root_message_ts;
   delete payload.status;
   delete payload.team_id;
@@ -827,6 +867,7 @@ function slackThreadPayload(document: SlackThreadDocument): JsonObject {
   assignIfDefined(payload, "last_message_ts", document.lastMessageTs);
   assignIfDefined(payload, "model_id", document.modelId);
   assignIfDefined(payload, "model_scope", document.modelId === undefined ? undefined : "thread");
+  assignIfDefined(payload, "reasoning_effort", document.reasoningEffort);
   assignIfDefined(payload, "root_message_ts", document.rootMessageTs);
   assignIfDefined(payload, "status", document.status);
   assignIfDefined(payload, "team_id", document.teamId);
