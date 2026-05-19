@@ -174,6 +174,19 @@ describe("createAgentSlackHandlers", () => {
     const updates: unknown[] = [];
     let acked = false;
     const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces(input) {
+          expect(input).toEqual({ enterpriseId: "E1" });
+          return [
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T2",
+              teamName: "Workspace Two",
+            },
+          ];
+        },
+      },
       routingRepository: {
         async findWorkspaceSettings(teamId: string) {
           expect(acked).toBe(true);
@@ -262,6 +275,92 @@ describe("createAgentSlackHandlers", () => {
       }),
     ]);
     expect(JSON.stringify(updates[0])).toContain("Model routing settings were saved.");
+  });
+
+  it("rejects model routing submissions for unverified selected workspaces", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces(input) {
+          expect(input).toEqual({ enterpriseId: "E1" });
+          return [
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T2",
+              teamName: "Workspace Two",
+            },
+          ];
+        },
+      },
+      routingRepository: {
+        async findWorkspaceSettings() {
+          throw new Error("should not read settings for unauthorized workspace");
+        },
+        async saveWorkspaceSettings(input: unknown) {
+          saves.push(input);
+        },
+      } as never,
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { enterprise: { id: "E1" }, team: { id: "T-random" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          enterpriseId: "E1",
+          selectedTeamId: "T-unauthorized",
+          source: "app_home",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+            model_routing_enabled_models: {
+              enabled_models: {
+                selected_options: [{ value: "openai:gpt-4o" }],
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(acks).toEqual([
+      expect.objectContaining({
+        response_action: "update",
+      }),
+    ]);
+    expect(saves).toEqual([]);
+    expect(updates).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({ type: "modal" }),
+      }),
+    ]);
+    expect(JSON.stringify(updates[0])).toContain(
+      "Only Slack workspace admins and owners can configure model routing.",
+    );
   });
 
   it("publishes Salesforce connection status and connect entry points on App Home", async () => {

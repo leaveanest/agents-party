@@ -812,6 +812,27 @@ async function handleModelRoutingModalSubmission(
     );
     return;
   }
+  const isSelectedWorkspaceAllowed = await canManageSelectedModelRoutingWorkspace(
+    {
+      enterpriseId: metadata?.enterpriseId ?? readSlackEnterpriseId(body),
+      installedWorkspaceDirectory: options.installedWorkspaceDirectory,
+      selectedTeamId,
+      sourceTeamId: bodyTeamId,
+    },
+    logger,
+  );
+  if (!isSelectedWorkspaceAllowed) {
+    await updateModelRoutingModal(
+      client,
+      view,
+      buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.error.unauthorized"),
+        userContext.translator,
+      ),
+      logger,
+    );
+    return;
+  }
   try {
     const existing = await options.routingRepository.findWorkspaceSettings(selectedTeamId);
     await options.routingRepository.saveWorkspaceSettings({
@@ -853,6 +874,36 @@ async function handleModelRoutingModalSubmission(
       ),
       logger,
     );
+  }
+}
+
+async function canManageSelectedModelRoutingWorkspace(
+  input: {
+    enterpriseId?: string;
+    installedWorkspaceDirectory?: SlackInstalledWorkspaceDirectory;
+    selectedTeamId: string;
+    sourceTeamId?: string;
+  },
+  logger: unknown,
+): Promise<boolean> {
+  if (input.selectedTeamId === input.sourceTeamId) {
+    return true;
+  }
+  if (input.installedWorkspaceDirectory === undefined) {
+    return false;
+  }
+  try {
+    const installedWorkspaces = await input.installedWorkspaceDirectory.listInstalledWorkspaces({
+      enterpriseId: input.enterpriseId,
+    });
+    return installedWorkspaces.some((workspace) => workspace.teamId === input.selectedTeamId);
+  } catch (error) {
+    logWarn(logger, "Failed to verify selected workspace for model routing settings.", {
+      enterpriseId: input.enterpriseId,
+      error,
+      selectedTeamId: input.selectedTeamId,
+    });
+    return false;
   }
 }
 
