@@ -27,6 +27,12 @@ describe("ModelRegistry", () => {
       provider: "openai",
       providerModelId: "gpt-4o",
     });
+    expect(registry.get("gpt-5.5")).toMatchObject({
+      capabilities: expect.arrayContaining(["structured_output", "tool_calling"]),
+      id: "openai:gpt-5.5",
+      provider: "openai",
+      providerModelId: "gpt-5.5",
+    });
     expect(registry.get("gpt-image-1.5")).toMatchObject({
       capabilities: ["image_generation"],
       id: "openai:gpt-image-1.5",
@@ -89,6 +95,7 @@ describe("ModelRegistry", () => {
   it("does not advertise text models as direct image generation models", () => {
     const registry = createDefaultModelRegistry();
 
+    expect(registry.get("openai:gpt-5.5").capabilities).not.toContain("image_generation");
     expect(registry.get("openai:gpt-4o").capabilities).not.toContain("image_generation");
   });
 

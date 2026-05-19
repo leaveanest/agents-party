@@ -129,6 +129,22 @@ export function createDefaultModelRegistry(): ModelRegistry {
 
 export const defaultModelRegistryEntries: readonly ModelInfo[] = [
   {
+    aliases: ["gpt-5.5"],
+    capabilities: [
+      "text",
+      "streaming",
+      "image_input",
+      "file_input",
+      "tool_calling",
+      "structured_output",
+      "web_search",
+    ],
+    displayName: "GPT-5.5",
+    id: "openai:gpt-5.5",
+    provider: "openai",
+    providerModelId: "gpt-5.5",
+  },
+  {
     aliases: ["gpt-4o"],
     capabilities: [
       "text",
