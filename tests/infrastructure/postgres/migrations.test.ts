@@ -39,6 +39,7 @@ describe("PostgresMigrationRunner", () => {
       "20260513_0007",
       "20260515_0008",
       "20260515_0009",
+      "20260519_0010",
     ]);
     expect(postgresMigrations[0]?.upSql).toContain(
       "create table if not exists slack_installations",
@@ -73,6 +74,12 @@ describe("PostgresMigrationRunner", () => {
     expect(postgresMigrations[7]?.upSql).toContain("locale in ('ja', 'en')");
     expect(postgresMigrations[8]?.upSql).toContain("add column if not exists enabled_model_ids");
     expect(postgresMigrations[8]?.upSql).toContain("jsonb_build_array(default_model_id)");
+    expect(postgresMigrations[9]?.upSql).toContain(
+      "create table if not exists workspace_feature_settings",
+    );
+    expect(postgresMigrations[9]?.upSql).toContain(
+      "create table if not exists channel_feature_settings",
+    );
   });
 
   it("requires explicit Alembic baseline when legacy metadata is present", async () => {

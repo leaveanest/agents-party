@@ -378,4 +378,33 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         and enabled_model_ids = '[]'::jsonb;
     `,
   },
+  {
+    id: "20260519_0010",
+    name: "workspace_feature_settings",
+    upSql: `
+      create table if not exists workspace_feature_settings (
+        team_id text not null,
+        feature_key text not null,
+        enabled boolean not null,
+        updated_at timestamp with time zone not null,
+        updated_by_user_id text,
+        payload jsonb not null default '{}'::jsonb,
+        primary key (team_id, feature_key)
+      );
+      create index if not exists ix_workspace_feature_settings_enabled
+        on workspace_feature_settings (team_id, enabled);
+
+      create table if not exists channel_feature_settings (
+        team_id text not null,
+        channel_id text not null,
+        feature_key text not null,
+        updated_at timestamp with time zone not null,
+        updated_by_user_id text,
+        payload jsonb not null default '{}'::jsonb,
+        primary key (team_id, channel_id, feature_key)
+      );
+      create index if not exists ix_channel_feature_settings_feature
+        on channel_feature_settings (team_id, feature_key);
+    `,
+  },
 ];

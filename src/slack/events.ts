@@ -11,6 +11,8 @@ import type {
 import type { SlackEventDeduplicator } from "./idempotency.js";
 import { readSlackEventId } from "./idempotency.js";
 import {
+  FEATURE_SETTINGS_CONFIGURE_ACTION_ID,
+  FEATURE_SETTINGS_MODAL_CALLBACK_ID,
   MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
@@ -50,6 +52,12 @@ export type SlackEventFeatureHandlers = {
     args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
   ): Promise<void>;
   handleSalesforcePdfWorkflowModalSubmission(
+    args: SlackViewMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
+  handleFeatureSettingsConfigureAction(
+    args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
+  handleFeatureSettingsModalSubmission(
     args: SlackViewMiddlewareArgs & AllMiddlewareArgs,
   ): Promise<void>;
 };
@@ -106,6 +114,9 @@ export function registerSlackEventHandlers(
   app.action(SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID, async (args) =>
     handlers.handleSalesforcePdfWorkflowConfigureAction(args),
   );
+  app.action(FEATURE_SETTINGS_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleFeatureSettingsConfigureAction(args),
+  );
   app.view(WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleWorkspaceCredentialModalSubmission(args),
   );
@@ -114,6 +125,9 @@ export function registerSlackEventHandlers(
   );
   app.view(SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleSalesforcePdfWorkflowModalSubmission(args),
+  );
+  app.view(FEATURE_SETTINGS_MODAL_CALLBACK_ID, async (args) =>
+    handlers.handleFeatureSettingsModalSubmission(args),
   );
 }
 
@@ -190,6 +204,12 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
       await ack();
     },
     async handleSalesforcePdfWorkflowModalSubmission({ ack }) {
+      await ack();
+    },
+    async handleFeatureSettingsConfigureAction({ ack }) {
+      await ack();
+    },
+    async handleFeatureSettingsModalSubmission({ ack }) {
       await ack();
     },
   };

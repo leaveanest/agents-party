@@ -15,6 +15,7 @@ import { PostgresSlackInstallationRepository } from "./infrastructure/postgres/s
 import { PostgresUserSettingsRepository } from "./infrastructure/postgres/userSettingsRepository.js";
 import { createBullMqSlackAgentJobQueue } from "./queues/slackAgentJobs.js";
 import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
+import { PostgresWorkspaceFeatureSettingsRepository } from "./infrastructure/postgres/workspaceFeatureSettingsRepository.js";
 import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
@@ -40,6 +41,10 @@ const userSettingsRepository =
   appRepositoryPool === undefined
     ? undefined
     : new PostgresUserSettingsRepository(appRepositoryPool);
+const featureSettingsRepository =
+  appRepositoryPool === undefined
+    ? undefined
+    : new PostgresWorkspaceFeatureSettingsRepository(appRepositoryPool);
 const slackInstallationRepository =
   appRepositoryPool === undefined || settings.slackClientId === undefined
     ? undefined
@@ -74,6 +79,7 @@ const salesforcePdfTools =
     : undefined;
 const agentRunner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
+  featureSettingsRepository,
   salesforcePdfTools,
   slackMcpTokenResolver:
     slackInstallationRepository === undefined
@@ -91,6 +97,13 @@ const slackGateway = settings.slackEnabled
         audioTranscriptionGateway,
         defaultLocale: settings.defaultLocale,
         installedWorkspaceDirectory: slackInstallationRepository,
+        featureSettingsHome:
+          featureSettingsRepository === undefined
+            ? undefined
+            : {
+                imageGenerationModelId: settings.imageGenerationModelId,
+                repository: featureSettingsRepository,
+              },
         routingRepository,
         salesforceConnectionHome:
           settings.salesforceOAuthEnabled &&

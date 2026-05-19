@@ -11,6 +11,7 @@ import {
 } from "./infrastructure/postgres/appRepositories.js";
 import { PostgresUserSettingsRepository } from "./infrastructure/postgres/userSettingsRepository.js";
 import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
+import { PostgresWorkspaceFeatureSettingsRepository } from "./infrastructure/postgres/workspaceFeatureSettingsRepository.js";
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createBullMqSlackAgentJobWorker } from "./queues/slackAgentJobs.js";
 import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
@@ -33,6 +34,7 @@ const routingRepository = new PostgresAgentRoutingRepository(pool);
 const oauthRepository = new PostgresOAuthRepository(pool);
 const salesforcePdfWorkflowRepository = new PostgresSalesforcePdfWorkflowRepository(pool);
 const userSettingsRepository = new PostgresUserSettingsRepository(pool);
+const featureSettingsRepository = new PostgresWorkspaceFeatureSettingsRepository(pool);
 const workspaceCredentialResolver =
   settings.llmApiKeyEncryptionKey === undefined
     ? undefined
@@ -57,6 +59,7 @@ const slackMcpInstallationRepository =
     : new PostgresSlackInstallationRepository(settings.slackClientId, { pool });
 const runner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
+  featureSettingsRepository,
   salesforcePdfTools,
   slackMcpTokenResolver:
     slackMcpInstallationRepository === undefined

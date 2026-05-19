@@ -328,6 +328,77 @@ describe("AgentRunner", () => {
     );
   });
 
+  it("redacts generated media bytes from follow-up model history", async () => {
+    const registry = new AgentToolRegistry([
+      {
+        description: "Generate an image.",
+        execute: async () => ({
+          media: {
+            dataBase64: "raw-image-bytes",
+            kind: "image",
+            mimeType: "image/png",
+            modelId: "openai:gpt-image-1.5",
+            prompt: "draw",
+            provider: "openai",
+            status: "generated",
+          },
+          message: "Image generated.",
+          ok: true,
+        }),
+        name: "generate_image",
+        outputSchema: z.object({
+          media: z.object({
+            dataBase64: z.string(),
+            kind: z.literal("image"),
+            mimeType: z.string(),
+            modelId: z.string(),
+            prompt: z.string(),
+            provider: z.string(),
+            status: z.literal("generated"),
+          }),
+          message: z.string(),
+          ok: z.boolean(),
+        }) as never,
+        parameters: { type: "object" },
+        schema: z.object({ prompt: z.string() }) as never,
+      },
+    ]);
+    const router = new SequencedProviderRouter([
+      {
+        content: "",
+        finishReason: "tool_call",
+        toolCalls: [
+          { input: { prompt: "draw" }, toolCallId: "call-1", toolName: "generate_image" },
+        ],
+      },
+      {
+        content: "uploaded",
+      },
+    ]);
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+      toolRegistry: registry,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "draw",
+      userId: "U1",
+    });
+
+    expect(result.structuredResult).toMatchObject({
+      media: {
+        dataBase64: "raw-image-bytes",
+        kind: "image",
+      },
+    });
+    expect(JSON.stringify(router.requests[1]?.history)).not.toContain("raw-image-bytes");
+    expect(JSON.stringify(router.requests[1]?.history)).toContain("[redacted]");
+  });
+
   it("lets tool registry factories gate tools by resolved model capability", async () => {
     const router = new FakeProviderRouter({
       content: "text only",

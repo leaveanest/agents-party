@@ -29,6 +29,14 @@ export const MODEL_ROUTING_ENABLED_MODELS_ACTION_ID = "enabled_models";
 export const MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID = "model_routing_reasoning_effort";
 export const MODEL_ROUTING_REASONING_EFFORT_ACTION_ID = "reasoning_effort";
 
+export const FEATURE_SETTINGS_CONFIGURE_ACTION_ID = "feature_settings_configure";
+export const FEATURE_SETTINGS_MODAL_CALLBACK_ID = "feature_settings_modal";
+export const FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID = "feature_settings_image_generation_enabled";
+export const FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID = "image_generation_enabled";
+export const FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID =
+  "feature_settings_image_generation_channels";
+export const FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID = "image_generation_channels";
+
 export const SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID = "salesforce_pdf_workflow_configure";
 export const SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID = "salesforce_pdf_workflow_modal";
 

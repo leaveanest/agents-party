@@ -16,6 +16,8 @@ import type { ProviderCredentialResolver } from "../providers/credentials.js";
 import { createNativeProviderAdapters } from "../providers/nativeProviderAdapters.js";
 import { ProviderRouter } from "../providers/providerRouter.js";
 import { normalizeReasoningEffort } from "../providers/reasoningOptions.js";
+import type { WorkspaceFeatureSettingsRepository } from "../repositories/workspaceFeatureSettings.js";
+import { createMediaGenerationAgentTools } from "./mediaGeneration/tools.js";
 import {
   type AgentRouterDecision,
   type SlackAgentInvocation,
@@ -64,6 +66,8 @@ export class AgentRunnerExecutionError extends Error {
 export type AgentRunnerOptions = {
   credentialResolver?: ProviderCredentialResolver;
   defaultModelId: string;
+  featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
+  imageGenerationModelId?: string;
   maxToolRounds?: number;
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
   systemPrompt?: string;
@@ -202,23 +206,37 @@ export function createDefaultAgentRunner(
   settings: AppSettings,
   options: {
     credentialResolver?: ProviderCredentialResolver;
+    featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
     salesforcePdfTools?: Omit<SalesforcePdfToolOptions, "context">;
     slackMcpTokenResolver?: SlackMcpTokenResolver;
   } = {},
 ): AgentRunner {
   const salesforcePdfTools = options.salesforcePdfTools;
+  const providerRouter = new ProviderRouter([
+    ...createNativeProviderAdapters({ credentialResolver: options.credentialResolver }),
+    ...createAiSdkAdapters({}, { credentialResolver: options.credentialResolver }),
+  ]);
   return new AgentRunner({
     credentialResolver: options.credentialResolver,
     defaultModelId: settings.agentModelId,
-    providerRouter: new ProviderRouter([
-      ...createNativeProviderAdapters({ credentialResolver: options.credentialResolver }),
-      ...createAiSdkAdapters({}, { credentialResolver: options.credentialResolver }),
-    ]),
+    featureSettingsRepository: options.featureSettingsRepository,
+    imageGenerationModelId: settings.imageGenerationModelId,
+    providerRouter,
     toolRegistryFactory: (invocation, model) => {
       if (!model.capabilities.includes("tool_calling")) {
         return new AgentToolRegistry();
       }
       const tools = [
+        ...createMediaGenerationAgentTools({
+          context: {
+            channelId: invocation.channelId,
+            teamId: invocation.teamId,
+          },
+          credentialResolver: options.credentialResolver,
+          featureSettingsRepository: options.featureSettingsRepository,
+          imageGenerationModelId: settings.imageGenerationModelId,
+          modelRegistry: providerRouter.registry,
+        }),
         ...(salesforcePdfTools === undefined
           ? []
           : createSalesforcePdfAgentTools({
@@ -357,7 +375,7 @@ function buildAgentHistory(input: {
         {
           content: [
             {
-              output: { type: "json" as const, value: result.output ?? null },
+              output: { type: "json" as const, value: redactToolOutput(result.output) },
               toolCallId: result.toolCallId,
               toolName: result.toolName,
               type: "tool-result" as const,
@@ -391,18 +409,63 @@ function normalizeRunnerResult(
   toolResults: AgentToolResult[],
 ): AgentRunnerResult {
   const modelSummary = modelTrace(model);
+  const structuredResult = generatedMediaToolOutput(toolResults);
   return {
     decision,
-    message: agentTextResultSchema.parse({ message: nonEmptyAgentMessage(result) }).message,
+    message: agentTextResultSchema.parse({
+      message: nonEmptyAgentMessage(result, structuredResult),
+    }).message,
     model: modelSummary,
     raw: result.raw,
+    structuredResult,
     toolResults,
   };
 }
 
-function nonEmptyAgentMessage(result: LlmResult): string {
+function redactToolOutput(output: JsonValue | undefined): JsonValue {
+  if (!isJsonObject(output)) {
+    return output ?? null;
+  }
+  return redactGeneratedMedia(output);
+}
+
+function redactGeneratedMedia(value: Record<string, JsonValue>): JsonValue {
+  const media = value.media;
+  if (!isJsonObject(media) || typeof media.dataBase64 !== "string") {
+    return value;
+  }
+  return {
+    ...value,
+    media: {
+      ...media,
+      dataBase64: "[redacted]",
+    },
+  };
+}
+
+function generatedMediaToolOutput(toolResults: AgentToolResult[]): JsonValue | undefined {
+  for (const result of [...toolResults].reverse()) {
+    if (!isJsonObject(result.output) || result.output.ok !== true) {
+      continue;
+    }
+    const media = result.output.media;
+    if (isJsonObject(media) && (media.kind === "image" || media.kind === "video")) {
+      return result.output;
+    }
+  }
+  return undefined;
+}
+
+function isJsonObject(value: JsonValue | undefined): value is Record<string, JsonValue> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function nonEmptyAgentMessage(result: LlmResult, structuredResult?: JsonValue): string {
   if (result.content.trim().length > 0) {
     return result.content;
+  }
+  if (isJsonObject(structuredResult) && typeof structuredResult.message === "string") {
+    return structuredResult.message;
   }
   if ((result.sources?.length ?? 0) > 0) {
     return "検索は実行されましたが、回答本文が返されませんでした。もう一度お試しください。";
