@@ -2849,6 +2849,157 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("queues flag reactions instead of running structured translation on the web process", async () => {
+    let runs = 0;
+    const runner = {
+      async runStructured() {
+        runs += 1;
+        return {
+          structuredOutput: { translatedText: "こんにちは" },
+        };
+      },
+    };
+    const queue = new MemorySlackAgentJobQueue();
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, {
+      agentJobQueue: queue,
+      routingRepository: repository,
+    });
+
+    await handlers.handleReactionAdded({
+      body: {
+        authorizations: [
+          {
+            enterprise_id: "E1",
+            is_enterprise_install: false,
+            team_id: "T1",
+          },
+        ],
+        event_id: "EvReaction1",
+        team_id: "T1",
+      },
+      client: {
+        chat: { postMessage: async () => ({}) },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-jp",
+        user: "U1",
+      },
+      logger: { error() {}, info() {}, warn() {} },
+    } as never);
+
+    expect(runs).toBe(0);
+    expect(queue.jobs).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        enterpriseId: "E1",
+        eventId: "EvReaction1",
+        eventType: "reaction_added",
+        isEnterpriseInstall: false,
+        messageTs: "1712345678.000100",
+        targetLanguage: "ja",
+        teamId: "T1",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      }),
+    ]);
+  });
+
+  it("processes queued flag reaction translations in the worker path", async () => {
+    const invocations: unknown[] = [];
+    const responseFormats: unknown[] = [];
+    const runner = {
+      async runStructured(invocation: unknown, responseFormat: unknown) {
+        invocations.push(invocation);
+        responseFormats.push(responseFormat);
+        return {
+          structuredOutput: { translatedText: "Worker translation" },
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "translation-agent" },
+        agentId: "translation",
+        modelId: "google:gemini-2.5-flash",
+        modelScope: "channel",
+        scope: "channel",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "reaction_added",
+        messageTs: "1712345680.000200",
+        targetLanguage: "en",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345680.000200",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            history: async () => ({ messages: [] }),
+            replies: async () => ({
+              messages: [
+                {
+                  text: "thread reply",
+                  thread_ts: "1712345678.000100",
+                  ts: "1712345680.000200",
+                },
+              ],
+            }),
+          },
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        modelId: "google:gemini-2.5-flash",
+        text: expect.stringContaining("thread reply"),
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining("Translate the following Slack message to en."),
+      }),
+    ]);
+    expect(responseFormats).toEqual([
+      expect.objectContaining({
+        jsonSchemaName: "slack_message_translation",
+        type: "json",
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "Worker translation",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
   it("falls back to thread replies when translating reactions on thread messages", async () => {
     const invocations: unknown[] = [];
     const runner = {

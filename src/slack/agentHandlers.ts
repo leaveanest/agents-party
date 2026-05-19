@@ -1855,6 +1855,10 @@ export async function processSlackAgentJob(
     await processAppMentionJob(job, input);
     return;
   }
+  if (job.eventType === "reaction_added") {
+    await processReactionAddedJob(job, input);
+    return;
+  }
   await processFollowUpMessageJob(job, input);
 }
 
@@ -2118,6 +2122,118 @@ async function processFollowUpMessageJob(
   });
 }
 
+async function processReactionAddedJob(
+  job: SlackAgentJob,
+  input: {
+    client: SlackAgentClient;
+    defaultLocale?: Locale;
+    logger: unknown;
+    retryContext?: SlackAgentJobRetryContext;
+    routingRepository?: SlackAgentRoutingRepository;
+    runner: AgentRunner;
+    userSettingsRepository?: UserSettingsRepository;
+  },
+): Promise<void> {
+  if (input.routingRepository === undefined || job.targetLanguage === undefined) {
+    return;
+  }
+  if (!(await input.routingRepository.isChannelEnabled(job.teamId, job.channelId))) {
+    return;
+  }
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: job.enterpriseId, teamId: job.teamId },
+    job.userId,
+    input,
+    input.logger,
+  );
+
+  let sourceText: string | undefined;
+  let threadTs = job.threadTs;
+  try {
+    const sourceMessage = await fetchSingleMessage(input.client, job.channelId, job.messageTs);
+    sourceText = readSlackMessageText(sourceMessage);
+    threadTs = readString(sourceMessage, "thread_ts") ?? job.threadTs;
+  } catch (error) {
+    logWarn(input.logger, "Could not fetch source message for translation reaction.", {
+      error,
+      teamId: job.teamId,
+      threadTs,
+    });
+  }
+
+  let text: string;
+  try {
+    const route = await resolveSlackAgentRoute(input.routingRepository, {
+      channelId: job.channelId,
+      teamId: job.teamId,
+      threadTs,
+    });
+    if (input.routingRepository.resolveAgent !== undefined && route === undefined) {
+      return;
+    }
+    await notifyModelFallback({
+      channelId: job.channelId,
+      client: input.client,
+      logger: input.logger,
+      route,
+      threadTs,
+      translator,
+      userId: job.userId,
+    });
+    if (sourceText === undefined || sourceText.trim() === "") {
+      await input.client.chat.postMessage({
+        channel: job.channelId,
+        text: translator.t("slack.error.unreadableReaction"),
+        thread_ts: threadTs,
+      });
+      return;
+    }
+    const result = await input.runner.runStructured(
+      {
+        channelId: job.channelId,
+        messageTs: job.messageTs,
+        modelId: route?.modelId,
+        teamId: job.teamId,
+        text:
+          `Translate the following Slack message to ${job.targetLanguage}.\n` +
+          "Return only the structured translation result. Preserve Slack mentions, URLs, emoji, and code blocks where possible.\n\n" +
+          sourceText,
+        threadTs,
+        userId: job.userId,
+        viewerContextChannelIds: [job.channelId],
+      },
+      TRANSLATION_RESULT_RESPONSE_FORMAT,
+    );
+    const translationResult = translationResultSchema.parse(result.structuredOutput);
+    text = translationResult.translatedText;
+    logStructuredAgentRunnerSuccess(input.logger, {
+      channelId: job.channelId,
+      eventType: "reaction_added",
+      messageTs: job.messageTs,
+      result,
+      teamId: job.teamId,
+      threadTs,
+    });
+  } catch (error) {
+    logError(input.logger, "TypeScript AgentRunner failed while handling translation reaction.", {
+      error,
+      ...runnerFailureLogFields(error),
+      teamId: job.teamId,
+      threadTs,
+    });
+    if (shouldRetryJobFailure(input.retryContext)) {
+      throw error;
+    }
+    text = translator.t("slack.error.translation");
+  }
+
+  await input.client.chat.postMessage({
+    channel: job.channelId,
+    text,
+    thread_ts: threadTs,
+  });
+}
+
 async function setSlackAssistantThreadStatus(input: {
   channelId: string;
   client: SlackAgentClient;
@@ -2251,6 +2367,31 @@ async function handleReactionAdded(
     options,
     logger,
   );
+  if (options.agentJobQueue !== undefined) {
+    await enqueueSlackAgentJob({
+      body,
+      client,
+      eventType: "reaction_added",
+      job: {
+        channelId,
+        enterpriseId: readSlackEnterpriseId(body),
+        eventId: readSlackEventId(body),
+        eventType: "reaction_added",
+        isEnterpriseInstall: readSlackEnterpriseInstall(body),
+        messageTs,
+        teamId,
+        targetLanguage,
+        text: "",
+        threadTs: messageTs,
+        userId: readString(event, "user") ?? "unknown",
+      },
+      logger,
+      queue: options.agentJobQueue,
+      translator,
+      threadTs: messageTs,
+    });
+    return;
+  }
 
   let sourceText: string | undefined;
   let threadTs = messageTs;
@@ -2641,7 +2782,7 @@ function mediaExtension(media: GeneratedSlackMedia): string {
 }
 
 async function fetchSingleMessage(
-  client: SlackEventArgs<"reaction_added">["client"],
+  client: SlackAgentClient,
   channelId: string,
   messageTs: string,
 ): Promise<StringIndexed> {
