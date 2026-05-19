@@ -2,6 +2,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { AgentRunnerExecutionError } from "../../src/agents/runner.js";
 import type { JsonObject } from "../../src/infrastructure/postgres/jsonDocumentRepository.js";
+import type {
+  ChannelFeatureSettingDocument,
+  WorkspaceFeatureKey,
+  WorkspaceFeatureSettingDocument,
+  WorkspaceFeatureSettingsRepository,
+} from "../../src/repositories/workspaceFeatureSettings.js";
 import {
   createAgentSlackHandlers,
   postAgentResult,
@@ -2076,6 +2082,184 @@ describe("createAgentSlackHandlers", () => {
 
     expect(JSON.stringify(publishedViews[0])).toContain("API keys");
     expect(JSON.stringify(publishedViews[0])).toContain("workspace_credential_configure");
+  });
+
+  it("publishes feature settings entry point only when image generation API key exists", async () => {
+    const publishedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      featureSettingsHome: {
+        imageGenerationModelId: "openai:gpt-image-1.5",
+        repository: new MemoryFeatureSettingsRepository(),
+      },
+      workspaceCredentialSettings: {
+        async resolveProviderCredential(input) {
+          return input.provider === "openai" ? { apiKey: "sk-test" } : undefined;
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleAppHomeOpened({
+      body: { team_id: "T1" },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            publishedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { user: "U1" },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(publishedViews[0])).toContain("Feature settings");
+    expect(JSON.stringify(publishedViews[0])).toContain("feature_settings_configure");
+
+    const hiddenViews: unknown[] = [];
+    const hiddenHandlers = createAgentSlackHandlers({} as never, {
+      featureSettingsHome: {
+        imageGenerationModelId: "openai:gpt-image-1.5",
+        repository: new MemoryFeatureSettingsRepository(),
+      },
+      workspaceCredentialSettings: {
+        async resolveProviderCredential() {
+          return undefined;
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+    await hiddenHandlers.handleAppHomeOpened({
+      body: { team_id: "T1" },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            hiddenViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { user: "U1" },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(hiddenViews[0])).not.toContain("feature_settings_configure");
+  });
+
+  it("rejects feature settings actions from non-admin Slack users after team resolution", async () => {
+    const openedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      featureSettingsHome: {
+        imageGenerationModelId: "openai:gpt-image-1.5",
+        repository: new MemoryFeatureSettingsRepository(),
+      },
+      workspaceCredentialSettings: {
+        async resolveProviderCredential() {
+          return { apiKey: "sk-test" };
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleFeatureSettingsConfigureAction({
+      ack: async () => {},
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T1", source: "app_home" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "U1" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: false, is_owner: false } }),
+        },
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(openedViews[0])).toContain(
+      "Only Slack workspace admins and owners can configure workspace features.",
+    );
+  });
+
+  it("opens and saves image generation feature settings for Slack workspace admins", async () => {
+    const openedViews: unknown[] = [];
+    const updatedViews: unknown[] = [];
+    const repository = new MemoryFeatureSettingsRepository({
+      allowedChannelIds: ["C1"],
+      workspaceEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers({} as never, {
+      featureSettingsHome: {
+        imageGenerationModelId: "openai:gpt-image-1.5",
+        repository,
+      },
+      workspaceCredentialSettings: {
+        async resolveProviderCredential() {
+          return { apiKey: "sk-test" };
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleFeatureSettingsConfigureAction({
+      ack: async () => {},
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T1", source: "app_home" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(openedViews[0])).toContain("multi_conversations_select");
+    expect(JSON.stringify(openedViews[0])).toContain("C1");
+
+    await handlers.handleFeatureSettingsModalSubmission({
+      ack: async (payload?: unknown) => {
+        updatedViews.push(["ack", payload]);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: validFeatureSettingsView({
+        channelIds: ["C2", "C3"],
+        enabled: true,
+        teamId: "T1",
+      }),
+    } as never);
+
+    expect(repository.workspaceSetting?.enabled).toBe(true);
+    expect(repository.allowedChannelIds).toEqual(["C2", "C3"]);
+    expect(JSON.stringify(updatedViews)).toContain("Feature settings were saved.");
   });
 
   it("opens the API key modal for Slack workspace admins", async () => {
@@ -5431,6 +5615,95 @@ function modelRoutingView(input: {
     title: { text: "Model routing", type: "plain_text" },
     type: "modal",
   };
+}
+
+function validFeatureSettingsView(input: {
+  channelIds: string[];
+  enabled: boolean;
+  teamId: string;
+}): unknown {
+  return {
+    hash: "HASH1",
+    id: "VIEW1",
+    private_metadata: JSON.stringify({ source: "app_home", teamId: input.teamId }),
+    state: {
+      values: {
+        feature_settings_image_generation_channels: {
+          image_generation_channels: { selected_conversations: input.channelIds },
+        },
+        feature_settings_image_generation_enabled: {
+          image_generation_enabled: {
+            selected_options: input.enabled ? [{ value: "enabled" }] : [],
+          },
+        },
+      },
+    },
+  };
+}
+
+class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsRepository {
+  allowedChannelIds: string[];
+  workspaceSetting: WorkspaceFeatureSettingDocument | undefined;
+
+  constructor(input: { allowedChannelIds?: string[]; workspaceEnabled?: boolean } = {}) {
+    this.allowedChannelIds = input.allowedChannelIds ?? [];
+    if (input.workspaceEnabled !== undefined) {
+      this.workspaceSetting = {
+        enabled: input.workspaceEnabled,
+        featureKey: "image_generation",
+        payload: {},
+        teamId: "T1",
+        updatedAt: new Date("2026-05-19T00:00:00Z"),
+      };
+    }
+  }
+
+  async findWorkspaceFeatureSetting(input: {
+    featureKey: WorkspaceFeatureKey;
+    teamId: string;
+  }): Promise<WorkspaceFeatureSettingDocument | undefined> {
+    return this.workspaceSetting?.teamId === input.teamId &&
+      this.workspaceSetting.featureKey === input.featureKey
+      ? this.workspaceSetting
+      : undefined;
+  }
+
+  async saveWorkspaceFeatureSetting(document: WorkspaceFeatureSettingDocument): Promise<void> {
+    this.workspaceSetting = document;
+  }
+
+  async listAllowedChannels(input: {
+    featureKey: WorkspaceFeatureKey;
+    teamId: string;
+  }): Promise<ChannelFeatureSettingDocument[]> {
+    return this.allowedChannelIds.map((channelId) => ({
+      channelId,
+      featureKey: input.featureKey,
+      payload: {},
+      teamId: input.teamId,
+      updatedAt: new Date("2026-05-19T00:00:00Z"),
+    }));
+  }
+
+  async isChannelAllowed(input: {
+    channelId: string;
+    featureKey: WorkspaceFeatureKey;
+    teamId: string;
+  }): Promise<boolean> {
+    return (
+      input.featureKey === "image_generation" &&
+      input.teamId === "T1" &&
+      this.allowedChannelIds.includes(input.channelId)
+    );
+  }
+
+  async replaceAllowedChannels(input: {
+    channelIds: readonly string[];
+    featureKey: WorkspaceFeatureKey;
+    teamId: string;
+  }): Promise<void> {
+    this.allowedChannelIds = [...input.channelIds];
+  }
 }
 
 class MemoryRoutingRepository {

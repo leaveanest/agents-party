@@ -53,6 +53,7 @@ import type { TranscriptionGateway } from "../providers/transcriptionGateway.js"
 import { createDefaultModelRegistry } from "../providers/modelRegistry.js";
 import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
 import type { UserSettingsRepository } from "../repositories/userSettings.js";
+import type { WorkspaceFeatureSettingsRepository } from "../repositories/workspaceFeatureSettings.js";
 import {
   SlackAudioProcessingError,
   hasSlackAudioFiles,
@@ -68,6 +69,12 @@ import {
 import type { SlackEventFeatureHandlers } from "./events.js";
 import { readSlackEventId } from "./idempotency.js";
 import {
+  FEATURE_SETTINGS_CONFIGURE_ACTION_ID,
+  FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID,
+  FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
+  FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID,
+  FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID,
+  FEATURE_SETTINGS_MODAL_CALLBACK_ID,
   MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
@@ -157,6 +164,12 @@ type ModelRoutingActionValue = {
   source?: "app_home" | "channel" | "thread";
   teamId?: string;
   threadTs?: string;
+};
+type FeatureSettingsActionValue = {
+  enterpriseId?: string;
+  selectedTeamId?: string;
+  source?: "app_home";
+  teamId?: string;
 };
 
 const DEFAULT_AGENT_OPTION = {
@@ -350,6 +363,11 @@ export type SalesforcePdfWorkflowHome = {
 
 export type WorkspaceCredentialSettingsHome = {
   listActiveProviderKinds?(input: { teamId: string }): Promise<CredentialProviderKind[]>;
+  resolveProviderCredential?(input: {
+    credentialName?: string;
+    provider: CredentialProviderKind;
+    workspaceId: string;
+  }): Promise<unknown>;
   saveProviderApiKey(input: {
     createdByUserId?: string;
     credentialName?: string;
@@ -370,11 +388,17 @@ export type AgentSlackHandlerOptions = {
   audioTranscriptionGateway?: TranscriptionGateway;
   defaultLocale?: Locale;
   installedWorkspaceDirectory?: SlackInstalledWorkspaceDirectory;
+  featureSettingsHome?: WorkspaceFeatureSettingsHome;
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
   salesforcePdfWorkflowHome?: SalesforcePdfWorkflowHome;
   userSettingsRepository?: UserSettingsRepository;
   workspaceCredentialSettings?: WorkspaceCredentialSettingsHome;
+};
+
+export type WorkspaceFeatureSettingsHome = {
+  imageGenerationModelId: string;
+  repository: WorkspaceFeatureSettingsRepository;
 };
 
 type SlackAgentJobRetryContext = {
@@ -464,6 +488,12 @@ export function createAgentSlackHandlers(
     async handleSalesforcePdfWorkflowModalSubmission(args) {
       await handleSalesforcePdfWorkflowModalSubmission(args, options);
     },
+    async handleFeatureSettingsConfigureAction(args) {
+      await handleFeatureSettingsConfigureAction(args, options);
+    },
+    async handleFeatureSettingsModalSubmission(args) {
+      await handleFeatureSettingsModalSubmission(args, options);
+    },
   };
 }
 
@@ -490,6 +520,7 @@ async function buildAppHomeBlocks(input: {
     },
   ];
   blocks.push(...(await buildModelRoutingAppHomeBlocks(input)));
+  blocks.push(...(await buildFeatureSettingsAppHomeBlocks(input)));
   if (input.options.workspaceCredentialSettings !== undefined && input.teamId !== undefined) {
     blocks.push({ type: "divider" });
     blocks.push({
@@ -582,6 +613,58 @@ async function buildAppHomeBlocks(input: {
     input.logger.warn("Failed to load Salesforce App Home connection status.", { error });
   }
   return blocks;
+}
+
+async function buildFeatureSettingsAppHomeBlocks(input: {
+  appHomeContext: SlackAppHomeContext;
+  logger: SlackEventArgs<"app_home_opened">["logger"];
+  options: AgentSlackHandlerOptions;
+  teamId: string | undefined;
+  translator: Translator;
+}): Promise<Record<string, unknown>[]> {
+  if (input.options.featureSettingsHome === undefined || input.teamId === undefined) {
+    return [];
+  }
+  const installedWorkspaces = await listAppHomeInstalledWorkspaces(input);
+  const selectedTeamId =
+    input.appHomeContext.mode === "enterprise_grid" ? installedWorkspaces[0]?.teamId : input.teamId;
+  if (selectedTeamId === undefined) {
+    return [];
+  }
+  const imageProvider = resolveImageGenerationProvider(
+    input.options.featureSettingsHome.imageGenerationModelId,
+    input.logger,
+  );
+  if (
+    imageProvider === undefined ||
+    !(await hasWorkspaceProviderApiKey(selectedTeamId, imageProvider, input.options, input.logger))
+  ) {
+    return [];
+  }
+  return [
+    { type: "divider" },
+    {
+      text: { text: input.translator.t("appHome.featureSettings.title"), type: "plain_text" },
+      type: "header",
+    },
+    {
+      accessory: {
+        action_id: FEATURE_SETTINGS_CONFIGURE_ACTION_ID,
+        text: { text: input.translator.t("appHome.configure"), type: "plain_text" },
+        type: "button",
+        value: JSON.stringify({
+          enterpriseId: input.appHomeContext.enterpriseId,
+          selectedTeamId,
+          source: "app_home",
+        }),
+      },
+      text: {
+        text: input.translator.t("appHome.featureSettings.body"),
+        type: "mrkdwn",
+      },
+      type: "section",
+    },
+  ];
 }
 
 async function buildModelRoutingAppHomeBlocks(input: {
@@ -2135,6 +2218,91 @@ function parseModelRoutingActionValue(
   }
 }
 
+function parseFeatureSettingsActionValue(
+  value: string | undefined,
+): FeatureSettingsActionValue | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) {
+      return undefined;
+    }
+    return {
+      enterpriseId: stringRecordField(parsed, "enterpriseId"),
+      selectedTeamId: stringRecordField(parsed, "selectedTeamId"),
+      source: parsed.source === "app_home" ? "app_home" : undefined,
+      teamId: stringRecordField(parsed, "teamId"),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function stringRecordField(value: Record<string, unknown>, field: string): string | undefined {
+  const fieldValue = value[field];
+  return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function resolveImageGenerationProvider(
+  imageGenerationModelId: string,
+  logger: unknown,
+): CredentialProviderKind | undefined {
+  try {
+    const model = createDefaultModelRegistry().get(imageGenerationModelId);
+    return model.provider === "openai" || model.provider === "google" ? model.provider : undefined;
+  } catch (error) {
+    logWarn(logger, "Failed to resolve image generation model provider.", {
+      error,
+      imageGenerationModelId,
+    });
+    return undefined;
+  }
+}
+
+async function hasWorkspaceProviderApiKey(
+  teamId: string,
+  providerKind: CredentialProviderKind,
+  options: AgentSlackHandlerOptions,
+  logger: unknown,
+): Promise<boolean> {
+  if (options.workspaceCredentialSettings?.resolveProviderCredential !== undefined) {
+    try {
+      return (
+        (await options.workspaceCredentialSettings.resolveProviderCredential({
+          credentialName: "api_key",
+          provider: providerKind,
+          workspaceId: teamId,
+        })) !== undefined
+      );
+    } catch (error) {
+      logWarn(logger, "Failed to resolve workspace provider API key status.", {
+        error,
+        providerKind,
+        teamId,
+      });
+      return false;
+    }
+  }
+  if (options.workspaceCredentialSettings?.listActiveProviderKinds === undefined) {
+    return false;
+  }
+  try {
+    const providerKinds = await options.workspaceCredentialSettings.listActiveProviderKinds({
+      teamId,
+    });
+    return providerKinds.includes(providerKind);
+  } catch (error) {
+    logWarn(logger, "Failed to list workspace provider API key status.", {
+      error,
+      providerKind,
+      teamId,
+    });
+    return false;
+  }
+}
+
 function parseModelRoutingSource(value: unknown): ModelRoutingActionValue["source"] | undefined {
   return value === "app_home" || value === "channel" || value === "thread" ? value : undefined;
 }
@@ -2276,6 +2444,333 @@ async function updateOpenedWorkspaceCredentialModalLocale(input: {
     input.view(translator),
     input.logger,
   );
+}
+
+async function handleFeatureSettingsConfigureAction(
+  { ack, body, client, logger }: SlackActionArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  await ack();
+  const actionValue = parseFeatureSettingsActionValue(readActionValue(body));
+  const enterpriseId = actionValue?.enterpriseId ?? readSlackEnterpriseId(body);
+  const bodyTeamId = readTeamId(body, {});
+  const selectedTeamId = actionValue?.selectedTeamId ?? actionValue?.teamId ?? bodyTeamId;
+  const slackUserId = readSlackUserId(body);
+  const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId, teamId: selectedTeamId ?? bodyTeamId },
+    slackUserId,
+    options,
+    logger,
+  );
+  if (slackUserId === undefined || triggerId === undefined || selectedTeamId === undefined) {
+    logger.warn("Ignoring feature settings configuration action with missing Slack context.");
+    return;
+  }
+  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
+  if (!userContext.isWorkspaceAdmin) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.unauthorized"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
+  if (options.featureSettingsHome === undefined) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.notConfigured"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
+  const imageProvider = resolveImageGenerationProvider(
+    options.featureSettingsHome.imageGenerationModelId,
+    logger,
+  );
+  if (
+    imageProvider === undefined ||
+    !(await hasWorkspaceProviderApiKey(selectedTeamId, imageProvider, options, logger))
+  ) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.missingImageCredential"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
+  const [workspaceSetting, allowedChannels] = await Promise.all([
+    options.featureSettingsHome.repository.findWorkspaceFeatureSetting({
+      featureKey: "image_generation",
+      teamId: selectedTeamId,
+    }),
+    options.featureSettingsHome.repository.listAllowedChannels({
+      featureKey: "image_generation",
+      teamId: selectedTeamId,
+    }),
+  ]);
+  await client.views.open({
+    trigger_id: triggerId,
+    view: buildFeatureSettingsModal({
+      allowedChannelIds: allowedChannels.map((channel) => channel.channelId),
+      enabled: workspaceSetting?.enabled === true,
+      enterpriseId,
+      teamId: selectedTeamId,
+      translator: userContext.translator,
+    }) as never,
+  });
+}
+
+async function handleFeatureSettingsModalSubmission(
+  { ack, body, client, logger, view }: SlackViewArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  const metadata = parseFeatureSettingsActionValue(
+    readString(view as unknown as StringIndexed, "private_metadata"),
+  );
+  const metadataTeamId = metadata?.teamId ?? metadata?.selectedTeamId;
+  const bodyTeamId = readTeamId(body, {});
+  const teamId = metadataTeamId ?? bodyTeamId;
+  const slackUserId = readSlackUserId(body);
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: metadata?.enterpriseId ?? readSlackEnterpriseId(body), teamId },
+    slackUserId,
+    options,
+    logger,
+  );
+  if (
+    options.featureSettingsHome === undefined ||
+    teamId === undefined ||
+    slackUserId === undefined
+  ) {
+    await ack({
+      errors: {
+        [FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID]: translator.t(
+          "featureSettings.error.notConfigured",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  const enabled = readSelectedOptionValues(
+    view,
+    FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID,
+    FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID,
+  ).includes("enabled");
+  const channelIds = readSelectedConversationValues(
+    view,
+    FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
+    FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID,
+  );
+  if (enabled && channelIds.length === 0) {
+    await ack({
+      errors: {
+        [FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID]: translator.t(
+          "featureSettings.error.channelsRequired",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  await ack({
+    response_action: "update",
+    view: buildFeatureSettingsResultModal(
+      translator.t("featureSettings.result.saving"),
+      translator,
+    ) as never,
+  });
+  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
+  if (!userContext.isWorkspaceAdmin) {
+    await updateFeatureSettingsModal(
+      client,
+      view,
+      buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.unauthorized"),
+        userContext.translator,
+      ),
+      logger,
+    );
+    return;
+  }
+  const imageProvider = resolveImageGenerationProvider(
+    options.featureSettingsHome.imageGenerationModelId,
+    logger,
+  );
+  if (
+    imageProvider === undefined ||
+    !(await hasWorkspaceProviderApiKey(teamId, imageProvider, options, logger))
+  ) {
+    await updateFeatureSettingsModal(
+      client,
+      view,
+      buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.missingImageCredential"),
+        userContext.translator,
+      ),
+      logger,
+    );
+    return;
+  }
+  try {
+    const now = new Date();
+    await options.featureSettingsHome.repository.saveWorkspaceFeatureSetting({
+      enabled,
+      featureKey: "image_generation",
+      payload: {
+        feature_key: "image_generation",
+        image_generation_model_id: options.featureSettingsHome.imageGenerationModelId,
+      },
+      teamId,
+      updatedAt: now,
+      updatedByUserId: slackUserId,
+    });
+    await options.featureSettingsHome.repository.replaceAllowedChannels({
+      channelIds,
+      featureKey: "image_generation",
+      teamId,
+      updatedAt: now,
+      updatedByUserId: slackUserId,
+    });
+    await updateFeatureSettingsModal(
+      client,
+      view,
+      buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.result.saved"),
+        userContext.translator,
+      ),
+      logger,
+    );
+  } catch (error) {
+    logger.error("Failed to save workspace feature settings.", { error, teamId });
+    await updateFeatureSettingsModal(
+      client,
+      view,
+      buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.saveFailed"),
+        userContext.translator,
+      ),
+      logger,
+    );
+  }
+}
+
+function buildFeatureSettingsModal(input: {
+  allowedChannelIds: readonly string[];
+  enabled: boolean;
+  enterpriseId?: string;
+  teamId: string;
+  translator: Translator;
+}): Record<string, unknown> {
+  const enabledOption = {
+    text: { text: input.translator.t("featureSettings.image.enabled"), type: "plain_text" },
+    value: "enabled",
+  };
+  return {
+    blocks: [
+      {
+        text: {
+          text: input.translator.t("featureSettings.modal.intro"),
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+      {
+        block_id: FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID,
+        element: {
+          action_id: FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID,
+          ...(input.enabled ? { initial_options: [enabledOption] } : {}),
+          options: [enabledOption],
+          type: "checkboxes",
+        },
+        label: {
+          text: input.translator.t("featureSettings.image.title"),
+          type: "plain_text",
+        },
+        optional: true,
+        type: "input",
+      },
+      {
+        block_id: FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
+        element: {
+          action_id: FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID,
+          filter: {
+            exclude_bot_users: true,
+            include: ["public", "private"],
+          },
+          ...(input.allowedChannelIds.length > 0
+            ? { initial_conversations: input.allowedChannelIds }
+            : {}),
+          placeholder: {
+            text: input.translator.t("featureSettings.channels.placeholder"),
+            type: "plain_text",
+          },
+          type: "multi_conversations_select",
+        },
+        label: {
+          text: input.translator.t("featureSettings.channels.label"),
+          type: "plain_text",
+        },
+        optional: true,
+        type: "input",
+      },
+    ],
+    callback_id: FEATURE_SETTINGS_MODAL_CALLBACK_ID,
+    close: { text: input.translator.t("common.cancel"), type: "plain_text" },
+    private_metadata: JSON.stringify({
+      enterpriseId: input.enterpriseId,
+      source: "app_home",
+      teamId: input.teamId,
+    }),
+    submit: { text: input.translator.t("common.save"), type: "plain_text" },
+    title: { text: input.translator.t("featureSettings.title"), type: "plain_text" },
+    type: "modal",
+  };
+}
+
+function buildFeatureSettingsResultModal(
+  message: string,
+  translator: Translator,
+): Record<string, unknown> {
+  return {
+    blocks: [
+      {
+        text: { text: message, type: "mrkdwn" },
+        type: "section",
+      },
+    ],
+    close: { text: translator.t("common.close"), type: "plain_text" },
+    title: { text: translator.t("featureSettings.title"), type: "plain_text" },
+    type: "modal",
+  };
+}
+
+async function updateFeatureSettingsModal(
+  client: SlackClient,
+  view: unknown,
+  modal: Record<string, unknown>,
+  logger: unknown,
+): Promise<void> {
+  const viewId = isRecord(view) ? readString(view, "id") : undefined;
+  if (viewId === undefined) {
+    logWarn(logger, "Could not update feature settings modal without Slack view id.", {});
+    return;
+  }
+  try {
+    await client.views.update({
+      view: modal as never,
+      view_id: viewId,
+    });
+  } catch (error) {
+    logWarn(logger, "Failed to update feature settings modal.", { error, viewId });
+  }
 }
 
 async function handleWorkspaceCredentialProviderSelectAction(
@@ -5613,6 +6108,22 @@ function readSelectedOptionValues(view: unknown, blockId: string, actionId: stri
   return options
     .map((option) => (isRecord(option) && typeof option.value === "string" ? option.value : ""))
     .filter((value) => value.length > 0);
+}
+
+function readSelectedConversationValues(
+  view: unknown,
+  blockId: string,
+  actionId: string,
+): string[] {
+  const element = readModalElement(view, blockId, actionId);
+  const conversations =
+    isRecord(element) && Array.isArray(element.selected_conversations)
+      ? element.selected_conversations
+      : [];
+  return conversations.filter(
+    (conversation): conversation is string =>
+      typeof conversation === "string" && conversation.length > 0,
+  );
 }
 
 function readModalElement(view: unknown, blockId: string, actionId: string): unknown {

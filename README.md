@@ -369,14 +369,16 @@ GOOGLE_MAPS_API_KEY=...
 
 For shared or production-like runtimes, store the Google Maps key in `workspace_credentials` with `provider_kind='google_maps'` and `credential_name='api_key'`. Slack admins can configure workspace API keys from App Home when credential storage is enabled. `GOOGLE_MAPS_API_KEY` remains a local fallback only.
 
-### Media Specialist Models
+### Media Generation Tools
 
 ```bash
 IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
 VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 ```
 
-The TypeScript image and video specialists assert explicit `image_generation` and `video_generation` model capabilities, then call provider-aware media gateways. In workspace-credential mode they use the encrypted provider credential row for the Slack team, for example `provider_kind='google'` / `credential_name='api_key'` for Google image and video models and `provider_kind='openai'` / `credential_name='api_key'` for OpenAI image models. Provider-package process environment fallbacks are for isolated local testing only.
+The TypeScript runner exposes image generation as a callable agent tool. The normal Slack agent model decides whether to call `generate_image`; the tool then checks workspace feature settings, channel allowlists, model capabilities, and workspace credentials before calling a provider-aware media gateway. In workspace-credential mode it uses the encrypted provider credential row for the Slack team, for example `provider_kind='google'` / `credential_name='api_key'` for Google image models and `provider_kind='openai'` / `credential_name='api_key'` for OpenAI image models.
+
+Image generation is deny-by-default. A workspace admin or owner must configure the required provider API key, open Feature settings from App Home, enable image generation for the workspace, and choose allowed channels. The tool only runs when the required provider API key exists, workspace `image_generation` is enabled, and the Slack channel is explicitly allowlisted. Thread-level feature settings are not used.
 
 ## Deployment
 

@@ -2,6 +2,8 @@ export const englishTranslations = {
   "appHome.apiKeys.body": "Store workspace provider API keys for this Slack workspace.",
   "appHome.apiKeys.title": "API keys",
   "appHome.configure": "Configure",
+  "appHome.featureSettings.body": "Enable workspace features and choose where they can be used.",
+  "appHome.featureSettings.title": "Feature settings",
   "appHome.intro": "Mention the app in a channel or thread to talk to the assistant.",
   "appHome.modelRouting.body":
     "Choose which models are available and the default model for this workspace.",
@@ -20,6 +22,7 @@ export const englishTranslations = {
   "appHome.salesforce.workflowStatus": "{{status}} - template: {{templateId}}",
   "appHome.title": "Agents party",
   "common.close": "Close",
+  "common.cancel": "Cancel",
   "common.disabled": "Disabled",
   "common.disabledStatus": "disabled",
   "common.enabled": "Enabled",
@@ -58,6 +61,24 @@ export const englishTranslations = {
   "credential.title.apiKey": "API key",
   "credential.title.saved": "API key saved",
   "credential.unavailable": "API key storage is not configured for this app process.",
+  "featureSettings.channels.label": "Allowed channels",
+  "featureSettings.channels.placeholder": "Choose channels",
+  "featureSettings.error.channelsRequired":
+    "Choose at least one channel before enabling image generation.",
+  "featureSettings.error.contextMismatch": "Slack workspace context does not match.",
+  "featureSettings.error.missingImageCredential":
+    "Register the required image generation provider API key before enabling this feature.",
+  "featureSettings.error.notConfigured": "Feature settings are not configured.",
+  "featureSettings.error.saveFailed": "Could not save feature settings. Try again later.",
+  "featureSettings.error.unauthorized":
+    "Only Slack workspace admins and owners can configure workspace features.",
+  "featureSettings.image.enabled": "Enable image generation",
+  "featureSettings.image.title": "Image generation",
+  "featureSettings.modal.intro":
+    "Control workspace features and the channels where they are allowed.",
+  "featureSettings.result.saved": "Feature settings were saved.",
+  "featureSettings.result.saving": "Saving feature settings...",
+  "featureSettings.title": "Feature settings",
   "modelRouting.modal.intro":
     "Model routing controls are being prepared for this workspace. The selected workspace context is preserved for save.",
   "modelRouting.channelModal.intro": "Choose the default model for this channel.",
@@ -151,6 +172,8 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "appHome.apiKeys.body": "このSlackワークスペース用のプロバイダーAPIキーを保存します。",
   "appHome.apiKeys.title": "APIキー",
   "appHome.configure": "設定",
+  "appHome.featureSettings.body": "ワークスペース機能と利用できるチャンネルを設定します。",
+  "appHome.featureSettings.title": "機能設定",
   "appHome.intro":
     "チャンネルまたはスレッドでアプリにメンションすると、アシスタントと会話できます。",
   "appHome.modelRouting.body":
@@ -170,6 +193,7 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "appHome.salesforce.workflowStatus": "{{status}} - テンプレート: {{templateId}}",
   "appHome.title": "Agents party",
   "common.close": "閉じる",
+  "common.cancel": "キャンセル",
   "common.disabled": "無効",
   "common.disabledStatus": "無効",
   "common.enabled": "有効",
@@ -211,6 +235,24 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "credential.title.apiKey": "APIキー",
   "credential.title.saved": "APIキーを保存しました",
   "credential.unavailable": "このアプリプロセスではAPIキー保存が設定されていません。",
+  "featureSettings.channels.label": "許可チャンネル",
+  "featureSettings.channels.placeholder": "チャンネルを選択",
+  "featureSettings.error.channelsRequired":
+    "画像生成を有効にする前に、少なくとも1つのチャンネルを選択してください。",
+  "featureSettings.error.contextMismatch": "Slackワークスペースのコンテキストが一致しません。",
+  "featureSettings.error.missingImageCredential":
+    "この機能を有効にする前に、必要な画像生成プロバイダーのAPIキーを登録してください。",
+  "featureSettings.error.notConfigured": "機能設定は設定されていません。",
+  "featureSettings.error.saveFailed":
+    "機能設定を保存できませんでした。時間をおいて再試行してください。",
+  "featureSettings.error.unauthorized":
+    "ワークスペース機能を設定できるのはSlackワークスペースの管理者またはオーナーのみです。",
+  "featureSettings.image.enabled": "画像生成を有効にする",
+  "featureSettings.image.title": "画像生成",
+  "featureSettings.modal.intro": "ワークスペース機能と、利用を許可するチャンネルを管理します。",
+  "featureSettings.result.saved": "機能設定を保存しました。",
+  "featureSettings.result.saving": "機能設定を保存しています...",
+  "featureSettings.title": "機能設定",
   "modelRouting.modal.intro":
     "このワークスペース向けのモデルルーティング設定を準備中です。保存に使うワークスペース文脈は保持されています。",
   "modelRouting.channelModal.intro": "このチャンネルで使うデフォルトモデルを選択します。",

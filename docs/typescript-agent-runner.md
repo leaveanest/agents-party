@@ -49,4 +49,6 @@ IMAGE_GENERATION_MODEL=openai:gpt-image-1.5
 
 Set `workspace_credentials.provider_kind=openai` and `credential_name=api_key` for the Slack workspace. Provider-specific tools should fail closed as unconfigured when the required workspace credential is missing.
 
+Image generation also requires workspace feature settings. A Slack admin or owner enables `image_generation` from App Home and selects an allowed channel list. The `generate_image` tool runs only when the configured provider API key exists, the workspace feature is enabled, and the current Slack channel is allowlisted.
+
 Workspace-aware provider credentials are enabled when `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are set, and production-like runtimes require both values. The runner carries Slack `teamId` into `LlmRequest.context.workspaceId`, and provider adapters use that typed context for encrypted `workspace_credentials` lookup instead of inferring credentials from metadata.
