@@ -35,6 +35,24 @@ variable "heroku_redis_plan" {
   default     = "heroku-redis:premium-0"
 }
 
+variable "enable_bucketeer" {
+  description = "Whether to provision Bucketeer for S3-compatible object storage."
+  type        = bool
+  default     = false
+}
+
+variable "bucketeer_plan" {
+  description = "Bucketeer add-on plan for S3-compatible object storage."
+  type        = string
+  default     = "bucketeer:micro"
+}
+
+variable "object_storage_prefix" {
+  description = "Optional key prefix for object storage objects, such as dev or prod."
+  type        = string
+  default     = null
+}
+
 variable "manage_web_formation" {
   description = "Whether Terraform manages the web dyno formation. The app must already have a release with a web process."
   type        = bool

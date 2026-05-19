@@ -15,6 +15,15 @@ describe("loadSettings", () => {
       redisUrl: undefined,
       imageGenerationModelId: "google:gemini-2.5-flash-image",
       llmApiKeyEncryptionKey: undefined,
+      objectStorageAccessKeyId: undefined,
+      objectStorageBucket: undefined,
+      objectStorageEnabled: false,
+      objectStorageEndpoint: undefined,
+      objectStorageForcePathStyle: false,
+      objectStoragePrefix: undefined,
+      objectStoragePublicBaseUrl: undefined,
+      objectStorageRegion: undefined,
+      objectStorageSecretAccessKey: undefined,
       googleOAuthCallbackPath: "/oauth/google/callback",
       googleOAuthCallbackUrl: "/oauth/google/callback",
       googleOAuthClientId: undefined,
@@ -277,6 +286,50 @@ describe("loadSettings", () => {
   it("reads the workspace LLM API key encryption key", () => {
     expect(loadSettings({ LLM_API_KEY_ENCRYPTION_KEY: "fernet-key" }).llmApiKeyEncryptionKey).toBe(
       "fernet-key",
+    );
+  });
+
+  it("reads S3-compatible object storage settings", () => {
+    const settings = loadSettings({
+      OBJECT_STORAGE_ACCESS_KEY_ID: "access-key",
+      OBJECT_STORAGE_BUCKET: "agents-party-assets",
+      OBJECT_STORAGE_ENDPOINT: "https://objects.example.com/",
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "true",
+      OBJECT_STORAGE_PREFIX: "/prod/uploads/",
+      OBJECT_STORAGE_PUBLIC_BASE_URL: "https://cdn.example.com/assets/",
+      OBJECT_STORAGE_REGION: "ap-northeast-1",
+      OBJECT_STORAGE_SECRET_ACCESS_KEY: "secret-key",
+    });
+
+    expect(settings.objectStorageEnabled).toBe(true);
+    expect(settings.objectStorageAccessKeyId).toBe("access-key");
+    expect(settings.objectStorageBucket).toBe("agents-party-assets");
+    expect(settings.objectStorageEndpoint).toBe("https://objects.example.com");
+    expect(settings.objectStorageForcePathStyle).toBe(true);
+    expect(settings.objectStoragePrefix).toBe("prod/uploads");
+    expect(settings.objectStoragePublicBaseUrl).toBe("https://cdn.example.com/assets");
+    expect(settings.objectStorageRegion).toBe("ap-northeast-1");
+    expect(settings.objectStorageSecretAccessKey).toBe("secret-key");
+  });
+
+  it("uses Bucketeer config vars as Heroku object storage defaults", () => {
+    const settings = loadSettings({
+      BUCKETEER_AWS_ACCESS_KEY_ID: "bucketeer-access-key",
+      BUCKETEER_AWS_REGION: "us-east-1",
+      BUCKETEER_AWS_SECRET_ACCESS_KEY: "bucketeer-secret-key",
+      BUCKETEER_BUCKET_NAME: "bucketeer-bucket",
+    });
+
+    expect(settings.objectStorageEnabled).toBe(true);
+    expect(settings.objectStorageAccessKeyId).toBe("bucketeer-access-key");
+    expect(settings.objectStorageBucket).toBe("bucketeer-bucket");
+    expect(settings.objectStorageRegion).toBe("us-east-1");
+    expect(settings.objectStorageSecretAccessKey).toBe("bucketeer-secret-key");
+  });
+
+  it("requires object storage endpoints to be absolute http URLs", () => {
+    expect(() => loadSettings({ OBJECT_STORAGE_ENDPOINT: "s3.example.com" })).toThrow(
+      "OBJECT_STORAGE_ENDPOINT must be an absolute http(s) URL.",
     );
   });
 });

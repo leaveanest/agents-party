@@ -17,3 +17,8 @@ output "heroku_redis_addon_name" {
   description = "Heroku Key-Value Store/Redis add-on name."
   value       = heroku_addon.redis.name
 }
+
+output "heroku_bucketeer_addon_name" {
+  description = "Bucketeer add-on name, when object storage is enabled."
+  value       = var.enable_bucketeer ? heroku_addon.bucketeer[0].name : null
+}

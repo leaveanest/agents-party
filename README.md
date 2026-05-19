@@ -308,6 +308,29 @@ LLM_API_KEY_ENCRYPTION_KEY=...
 
 When `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are configured, LLM and specialist API keys are resolved from encrypted rows in the PostgreSQL `workspace_credentials` table by Slack `team_id`. Slack workspace admins and owners can register or rotate those keys from App Home by opening the API keys configuration modal. Google text models prefer `provider_kind='google'` / `credential_name='service_account_json'` for Vertex AI service account JSON, then fall back to `credential_name='api_key'` for Google Generative AI API keys. Production-like runtimes (`APP_ENV=heroku`, `APP_ENV=prod`, `APP_ENV=production`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set) require both values at startup so provider calls cannot silently fall back to process-level provider keys. Without that resolver, isolated local development can still use process-level provider environment variables supported by the AI SDK provider packages.
 
+### S3-compatible object storage
+
+The runtime can be configured for S3-compatible object storage with common `OBJECT_STORAGE_*`
+settings. AWS deployments should use ECS task-role credentials. Heroku deployments should use the
+Bucketeer add-on; the runtime treats Bucketeer config vars as defaults for the same object storage
+settings.
+
+```bash
+OBJECT_STORAGE_BUCKET=agents-party-objects
+OBJECT_STORAGE_REGION=ap-northeast-1
+OBJECT_STORAGE_ACCESS_KEY_ID=
+OBJECT_STORAGE_SECRET_ACCESS_KEY=
+OBJECT_STORAGE_ENDPOINT=
+OBJECT_STORAGE_FORCE_PATH_STYLE=false
+OBJECT_STORAGE_PREFIX=prod
+OBJECT_STORAGE_PUBLIC_BASE_URL=
+```
+
+For Heroku Bucketeer, the add-on provides `BUCKETEER_BUCKET_NAME`, `BUCKETEER_AWS_REGION`,
+`BUCKETEER_AWS_ACCESS_KEY_ID`, and `BUCKETEER_AWS_SECRET_ACCESS_KEY`. Do not copy those secret
+values into Terraform-managed config vars. `OBJECT_STORAGE_ENDPOINT` can stay unset for AWS S3 and
+Bucketeer; set it only for S3-compatible services that require a custom endpoint.
+
 ### Local database
 
 Use a direct PostgreSQL URL for local development and one-off verification:
@@ -390,7 +413,9 @@ Heroku production deploys use:
 - Heroku Postgres add-on for `DATABASE_URL`
 - Heroku Key-Value Store/Redis add-on for `REDIS_URL`
 
-Terraform for the Heroku app, add-ons, buildpack, non-secret config vars, and optional web formation lives under `terraform/environments/dev/`.
+Terraform for the Heroku app, add-ons, buildpack, non-secret config vars, optional Bucketeer object
+storage, and optional web formation lives under `terraform/environments/dev/`.
+AWS/Fargate infrastructure lives under `terraform/environments/aws/`.
 
 Secret values are intentionally not managed by Terraform because Terraform state can contain managed config values. Set Slack, OAuth, encryption, Salesforce, and external API secrets through `heroku config:set` or CI secret injection instead.
 The Heroku provider is configured to avoid storing unmanaged app config vars and add-on config var values in Terraform state.

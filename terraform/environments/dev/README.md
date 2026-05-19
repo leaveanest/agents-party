@@ -1,7 +1,8 @@
 # Dev Environment Terraform
 
-This Terraform environment creates the Heroku dev app, Heroku Postgres, Heroku Redis/KVS, buildpack
-configuration, non-secret app config vars, and optional dyno formation.
+This Terraform environment creates the Heroku dev app, Heroku Postgres, Heroku Redis/KVS,
+optional Bucketeer object storage, buildpack configuration, non-secret app config vars, and
+optional dyno formation.
 
 Secret values are intentionally not managed by Terraform. Set Slack, OAuth, encryption, Salesforce,
 and external API secrets with `heroku config:set` or CI secret injection after applying
@@ -14,6 +15,17 @@ infrastructure.
 - `HEROKU_API_KEY` exported in your shell, or an authenticated Heroku CLI/netrc session
 
 Do not put Heroku API keys or application secrets in `.tfvars`.
+
+## Object Storage
+
+Set `enable_bucketeer = true` to provision Bucketeer as the standard Heroku S3-compatible
+object storage add-on. Bucketeer injects `BUCKETEER_BUCKET_NAME`, `BUCKETEER_AWS_REGION`,
+`BUCKETEER_AWS_ACCESS_KEY_ID`, and `BUCKETEER_AWS_SECRET_ACCESS_KEY` into the app config.
+The application reads those values as object storage defaults, so Terraform does not copy the
+secret values into managed app config.
+
+`versions.tf` keeps `set_addon_config_vars_in_state = false`; do not change that unless the team
+accepts storing add-on credentials in Terraform state.
 
 ## First Apply
 

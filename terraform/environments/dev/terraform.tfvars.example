@@ -10,4 +10,9 @@ manage_worker_formation = false
 # Enable together with worker formation after the worker process is deployed and scaled.
 slack_agent_queue_enabled = false
 
+# Enable to provision Bucketeer for S3-compatible object storage on Heroku.
+enable_bucketeer     = false
+bucketeer_plan       = "bucketeer:micro"
+object_storage_prefix = "dev"
+
 additional_config_vars = {}
