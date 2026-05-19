@@ -77,6 +77,15 @@ const DEFAULT_SLACK_SCOPES = [
   "reactions:read",
   "users:read",
 ];
+const DEFAULT_SLACK_USER_SCOPES = [
+  "channels:history",
+  "groups:history",
+  "im:history",
+  "mpim:history",
+  "search:read.public",
+  "users:read",
+  "users:read.email",
+];
 
 /**
  * Read application settings from environment variables.
@@ -226,7 +235,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     slackScopes: parseList(env.SLACK_SCOPES, DEFAULT_SLACK_SCOPES),
     slackSigningSecret,
     slackStateSecret,
-    slackUserScopes: parseList(env.SLACK_USER_SCOPES, []),
+    slackUserScopes: parseList(env.SLACK_USER_SCOPES, DEFAULT_SLACK_USER_SCOPES),
     salesforceOAuthCallbackPath,
     salesforceOAuthCallbackUrl: buildCallbackUrl(
       salesforceOAuthRedirectBaseUrl,

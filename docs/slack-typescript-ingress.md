@@ -24,7 +24,8 @@ Slack OAuth install routes additionally require:
 - `SLACK_STATE_SECRET`
 - `SLACK_SCOPES`
 
-`SLACK_USER_SCOPES` is optional and comma-separated.
+`SLACK_USER_SCOPES` is comma-separated. Slack MCP tools use these invoking-user token scopes when
+MCP access is enabled.
 
 Slack-visible fixed copy is localized with the following fallback order:
 
@@ -45,6 +46,11 @@ enterprise-level preference from being duplicated across teams while preserving 
 for non-enterprise installations.
 
 Audio attachment understanding requires the bot `files:read` scope in addition to channel history scopes. Audio bytes are fetched only for the current agent invocation and are kept in memory.
+
+Slack MCP tools resolve the invoking user's Slack installation token at invocation time and fail
+closed when that user has not installed with user scopes. Do not put MCP OAuth tokens in Redis jobs
+or process-wide environment variables for multi-workspace production traffic; reinstall the app with
+the manifest user scopes so `installation.user.token` contains the needed read/search grants.
 
 Transcription uses `TRANSCRIPTION_MODEL` (default `google:speech-to-text-latest-long`), `TRANSCRIPTION_LANGUAGE_CODE` (default `ja-JP`), and `TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES` (default `en-US`). Provider credentials are resolved from `workspace_credentials`; Google Speech-to-Text uses `provider_kind=google` and `credential_name=service_account_json`, with the encrypted secret containing the service account JSON. AI SDK transcription providers use their provider kind (`openai`, `groq`, or `azure_openai`) with `credential_name=api_key`.
 

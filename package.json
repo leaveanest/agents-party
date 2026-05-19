@@ -45,6 +45,7 @@
     "@ai-sdk/togetherai": "^2.0.51",
     "@ai-sdk/xai": "^3.0.89",
     "@google/genai": "^2.0.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@pdfme/common": "^6.1.2",
     "@pdfme/generator": "^6.1.2",
     "@pdfme/schemas": "^6.1.2",

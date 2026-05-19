@@ -46,6 +46,8 @@ export const slackThreadHistoryMessageSchema = z.discriminatedUnion("role", [
 export const slackAgentInvocationSchema = z
   .object({
     channelId: z.string().min(1),
+    enterpriseId: z.string().min(1).optional(),
+    isEnterpriseInstall: z.boolean().optional(),
     messageTs: z.string().min(1),
     modelId: z
       .preprocess(

@@ -15,7 +15,9 @@ import { createDefaultTranscriptionGateway } from "./providers/transcriptionGate
 import { createBullMqSlackAgentJobWorker } from "./queues/slackAgentJobs.js";
 import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
 import { processSlackAgentJob } from "./slack/agentHandlers.js";
+import { createSlackInstallationMcpTokenResolver } from "./slack/mcpTokenResolver.js";
 import { createSlackWebClientProvider } from "./slack/webClient.js";
+import { PostgresSlackInstallationRepository } from "./infrastructure/postgres/slackInstallationRepository.js";
 
 const settings = loadSettings();
 
@@ -49,9 +51,17 @@ const salesforcePdfTools =
         tokenEncryptionKey: settings.salesforceTokenEncryptionKey,
       })
     : undefined;
+const slackMcpInstallationRepository =
+  settings.slackClientId === undefined
+    ? undefined
+    : new PostgresSlackInstallationRepository(settings.slackClientId, { pool });
 const runner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
   salesforcePdfTools,
+  slackMcpTokenResolver:
+    slackMcpInstallationRepository === undefined
+      ? undefined
+      : createSlackInstallationMcpTokenResolver(slackMcpInstallationRepository),
 });
 const audioTranscriptionGateway = createDefaultTranscriptionGateway(settings, {
   credentialResolver: workspaceCredentialResolver,

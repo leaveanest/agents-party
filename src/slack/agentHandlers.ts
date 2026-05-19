@@ -2917,6 +2917,8 @@ async function handleMention(
     const threadMessages = await readThreadMessages(client, event.channel, threadTs);
     const result = await runner.run({
       channelId: event.channel,
+      enterpriseId: readSlackEnterpriseId(body),
+      isEnterpriseInstall: readSlackEnterpriseInstall(body),
       messageTs: event.ts,
       modelId: route?.modelId,
       reasoningEffort: route?.reasoningEffort,
@@ -3106,6 +3108,8 @@ async function handleMessage(
     const threadMessages = await readThreadMessages(client, event.channel, threadTs);
     const result = await runner.run({
       channelId: event.channel,
+      enterpriseId: readSlackEnterpriseId(body),
+      isEnterpriseInstall: readSlackEnterpriseInstall(body),
       messageTs: event.ts,
       modelId,
       reasoningEffort,
@@ -3289,6 +3293,8 @@ async function processAppMentionJob(
     const threadMessages = await readThreadMessages(input.client, job.channelId, job.threadTs);
     const result = await input.runner.run({
       channelId: job.channelId,
+      enterpriseId: job.enterpriseId,
+      isEnterpriseInstall: job.isEnterpriseInstall,
       messageTs: job.messageTs,
       modelId: route?.modelId,
       reasoningEffort: route?.reasoningEffort,
@@ -3447,6 +3453,8 @@ async function processFollowUpMessageJob(
     const threadMessages = await readThreadMessages(input.client, job.channelId, job.threadTs);
     const result = await input.runner.run({
       channelId: job.channelId,
+      enterpriseId: job.enterpriseId,
+      isEnterpriseInstall: job.isEnterpriseInstall,
       messageTs: job.messageTs,
       modelId,
       reasoningEffort,
@@ -3601,6 +3609,8 @@ async function processReactionAddedJob(
     const result = await input.runner.runStructured(
       {
         channelId: job.channelId,
+        enterpriseId: job.enterpriseId,
+        isEnterpriseInstall: job.isEnterpriseInstall,
         messageTs: job.messageTs,
         modelId: route?.modelId,
         reasoningEffort: route?.reasoningEffort,
@@ -3997,6 +4007,8 @@ async function handleReactionAdded(
     const result = await runner.runStructured(
       {
         channelId,
+        enterpriseId: readSlackEnterpriseId(body),
+        isEnterpriseInstall: readSlackEnterpriseInstall(body),
         messageTs,
         modelId: route?.modelId,
         reasoningEffort: route?.reasoningEffort,
