@@ -10,28 +10,75 @@ import {
 } from "../../src/providers/modelRegistry.js";
 
 describe("ModelRegistry", () => {
-  it("registers active default provider entries", () => {
+  it("registers every target provider in the default capability matrix", () => {
     const registry = createDefaultModelRegistry();
 
     expect(registry.list("openai")).not.toHaveLength(0);
     expect(registry.list("azure_openai")).not.toHaveLength(0);
+    expect(registry.list("anthropic")).not.toHaveLength(0);
+    expect(registry.list("baseten")).not.toHaveLength(0);
     expect(registry.list("google")).not.toHaveLength(0);
+    expect(registry.list("bedrock")).not.toHaveLength(0);
+    expect(registry.list("cerebras")).not.toHaveLength(0);
+    expect(registry.list("cohere")).not.toHaveLength(0);
+    expect(registry.list("deepinfra")).not.toHaveLength(0);
+    expect(registry.list("deepseek")).not.toHaveLength(0);
+    expect(registry.list("fireworks")).not.toHaveLength(0);
     expect(registry.list("groq")).not.toHaveLength(0);
+    expect(registry.list("mistral")).not.toHaveLength(0);
+    expect(registry.list("nvidia")).not.toHaveLength(0);
+    expect(registry.list("perplexity")).not.toHaveLength(0);
+    expect(registry.list("togetherai")).not.toHaveLength(0);
+    expect(registry.list("xai")).not.toHaveLength(0);
   });
 
   it("resolves legacy model aliases to explicit provider records", () => {
     const registry = createDefaultModelRegistry();
 
+    expect(registry.get("gpt-5.2")).toMatchObject({
+      id: "openai:gpt-5.2",
+      provider: "openai",
+      providerModelId: "gpt-5.2",
+    });
+    expect(registry.get("claude-sonnet-4-20250514")).toMatchObject({
+      id: "anthropic:claude-sonnet-4-20250514",
+      provider: "anthropic",
+      providerModelId: "claude-sonnet-4-20250514",
+    });
+    expect(registry.get("gemini-3-flash-preview")).toMatchObject({
+      id: "google:gemini-3-flash-preview",
+      provider: "google",
+      providerModelId: "gemini-3-flash-preview",
+    });
+    expect(registry.get("llama-3.3-70b-versatile")).toMatchObject({
+      id: "groq:llama-3.3-70b-versatile",
+      provider: "groq",
+      providerModelId: "llama-3.3-70b-versatile",
+    });
+    expect(registry.get("grok-4.3-latest")).toMatchObject({
+      id: "xai:grok-4.3",
+      provider: "xai",
+      providerModelId: "grok-4.3",
+    });
+    expect(registry.get("openai:gpt-5.5")).toMatchObject({
+      id: "openai:gpt-5.5",
+      provider: "openai",
+      providerModelId: "gpt-5.5",
+    });
+    expect(registry.get("mistral:mistral-large-latest")).toMatchObject({
+      id: "mistral:mistral-large-latest",
+      provider: "mistral",
+      providerModelId: "mistral-large-latest",
+    });
+    expect(registry.get("deepseek:deepseek-reasoner")).toMatchObject({
+      id: "deepseek:deepseek-reasoner",
+      provider: "deepseek",
+      providerModelId: "deepseek-reasoner",
+    });
     expect(registry.get("gpt-4o")).toMatchObject({
       id: "openai:gpt-4o",
       provider: "openai",
       providerModelId: "gpt-4o",
-    });
-    expect(registry.get("gpt-5.5")).toMatchObject({
-      capabilities: expect.arrayContaining(["structured_output", "tool_calling"]),
-      id: "openai:gpt-5.5",
-      provider: "openai",
-      providerModelId: "gpt-5.5",
     });
     expect(registry.get("gpt-image-1.5")).toMatchObject({
       capabilities: ["image_generation"],
@@ -65,6 +112,12 @@ describe("ModelRegistry", () => {
     });
   });
 
+  it("does not advertise text models as direct image generation models", () => {
+    const registry = createDefaultModelRegistry();
+
+    expect(registry.get("openai:gpt-4o").capabilities).not.toContain("image_generation");
+  });
+
   it("does not register deprecated or unsupported chat model entries", () => {
     const registry = createDefaultModelRegistry();
 
@@ -92,11 +145,20 @@ describe("ModelRegistry", () => {
     }
   });
 
-  it("does not advertise text models as direct image generation models", () => {
+  it("marks OpenAI reasoning models with thinking capability", () => {
     const registry = createDefaultModelRegistry();
 
-    expect(registry.get("openai:gpt-5.5").capabilities).not.toContain("image_generation");
-    expect(registry.get("openai:gpt-4o").capabilities).not.toContain("image_generation");
+    expect(registry.get("openai:gpt-5.2").capabilities).toContain("thinking");
+    expect(registry.get("openai:gpt-5-mini").capabilities).toContain("thinking");
+  });
+
+  it("advertises web search for models where AI SDK can enable it by default", () => {
+    const registry = createDefaultModelRegistry();
+
+    expect(registry.get("openai:gpt-5.5").capabilities).toContain("web_search");
+    expect(registry.get("anthropic:claude-sonnet-4-5").capabilities).toContain("web_search");
+    expect(registry.get("google:gemini-2.5-pro").capabilities).toContain("web_search");
+    expect(registry.get("perplexity:sonar").capabilities).toContain("web_search");
   });
 
   it("rejects unknown model names instead of inferring provider from strings", () => {

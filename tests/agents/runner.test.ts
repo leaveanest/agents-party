@@ -15,15 +15,21 @@ const model: ModelInfo = {
 };
 const explicitModel: ModelInfo = {
   capabilities: ["text", "tool_calling"],
-  id: "openai:gpt-4o",
-  provider: "openai",
-  providerModelId: "gpt-4o",
+  id: "anthropic:claude-3-5-sonnet-latest",
+  provider: "anthropic",
+  providerModelId: "claude-3-5-sonnet-latest",
 };
 const textOnlyModel: ModelInfo = {
   capabilities: ["text"],
-  id: "openai:text-only",
+  id: "plamo:plamo-2.0-mini",
+  provider: "plamo",
+  providerModelId: "plamo-2.0-mini",
+};
+const thinkingModel: ModelInfo = {
+  capabilities: ["text", "thinking"],
+  id: "openai:gpt-5",
   provider: "openai",
-  providerModelId: "text-only",
+  providerModelId: "gpt-5",
 };
 
 describe("AgentRunner", () => {
@@ -61,6 +67,12 @@ describe("AgentRunner", () => {
       role: "user",
     });
     expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
+    expect(router.requests[0]?.system).toBe(
+      "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.",
+    );
+    expect(router.requests[0]?.history.messages.map((message) => message.role)).not.toContain(
+      "system",
+    );
   });
 
   it("uses an explicit invocation model before the default model", async () => {
@@ -82,10 +94,51 @@ describe("AgentRunner", () => {
     });
 
     expect(result.model).toEqual({
-      id: "openai:gpt-4o",
-      provider: "openai",
+      id: "anthropic:claude-3-5-sonnet-latest",
+      provider: "anthropic",
     });
     expect(router.requests[0]?.model.id).toBe(explicitModel.id);
+  });
+
+  it("leaves reasoning effort unset until routing settings choose one", async () => {
+    const router = new FakeProviderRouter({
+      content: "reasoned",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: thinkingModel.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "think",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.reasoningEffort).toBeUndefined();
+  });
+
+  it("uses explicit invocation reasoning effort before the model default", async () => {
+    const router = new FakeProviderRouter({
+      content: "reasoned",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: thinkingModel.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      reasoningEffort: "provider_default",
+      teamId: "T1",
+      text: "think",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.reasoningEffort).toBe("provider_default");
   });
 
   it("runs structured agent requests without imposing an output token limit", async () => {
@@ -120,6 +173,29 @@ describe("AgentRunner", () => {
     expect(result.structuredOutput).toEqual({ translatedText: "こんにちは" });
     expect(router.requests[0]?.maxOutputTokens).toBeUndefined();
     expect(router.requests[0]?.responseFormat).toEqual(expect.objectContaining({ type: "json" }));
+  });
+
+  it("returns a user-facing fallback when the provider returns no text after search", async () => {
+    const router = new FakeProviderRouter({
+      content: "",
+      sources: [{ title: "Source", url: "https://example.com" }],
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "search",
+      userId: "U1",
+    });
+
+    expect(result.message).toBe(
+      "検索は実行されましたが、回答本文が返されませんでした。もう一度お試しください。",
+    );
   });
 
   it("adds transient audio transcripts to provider history without persistence types", async () => {
@@ -335,10 +411,56 @@ describe("AgentRunner", () => {
       model: { id: "missing:default-model" },
     });
   });
+
+  it("preserves Slack thread history roles before provider invocation", async () => {
+    const router = new FakeProviderRouter({
+      content: "thread aware",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "2.0",
+      teamId: "T1",
+      text: "continue",
+      threadHistory: [
+        {
+          messageTs: "1.0",
+          role: "user",
+          teamId: "T1",
+          text: "root question",
+          userId: "U1",
+        },
+        {
+          botId: "BAPP",
+          messageTs: "1.1",
+          role: "assistant",
+          teamId: "T1",
+          text: "previous answer",
+        },
+      ],
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.history.messages.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        author: { id: "slack:T1:U1", kind: "user" },
+        role: "user",
+        content: [{ text: "root question", type: "text" }],
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ text: "previous answer", type: "text" }],
+      }),
+    ]);
+  });
 });
 
 class FakeProviderRouter {
-  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel]);
+  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel, thinkingModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly result: LlmResult) {}
@@ -350,7 +472,7 @@ class FakeProviderRouter {
 }
 
 class SequencedProviderRouter {
-  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel]);
+  readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel, thinkingModel]);
   readonly requests: LlmRequest[] = [];
 
   constructor(private readonly results: LlmResult[]) {}

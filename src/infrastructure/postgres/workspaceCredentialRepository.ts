@@ -69,6 +69,20 @@ export class PostgresWorkspaceCredentialRepository implements WorkspaceCredentia
     const row = result.rows[0];
     return row === undefined ? undefined : mapWorkspaceCredential(row);
   }
+
+  async listActiveProviderKinds(input: { teamId: string }): Promise<CredentialProviderKind[]> {
+    const result = await this.pool.query<{ provider_kind: CredentialProviderKind }>(
+      `
+        select distinct provider_kind
+        from workspace_credentials
+        where team_id = $1
+          and status = 'active'
+        order by provider_kind
+      `,
+      [input.teamId],
+    );
+    return result.rows.map((row) => row.provider_kind);
+  }
 }
 
 type WorkspaceCredentialRow = {

@@ -3,7 +3,6 @@ export type ConversationHistory = {
 };
 
 export type ConversationMessage =
-  | SystemConversationMessage
   | UserConversationMessage
   | AssistantConversationMessage
   | ToolConversationMessage;
@@ -18,11 +17,6 @@ export type MessageProvenance = {
   source: "slack" | "agent" | "tool" | "system";
   externalMessageId?: string;
   threadId?: string;
-};
-
-export type SystemConversationMessage = ConversationMessageBase & {
-  role: "system";
-  content: string;
 };
 
 export type UserConversationMessage = ConversationMessageBase & {

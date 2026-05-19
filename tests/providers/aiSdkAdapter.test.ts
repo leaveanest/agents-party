@@ -6,13 +6,14 @@ import {
   AiSdkLlmAdapter,
   createAiSdkAdapters,
   createAiSdkModelResolver,
+  createAiSdkProviderToolResolver,
   LlmProviderError,
 } from "../../src/providers/aiSdkAdapter.js";
 import {
   MissingWorkspaceContextError,
   MissingWorkspaceCredentialError,
 } from "../../src/providers/credentials.js";
-import type { ModelInfo } from "../../src/providers/contracts.js";
+import { LlmReasoningEffortId, type ModelInfo } from "../../src/providers/contracts.js";
 
 const model: ModelInfo = {
   capabilities: ["text", "streaming", "tool_calling"],
@@ -61,6 +62,7 @@ describe("AiSdkLlmAdapter", () => {
     const result = await adapter.generate({
       history,
       model,
+      system: "Reply as a concise Slack assistant.",
       tools: [
         {
           name: "search",
@@ -75,6 +77,13 @@ describe("AiSdkLlmAdapter", () => {
       ],
     });
 
+    expect(languageModel.doGenerateCalls[0]?.prompt.at(0)).toEqual({
+      content: "Reply as a concise Slack assistant.",
+      role: "system",
+    });
+    expect(languageModel.doGenerateCalls[0]?.prompt.at(1)).toMatchObject({
+      role: "user",
+    });
     expect(result).toMatchObject({
       content: "Hello from AI SDK",
       finishReason: "stop",
@@ -85,6 +94,428 @@ describe("AiSdkLlmAdapter", () => {
       },
     });
     expect(languageModel.doGenerateCalls[0]?.tools).toHaveLength(1);
+  });
+
+  it("enables provider web search tools by default for web-search capable models", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            text: "Searched answer",
+            type: "text",
+          },
+        ],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        ...model,
+        capabilities: [...model.capabilities, "web_search"],
+      },
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.tools?.map((candidate) => candidate.name)).toContain(
+      "web_search",
+    );
+  });
+
+  it("passes reasoning effort through provider options for thinking-capable models", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "Reasoned answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4, 2),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    const result = await adapter.generate({
+      history,
+      model: {
+        ...model,
+        capabilities: [...model.capabilities, "thinking"],
+      },
+      reasoningEffort: LlmReasoningEffortId.Medium,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toEqual({
+      openai: { reasoningEffort: "medium" },
+    });
+    expect(result.usage).toMatchObject({
+      reasoningTokens: 2,
+    });
+  });
+
+  it("omits reasoning provider options for models without thinking capability", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "Plain answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model,
+      reasoningEffort: LlmReasoningEffortId.Medium,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toBeUndefined();
+  });
+
+  it("uses the OpenAI providerOptions key for Azure OpenAI reasoning settings", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "Azure reasoned answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "azure_openai",
+    });
+    const adapter = new AiSdkLlmAdapter("azure_openai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "azure_openai:test-model",
+        provider: "azure_openai",
+        providerModelId: "test-model",
+      },
+      reasoningEffort: LlmReasoningEffortId.Low,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toEqual({
+      openai: { reasoningEffort: "low" },
+    });
+  });
+
+  it("passes reasoning effort through Anthropic effort provider option", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "Anthropic answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "anthropic",
+    });
+    const adapter = new AiSdkLlmAdapter("anthropic", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "anthropic:test-model",
+        provider: "anthropic",
+        providerModelId: "test-model",
+      },
+      reasoningEffort: LlmReasoningEffortId.High,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toEqual({
+      anthropic: { effort: "high" },
+    });
+  });
+
+  it("passes xhigh reasoning effort through for OpenAI Codex Max models", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "OpenAI answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "openai:gpt-5.1-codex-max",
+        provider: "openai",
+        providerModelId: "gpt-5.1-codex-max",
+      },
+      reasoningEffort: LlmReasoningEffortId.XHigh,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toEqual({
+      openai: { reasoningEffort: "xhigh" },
+    });
+  });
+
+  it("passes minimal reasoning effort through for OpenAI models", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "OpenAI answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "openai:gpt-5.2",
+        provider: "openai",
+        providerModelId: "gpt-5.2",
+      },
+      reasoningEffort: LlmReasoningEffortId.Minimal,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toEqual({
+      openai: { reasoningEffort: "minimal" },
+    });
+  });
+
+  it("passes minimal reasoning effort through Google thinking level", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "Google answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "gemini-test",
+      provider: "google",
+    });
+    const adapter = new AiSdkLlmAdapter("google", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "google:gemini-3.1-flash-lite-preview",
+        provider: "google",
+        providerModelId: "gemini-3.1-flash-lite-preview",
+      },
+      reasoningEffort: LlmReasoningEffortId.Minimal,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toEqual({
+      google: { thinkingConfig: { thinkingLevel: "minimal" } },
+    });
+  });
+
+  it("omits unsupported Google thinking levels for specific Gemini models", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "Google answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "gemini-test",
+      provider: "google",
+    });
+    const adapter = new AiSdkLlmAdapter("google", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "google:gemini-3.1-pro-preview",
+        provider: "google",
+        providerModelId: "gemini-3.1-pro-preview",
+      },
+      reasoningEffort: LlmReasoningEffortId.Medium,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toBeUndefined();
+  });
+
+  it("omits Google thinking level for Gemini 2.5 models", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "Google answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "gemini-test",
+      provider: "google",
+    });
+    const adapter = new AiSdkLlmAdapter("google", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "google:gemini-2.5-pro",
+        provider: "google",
+        providerModelId: "gemini-2.5-pro",
+      },
+      reasoningEffort: LlmReasoningEffortId.High,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toBeUndefined();
+  });
+
+  it("omits OpenAI xhigh reasoning effort for models that do not support it", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "OpenAI answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "openai:gpt-5",
+        provider: "openai",
+        providerModelId: "gpt-5",
+      },
+      reasoningEffort: LlmReasoningEffortId.XHigh,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toBeUndefined();
+  });
+
+  it("ignores reasoning effort for thinking models on unsupported providers", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "Together answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "togetherai",
+    });
+    const adapter = new AiSdkLlmAdapter("togetherai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "togetherai:test-model",
+        provider: "togetherai",
+        providerModelId: "test-model",
+      },
+      reasoningEffort: LlmReasoningEffortId.Medium,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toBeUndefined();
+  });
+
+  it("omits unsupported reasoning efforts for providers with narrower effort sets", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [{ text: "xAI answer", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "xai",
+    });
+    const adapter = new AiSdkLlmAdapter("xai", () => languageModel);
+
+    await adapter.generate({
+      history,
+      model: {
+        capabilities: ["text", "thinking"],
+        id: "xai:test-model",
+        provider: "xai",
+        providerModelId: "test-model",
+      },
+      reasoningEffort: LlmReasoningEffortId.Medium,
+    });
+
+    expect(languageModel.doGenerateCalls[0]?.providerOptions).toBeUndefined();
+  });
+
+  it("does not expose provider-executed web search calls as repository agent tools", async () => {
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: {
+        content: [
+          {
+            providerExecuted: true,
+            toolCallId: "search-1",
+            toolName: "web_search",
+            input: JSON.stringify({ query: "latest AI SDK web search" }),
+            type: "tool-call",
+          },
+          {
+            text: "Searched answer",
+            type: "text",
+          },
+        ],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: usage(3, 4),
+        warnings: [],
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    const result = await adapter.generate({
+      history,
+      model: {
+        ...model,
+        capabilities: [...model.capabilities, "web_search"],
+      },
+    });
+
+    expect(result.toolCalls).toEqual([]);
+  });
+
+  it("uses AI SDK provider-specific web search tool names", () => {
+    const resolveTools = createAiSdkProviderToolResolver();
+    const providers = [
+      ["openai", "web_search"],
+      ["azure_openai", "web_search_preview"],
+      ["anthropic", "web_search"],
+      ["google", "google_search"],
+    ] as const;
+
+    for (const [provider, toolName] of providers) {
+      expect(
+        Object.keys(
+          resolveTools({
+            capabilities: ["text", "web_search"],
+            id: `${provider}:test-model`,
+            provider,
+            providerModelId: "test-model",
+          }) ?? {},
+        ),
+      ).toEqual([toolName]);
+    }
   });
 
   it("passes workspace credentials into the model resolver", async () => {
@@ -322,10 +753,17 @@ describe("AiSdkLlmAdapter", () => {
     const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
 
     const events = [];
-    for await (const event of adapter.stream({ history, model })) {
+    for await (const event of adapter.stream({ history, model, system: "Stream concisely." })) {
       events.push(event);
     }
 
+    expect(languageModel.doStreamCalls[0]?.prompt.at(0)).toEqual({
+      content: "Stream concisely.",
+      role: "system",
+    });
+    expect(languageModel.doStreamCalls[0]?.prompt.at(1)).toMatchObject({
+      role: "user",
+    });
     expect(events).toEqual([
       { text: "Hel", type: "text-delta" },
       { text: "lo", type: "text-delta" },
@@ -455,8 +893,18 @@ describe("AiSdkLlmAdapter", () => {
       "azure_openai",
       "anthropic",
       "google",
+      "bedrock",
       "groq",
       "xai",
+      "mistral",
+      "togetherai",
+      "cohere",
+      "fireworks",
+      "deepinfra",
+      "deepseek",
+      "cerebras",
+      "perplexity",
+      "baseten",
       "plamo",
       "nvidia",
       "litellm",
@@ -464,15 +912,15 @@ describe("AiSdkLlmAdapter", () => {
   });
 
   it("does not read OpenAI-compatible provider settings from process environment", async () => {
-    const previousApiKey = process.env.XAI_API_KEY;
-    const previousBaseUrl = process.env.XAI_BASE_URL;
-    process.env.XAI_API_KEY = "env-key";
-    process.env.XAI_BASE_URL = "https://env.example/v1";
+    const previousApiKey = process.env.NVIDIA_API_KEY;
+    const previousBaseUrl = process.env.NVIDIA_BASE_URL;
+    process.env.NVIDIA_API_KEY = "env-key";
+    process.env.NVIDIA_BASE_URL = "https://env.example/v1";
     const requests: Array<{ authorization: string | null; url: string }> = [];
     try {
       const adapter = createAiSdkAdapters({
         openAICompatible: {
-          xai: {
+          nvidia: {
             fetch: async (input, init) => {
               const headers = new Headers(init?.headers);
               requests.push({
@@ -483,9 +931,9 @@ describe("AiSdkLlmAdapter", () => {
             },
           },
         },
-      }).find((candidate) => candidate.provider === "xai");
+      }).find((candidate) => candidate.provider === "nvidia");
       if (adapter === undefined) {
-        throw new Error("xAI adapter was not registered.");
+        throw new Error("NVIDIA adapter was not registered.");
       }
 
       await expect(
@@ -493,9 +941,9 @@ describe("AiSdkLlmAdapter", () => {
           history,
           model: {
             capabilities: ["text"],
-            id: "xai:grok-2-latest",
-            provider: "xai",
-            providerModelId: "grok-2-latest",
+            id: "nvidia:meta/llama-3.1-70b-instruct",
+            provider: "nvidia",
+            providerModelId: "meta/llama-3.1-70b-instruct",
           },
         }),
       ).resolves.toMatchObject({ content: "configured path" });
@@ -503,12 +951,12 @@ describe("AiSdkLlmAdapter", () => {
       expect(requests).toEqual([
         {
           authorization: null,
-          url: "https://api.x.ai/v1/chat/completions",
+          url: "https://integrate.api.nvidia.com/v1/chat/completions",
         },
       ]);
     } finally {
-      restoreEnv("XAI_API_KEY", previousApiKey);
-      restoreEnv("XAI_BASE_URL", previousBaseUrl);
+      restoreEnv("NVIDIA_API_KEY", previousApiKey);
+      restoreEnv("NVIDIA_BASE_URL", previousBaseUrl);
     }
   });
 
@@ -517,7 +965,7 @@ describe("AiSdkLlmAdapter", () => {
     const adapter = createAiSdkAdapters(
       {
         openAICompatible: {
-          xai: {
+          nvidia: {
             baseURL: "https://configured.example/v1",
             fetch: async (input, init) => {
               const headers = new Headers(init?.headers);
@@ -535,7 +983,7 @@ describe("AiSdkLlmAdapter", () => {
           async resolveProviderCredential(input) {
             expect(input).toEqual({
               credentialName: "api_key",
-              provider: "xai",
+              provider: "nvidia",
               workspaceId: "T1",
             });
             return {
@@ -545,9 +993,9 @@ describe("AiSdkLlmAdapter", () => {
           },
         },
       },
-    ).find((candidate) => candidate.provider === "xai");
+    ).find((candidate) => candidate.provider === "nvidia");
     if (adapter === undefined) {
-      throw new Error("xAI adapter was not registered.");
+      throw new Error("NVIDIA adapter was not registered.");
     }
 
     await expect(
@@ -556,9 +1004,9 @@ describe("AiSdkLlmAdapter", () => {
         history,
         model: {
           capabilities: ["text"],
-          id: "xai:grok-2-latest",
-          provider: "xai",
-          providerModelId: "grok-2-latest",
+          id: "nvidia:meta/llama-3.1-70b-instruct",
+          provider: "nvidia",
+          providerModelId: "meta/llama-3.1-70b-instruct",
         },
       }),
     ).resolves.toMatchObject({ content: "workspace credential path" });
@@ -577,7 +1025,7 @@ describe("AiSdkLlmAdapter", () => {
     });
 
     expect(adapter.supports({ history, model }, ["text"])).toBe(true);
-    expect(adapter.supports({ history, model }, ["text", "web_search"])).toBe(false);
+    expect(adapter.supports({ history, model }, ["text", "web_search"])).toBe(true);
     expect(adapter.supports({ history, model }, ["image_generation"])).toBe(false);
   });
 
@@ -587,15 +1035,15 @@ describe("AiSdkLlmAdapter", () => {
     expect(() =>
       resolveModel({
         capabilities: ["text"],
-        id: "bedrock:test-model",
-        provider: "bedrock",
+        id: "dify:test-model",
+        provider: "dify",
         providerModelId: "test-model",
       }),
     ).toThrow(LlmProviderError);
   });
 });
 
-function usage(inputTokens: number, outputTokens: number) {
+function usage(inputTokens: number, outputTokens: number, reasoningTokens?: number) {
   return {
     inputTokens: {
       cacheRead: undefined,
@@ -604,7 +1052,7 @@ function usage(inputTokens: number, outputTokens: number) {
       total: inputTokens,
     },
     outputTokens: {
-      reasoning: undefined,
+      reasoning: reasoningTokens,
       text: outputTokens,
       total: outputTokens,
     },

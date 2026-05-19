@@ -58,6 +58,12 @@ describe("RssFeedProcessor", () => {
       "openai:gpt-4o",
       "google:gemini-2.5-flash",
     ]);
+    expect(providerRouter.requests[0]?.system).toBe(
+      "You write concise Slack mrkdwn updates for RSS articles. Summarize the article in Japanese, include why it matters, and keep the response under 900 characters.",
+    );
+    expect(
+      providerRouter.requests[0]?.history.messages.map((message) => message.role),
+    ).not.toContain("system");
     expect(publisher.posts).toHaveLength(2);
     expect(repository.completed.map((item) => item.modelSource)).toEqual(["channel", "workspace"]);
   });

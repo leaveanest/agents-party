@@ -98,7 +98,6 @@ describe("native provider adapters", () => {
       "openai",
       "anthropic",
       "google",
-      "bedrock",
       "dify",
     ]);
   });

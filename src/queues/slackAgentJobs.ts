@@ -8,6 +8,7 @@ const JOB_ATTEMPTS = 3;
 const DEDUPE_TTL_MILLIS = 10 * 60 * 1000;
 
 export const slackAgentJobSchema = z.object({
+  apiAppId: z.string().optional(),
   botUserId: z.string().optional(),
   channelId: z.string().min(1),
   enterpriseId: z.string().optional(),
