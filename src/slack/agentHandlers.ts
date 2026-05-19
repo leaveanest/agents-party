@@ -3835,9 +3835,13 @@ function readSlackBlockTextParts(value: unknown): string[] {
       ? value.fields.map((field) => readSlackTextObjectText(field))
       : []),
     ...(Array.isArray(value.elements)
-      ? value.elements.map((element) => readSlackRichTextElementText(element))
+      ? value.elements.map((element) => readSlackBlockElementText(element))
       : []),
   ].filter((text): text is string => text !== undefined);
+}
+
+function readSlackBlockElementText(value: unknown): string | undefined {
+  return readSlackTextObjectText(value) ?? readSlackRichTextElementText(value);
 }
 
 function readSlackRichTextElementText(value: unknown): string | undefined {

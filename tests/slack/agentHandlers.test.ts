@@ -2917,6 +2917,72 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("translates flag reactions from context-only Block Kit messages", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "Translated context text",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "translation-agent" },
+        agentId: "translation",
+        scope: "channel",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        conversations: {
+          history: async () => ({
+            messages: [
+              {
+                blocks: [
+                  {
+                    elements: [
+                      { text: "Context headline", type: "mrkdwn" },
+                      { text: "Plain context detail", type: "plain_text" },
+                    ],
+                    type: "context",
+                  },
+                ],
+                text: "",
+                thread_ts: "1712345678.000100",
+                ts: "1712345678.000100",
+              },
+            ],
+          }),
+        },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-jp",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        text:
+          "Translate the following Slack message to ja:\n\n" +
+          "Context headline\n" +
+          "Plain context detail",
+      }),
+    ]);
+  });
+
   it("does not translate reactions in disabled channels", async () => {
     let runs = 0;
     const runner = {
