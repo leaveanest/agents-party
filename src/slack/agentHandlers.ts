@@ -2226,7 +2226,7 @@ async function handleReactionAdded(
   let threadTs = messageTs;
   try {
     const sourceMessage = await fetchSingleMessage(client, channelId, messageTs);
-    sourceText = readString(sourceMessage, "text");
+    sourceText = readSlackMessageText(sourceMessage);
     threadTs = readString(sourceMessage, "thread_ts") ?? messageTs;
   } catch (error) {
     logger.warn("Could not fetch source message for translation reaction.", {
@@ -3808,6 +3808,134 @@ function escapeRegExp(value: string): string {
 function readString(value: StringIndexed, field: string): string | undefined {
   const fieldValue = value[field];
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readSlackMessageText(message: StringIndexed): string | undefined {
+  return firstNonEmptyText([
+    readString(message, "text"),
+    readSlackBlocksText(message.blocks),
+    readSlackAttachmentsText(message.attachments),
+  ]);
+}
+
+function readSlackBlocksText(value: unknown): string | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return joinNonEmptyLines(value.flatMap((block) => readSlackBlockTextParts(block)));
+}
+
+function readSlackBlockTextParts(value: unknown): string[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+  return [
+    readSlackTextObjectText(value.text),
+    ...(Array.isArray(value.fields)
+      ? value.fields.map((field) => readSlackTextObjectText(field))
+      : []),
+    ...(Array.isArray(value.elements)
+      ? value.elements.map((element) => readSlackRichTextElementText(element))
+      : []),
+  ].filter((text): text is string => text !== undefined);
+}
+
+function readSlackRichTextElementText(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const type = readOptionalString(value.type);
+  const text = readOptionalString(value.text);
+  if (type === "text" && text !== undefined) {
+    return text;
+  }
+  if (type === "link") {
+    return text ?? readOptionalString(value.url);
+  }
+  if (type === "emoji") {
+    const name = readOptionalString(value.name);
+    return name === undefined ? undefined : `:${name}:`;
+  }
+  if (type === "user") {
+    const userId = readOptionalString(value.user_id);
+    return userId === undefined ? undefined : `<@${userId}>`;
+  }
+  if (type === "channel") {
+    const channelId = readOptionalString(value.channel_id);
+    return channelId === undefined ? undefined : `<#${channelId}>`;
+  }
+  if (type === "broadcast") {
+    const range = readOptionalString(value.range);
+    return range === undefined ? undefined : `<!${range}>`;
+  }
+  if (type === "date") {
+    return readOptionalString(value.fallback);
+  }
+  const textObjectText = readSlackTextObjectText(value.text);
+  if (textObjectText !== undefined) {
+    return textObjectText;
+  }
+  if (!Array.isArray(value.elements)) {
+    return undefined;
+  }
+  const childText = value.elements
+    .map((element) => readSlackRichTextElementText(element))
+    .filter((part): part is string => part !== undefined);
+  if (type === "rich_text_section") {
+    return firstNonEmptyText([childText.join("")]);
+  }
+  return joinNonEmptyLines(childText);
+}
+
+function readSlackAttachmentsText(value: unknown): string | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return joinNonEmptyLines(value.flatMap((attachment) => readSlackAttachmentTextParts(attachment)));
+}
+
+function readSlackAttachmentTextParts(value: unknown): string[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+  const fieldText = Array.isArray(value.fields)
+    ? value.fields.flatMap((field) => {
+        if (!isRecord(field)) {
+          return [];
+        }
+        return [readOptionalString(field.title), readOptionalString(field.value)];
+      })
+    : [];
+  return [
+    readOptionalString(value.pretext),
+    readOptionalString(value.title),
+    readOptionalString(value.text),
+    readOptionalString(value.fallback),
+    readSlackBlocksText(value.blocks),
+    ...fieldText,
+  ].filter((text): text is string => text !== undefined);
+}
+
+function readSlackTextObjectText(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return readOptionalString(value.text);
+}
+
+function firstNonEmptyText(values: Array<string | undefined>): string | undefined {
+  return values
+    .map((value) => value?.trim())
+    .find((value): value is string => value !== undefined && value !== "");
+}
+
+function joinNonEmptyLines(values: Array<string | undefined>): string | undefined {
+  return firstNonEmptyText([
+    values
+      .map((value) => value?.trim())
+      .filter((value): value is string => value !== undefined && value !== "")
+      .join("\n"),
+  ]);
 }
 
 function readOptionalContextValue(value: unknown): string | undefined {

@@ -2840,6 +2840,83 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("translates flag reactions from block-only Slack messages", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "Translated block text",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "translation-agent" },
+        agentId: "translation",
+        scope: "channel",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        chat: { postMessage: async () => ({}) },
+        conversations: {
+          history: async () => ({
+            messages: [
+              {
+                blocks: [
+                  {
+                    text: {
+                      text: "日本中心で、今日（2026/5/19）の政治ニュースをざっと検索しました。",
+                      type: "mrkdwn",
+                    },
+                    type: "section",
+                  },
+                  {
+                    elements: [
+                      {
+                        elements: [
+                          { text: "必要なら「3分で読める要約」に絞って続けます。", type: "text" },
+                        ],
+                        type: "rich_text_section",
+                      },
+                    ],
+                    type: "rich_text",
+                  },
+                ],
+                text: "",
+                thread_ts: "1712345678.000100",
+                ts: "1712345678.000100",
+              },
+            ],
+          }),
+        },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345678.000100", type: "message" },
+        reaction: "flag-us",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        text:
+          "Translate the following Slack message to en:\n\n" +
+          "日本中心で、今日（2026/5/19）の政治ニュースをざっと検索しました。\n" +
+          "必要なら「3分で読める要約」に絞って続けます。",
+      }),
+    ]);
+  });
+
   it("does not translate reactions in disabled channels", async () => {
     let runs = 0;
     const runner = {
