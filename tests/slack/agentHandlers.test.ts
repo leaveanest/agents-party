@@ -180,6 +180,102 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).not.toContain("google:gemini-2.5-flash");
   });
 
+  it("removes reasoning selector when default model changes to a non-reasoning model", async () => {
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never);
+
+    await handlers.handleModelRoutingDefaultModelSelectAction({
+      ack: async () => undefined,
+      body: {
+        view: modelRoutingView({
+          blocks: [
+            { block_id: "model_routing_enabled_models", type: "input" },
+            { block_id: "model_routing_default_model", type: "input" },
+            { block_id: "model_routing_reasoning_effort", type: "input" },
+          ],
+          defaultModelId: "openai:gpt-4o",
+          reasoningEffort: "provider_default",
+        }),
+      },
+      client: {
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updates[0]);
+    expect(updates[0]).toEqual(expect.objectContaining({ hash: "HASH1" }));
+    expect(serialized).toContain("model_routing_default_model");
+    expect(serialized).not.toContain("model_routing_reasoning_effort");
+  });
+
+  it("adds model-specific reasoning options when default model changes to a reasoning model", async () => {
+    const updates: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      defaultLocale: "en",
+      userSettingsRepository: {
+        async findUserSettings(input) {
+          expect(input).toEqual({
+            enterpriseId: "E1",
+            slackUserId: "UADMIN",
+            teamId: "T1",
+          });
+          return {
+            createdAt: new Date("2026-05-15T00:00:00Z"),
+            locale: "ja",
+            payload: {},
+            scopeId: "T1",
+            scopeKind: "team",
+            slackUserId: "UADMIN",
+            teamId: "T1",
+            updatedAt: new Date("2026-05-15T00:00:00Z"),
+          };
+        },
+        async saveUserSettings() {},
+      },
+    });
+
+    await handlers.handleModelRoutingDefaultModelSelectAction({
+      ack: async () => undefined,
+      body: {
+        enterprise: { id: "E1" },
+        team: { id: "T-random" },
+        user: { id: "UADMIN" },
+        view: modelRoutingView({
+          blocks: [
+            { block_id: "model_routing_enabled_models", type: "input" },
+            { block_id: "model_routing_default_model", type: "input" },
+          ],
+          defaultModelId: "google:gemini-3.1-pro-preview",
+        }),
+      },
+      client: {
+        views: {
+          update: async (payload: unknown) => {
+            updates.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updates[0]);
+    expect(updates[0]).toEqual(expect.objectContaining({ hash: "HASH1" }));
+    expect(serialized).toContain("model_routing_reasoning_effort");
+    expect(serialized).toContain("推論深度");
+    expect(serialized).not.toContain("Reasoning effort");
+    expect(serialized).toContain('"value":"low"');
+    expect(serialized).toContain('"value":"high"');
+    expect(serialized).not.toContain('"value":"medium"');
+    expect(serialized).not.toContain('"value":"minimal"');
+  });
+
   it("does not open model routing selectors when no model provider credentials are registered", async () => {
     const updatedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
@@ -4755,6 +4851,42 @@ function validWorkspaceCredentialView(teamId: string): unknown {
         },
       },
     },
+  };
+}
+
+function modelRoutingView(input: {
+  blocks: Record<string, unknown>[];
+  defaultModelId: string;
+  reasoningEffort?: string;
+}): unknown {
+  return {
+    blocks: input.blocks,
+    callback_id: "model_routing_modal",
+    close: { text: "Close", type: "plain_text" },
+    hash: "HASH1",
+    id: "VIEW1",
+    private_metadata: JSON.stringify({ source: "app_home", teamId: "T1" }),
+    state: {
+      values: {
+        model_routing_default_model: {
+          default_model: {
+            selected_option: { value: input.defaultModelId },
+          },
+        },
+        ...(input.reasoningEffort === undefined
+          ? {}
+          : {
+              model_routing_reasoning_effort: {
+                reasoning_effort: {
+                  selected_option: { value: input.reasoningEffort },
+                },
+              },
+            }),
+      },
+    },
+    submit: { text: "Save", type: "plain_text" },
+    title: { text: "Model routing", type: "plain_text" },
+    type: "modal",
   };
 }
 

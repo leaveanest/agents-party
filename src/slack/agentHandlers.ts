@@ -422,6 +422,9 @@ export function createAgentSlackHandlers(
     async handleModelRoutingConfigureAction(args) {
       await handleModelRoutingConfigureAction(args, options);
     },
+    async handleModelRoutingDefaultModelSelectAction(args) {
+      await handleModelRoutingDefaultModelSelectAction(args, options);
+    },
     async handleModelRoutingModalSubmission(args) {
       await handleModelRoutingModalSubmission(args, options);
     },
@@ -1684,6 +1687,56 @@ async function handleThreadModelRoutingModalSubmission(input: {
   }
 }
 
+async function handleModelRoutingDefaultModelSelectAction(
+  { ack, body, client, logger }: SlackActionArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  await ack();
+  const view = isRecord(body) ? body.view : undefined;
+  if (!isRecord(view) || readString(view, "callback_id") !== MODEL_ROUTING_MODAL_CALLBACK_ID) {
+    return;
+  }
+  const viewRecord = view;
+
+  const metadata = parseModelRoutingActionValue(readString(viewRecord, "private_metadata"));
+  const bodyTeamId = readTeamId(body, {});
+  const selectedTeamId =
+    readSelectedOptionValue(
+      viewRecord,
+      MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
+      MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
+    ) ??
+    metadata?.selectedTeamId ??
+    metadata?.teamId ??
+    bodyTeamId;
+  const translator = await resolveHandlerTranslator(
+    {
+      enterpriseId: metadata?.enterpriseId ?? readSlackEnterpriseId(body),
+      teamId: selectedTeamId,
+    },
+    readSlackUserId(body),
+    options,
+    logger,
+  );
+  const defaultModelId = readSelectedOptionValue(
+    viewRecord,
+    MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+    MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
+  );
+  const blocks = modelRoutingBlocksForSelectedDefaultModel({
+    defaultModelId,
+    translator,
+    view: viewRecord,
+  });
+  await updateModelRoutingModal(
+    client,
+    viewRecord,
+    modalWithUpdatedBlocks(viewRecord, blocks),
+    logger,
+    { useHash: true },
+  );
+}
+
 async function listWorkspaceCredentialedLlmProviders(
   teamId: string,
   options: AgentSlackHandlerOptions,
@@ -1846,7 +1899,7 @@ function reasoningEffortForScopedSave(input: {
 }
 
 function readReasoningEffortValue(
-  view: SlackViewArgs["view"],
+  view: unknown,
   modelId: string | undefined,
 ): LlmReasoningEffort | undefined {
   if (!modelSupportsReasoningSettings(modelId)) {
@@ -1897,6 +1950,56 @@ function buildReasoningEffortBlock(input: {
   };
 }
 
+function modelRoutingBlocksForSelectedDefaultModel(input: {
+  defaultModelId?: string;
+  translator: Translator;
+  view: unknown;
+}): Record<string, unknown>[] {
+  const sourceBlocks =
+    isRecord(input.view) && Array.isArray(input.view.blocks) ? input.view.blocks : [];
+  const blocks = sourceBlocks.filter(
+    (block): block is Record<string, unknown> =>
+      isRecord(block) && readString(block, "block_id") !== MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
+  );
+  if (!modelSupportsReasoningSettings(input.defaultModelId)) {
+    return blocks;
+  }
+  const selectedEffort =
+    readReasoningEffortValue(input.view, input.defaultModelId) ??
+    LlmReasoningEffortId.ProviderDefault;
+  const reasoningBlock = buildReasoningEffortBlock({
+    initialEffort: selectedEffort,
+    modelId: input.defaultModelId,
+    translator: input.translator,
+  });
+  const defaultModelBlockIndex = blocks.findIndex(
+    (block) => readString(block, "block_id") === MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
+  );
+  if (defaultModelBlockIndex < 0) {
+    return [...blocks, reasoningBlock];
+  }
+  return [
+    ...blocks.slice(0, defaultModelBlockIndex + 1),
+    reasoningBlock,
+    ...blocks.slice(defaultModelBlockIndex + 1),
+  ];
+}
+
+function modalWithUpdatedBlocks(
+  view: Record<string, unknown>,
+  blocks: readonly Record<string, unknown>[],
+): Record<string, unknown> {
+  return {
+    blocks,
+    callback_id: readString(view, "callback_id") ?? MODEL_ROUTING_MODAL_CALLBACK_ID,
+    close: isRecord(view.close) ? view.close : { text: "Close", type: "plain_text" },
+    private_metadata: readString(view, "private_metadata") ?? "",
+    submit: isRecord(view.submit) ? view.submit : { text: "Save", type: "plain_text" },
+    title: isRecord(view.title) ? view.title : { text: "Model routing", type: "plain_text" },
+    type: "modal",
+  };
+}
+
 function buildModelRoutingOpeningModal(
   translator: Translator,
   title = translator.t("modelRouting.title"),
@@ -1944,14 +2047,17 @@ async function updateModelRoutingModal(
   view: unknown,
   modal: Record<string, unknown>,
   logger: unknown,
+  options: { useHash?: boolean } = {},
 ): Promise<void> {
   const viewId = isRecord(view) ? readString(view, "id") : undefined;
   if (viewId === undefined) {
     logWarn(logger, "Could not update model routing modal without Slack view id.", {});
     return;
   }
+  const hash = options.useHash && isRecord(view) ? readString(view, "hash") : undefined;
   try {
     await client.views.update({
+      ...(hash === undefined ? {} : { hash }),
       view: modal as never,
       view_id: viewId,
     });
