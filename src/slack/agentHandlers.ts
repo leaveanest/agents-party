@@ -2645,19 +2645,40 @@ async function fetchSingleMessage(
   channelId: string,
   messageTs: string,
 ): Promise<StringIndexed> {
-  const response = await client.conversations.history({
+  const historyResponse = await client.conversations.history({
     channel: channelId,
     inclusive: true,
     latest: messageTs,
     limit: 1,
     oldest: messageTs,
   });
-  const messages = Array.isArray(response.messages) ? response.messages : [];
-  const message = messages[0];
+  const historyMessage = findMessageByTs(historyResponse.messages, messageTs);
+  if (historyMessage !== undefined) {
+    return historyMessage;
+  }
+
+  const repliesResponse = await client.conversations.replies({
+    channel: channelId,
+    inclusive: true,
+    latest: messageTs,
+    limit: 1,
+    oldest: messageTs,
+    ts: messageTs,
+  });
+  const message = findMessageByTs(repliesResponse.messages, messageTs);
   if (!isRecord(message)) {
     throw new Error("Slack history response did not contain a message.");
   }
   return message;
+}
+
+function findMessageByTs(messages: unknown, messageTs: string): StringIndexed | undefined {
+  if (!Array.isArray(messages)) {
+    return undefined;
+  }
+  return messages.find((message): message is StringIndexed => {
+    return isRecord(message) && readString(message, "ts") === messageTs;
+  });
 }
 
 function buildWorkspaceCredentialModal(

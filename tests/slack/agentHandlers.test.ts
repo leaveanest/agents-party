@@ -2849,6 +2849,72 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("falls back to thread replies when translating reactions on thread messages", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async runStructured(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          structuredOutput: { translatedText: "Thread reply translation" },
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "translation-agent" },
+        agentId: "translation",
+        scope: "channel",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleReactionAdded({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: {
+          history: async () => ({ messages: [] }),
+          replies: async () => ({
+            messages: [
+              {
+                text: "thread reply",
+                thread_ts: "1712345678.000100",
+                ts: "1712345680.000200",
+              },
+            ],
+          }),
+        },
+      },
+      event: {
+        item: { channel: "C1", ts: "1712345680.000200", type: "message" },
+        reaction: "flag-us",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        text: expect.stringContaining("thread reply"),
+        threadTs: "1712345678.000100",
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        text: "Thread reply translation",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
   it("translates flag reactions from block-only Slack messages", async () => {
     const invocations: unknown[] = [];
     const runner = {
@@ -3005,7 +3071,9 @@ describe("createAgentSlackHandlers", () => {
       body: { team_id: "T1" },
       client: {
         chat: { postMessage: async () => ({}) },
-        conversations: { history: async () => ({ messages: [{ text: "hello" }] }) },
+        conversations: {
+          history: async () => ({ messages: [{ text: "hello", ts: "1712345678.000100" }] }),
+        },
       },
       event: {
         item: { channel: "C1", ts: "1712345678.000100", type: "message" },
@@ -3045,7 +3113,9 @@ describe("createAgentSlackHandlers", () => {
       body: { team_id: "T1" },
       client: {
         chat: { postMessage: async () => ({}) },
-        conversations: { history: async () => ({ messages: [{ text: "hello" }] }) },
+        conversations: {
+          history: async () => ({ messages: [{ text: "hello", ts: "1712345678.000100" }] }),
+        },
       },
       event: {
         item: { channel: "C1", ts: "1712345678.000100", type: "message" },
@@ -3085,7 +3155,9 @@ describe("createAgentSlackHandlers", () => {
             return {};
           },
         },
-        conversations: { history: async () => ({ messages: [{ text: "" }] }) },
+        conversations: {
+          history: async () => ({ messages: [{ text: "", ts: "1712345678.000100" }] }),
+        },
       },
       event: {
         item: { channel: "C1", ts: "1712345678.000100", type: "message" },
@@ -3129,7 +3201,9 @@ describe("createAgentSlackHandlers", () => {
       body: { team_id: "T1" },
       client: {
         chat: { postMessage: async () => ({}) },
-        conversations: { history: async () => ({ messages: [{ text: "hello" }] }) },
+        conversations: {
+          history: async () => ({ messages: [{ text: "hello", ts: "1712345678.000100" }] }),
+        },
       },
       event: {
         item: { channel: "C1", ts: "1712345678.000100", type: "message" },

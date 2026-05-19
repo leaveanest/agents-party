@@ -65,30 +65,32 @@ export class PostgresSlackInstallationRepository implements SlackInstallationRep
   async findInstallation(
     lookup: SlackInstallationLookup,
   ): Promise<SlackInstallationRow | undefined> {
-    const result = await this.pool.query<SlackInstallationRecord>(
-      `select * from slack_installations
-       where client_id = $1
-         and enterprise_id is not distinct from $2
-         and team_id is not distinct from $3
-         and ($4::text is null or user_id = $4)
-       order by installed_at desc
-       limit 1`,
-      [this.clientId, lookup.enterpriseId, resolvedTeamId(lookup), lookup.userId],
-    );
-    const [row] = result.rows;
+    const teamId = resolvedTeamId(lookup);
+    if (lookup.enterpriseId === undefined && teamId === undefined) {
+      return undefined;
+    }
+    const row =
+      (await this.findInstallationRecord(lookup, teamId, lookup.userId)) ??
+      (lookup.userId === undefined
+        ? undefined
+        : await this.findInstallationRecord(lookup, teamId, undefined));
     return row === undefined ? undefined : installationRecordToRow(row);
   }
 
   async findBot(lookup: SlackInstallationLookup): Promise<SlackBotRow | undefined> {
+    const teamId = resolvedTeamId(lookup);
+    if (lookup.enterpriseId === undefined && teamId === undefined) {
+      return undefined;
+    }
     const result = await this.pool.query<SlackBotRecord>(
       `select * from slack_bots
        where client_id = $1
-         and enterprise_id is not distinct from $2
+         and ($2::text is null or enterprise_id is not distinct from $2)
          and team_id is not distinct from $3
          and bot_token is not null
        order by installed_at desc
        limit 1`,
-      [this.clientId, lookup.enterpriseId, resolvedTeamId(lookup)],
+      [this.clientId, lookup.enterpriseId, teamId],
     );
     const [row] = result.rows;
     return row === undefined ? undefined : botRecordToRow(row);
@@ -155,6 +157,24 @@ export class PostgresSlackInstallationRepository implements SlackInstallationRep
          and team_id is not distinct from $3`,
       [this.clientId, lookup.enterpriseId, resolvedTeamId(lookup)],
     );
+  }
+
+  private async findInstallationRecord(
+    lookup: SlackInstallationLookup,
+    teamId: string | undefined,
+    userId: string | undefined,
+  ): Promise<SlackInstallationRecord | undefined> {
+    const result = await this.pool.query<SlackInstallationRecord>(
+      `select * from slack_installations
+       where client_id = $1
+         and ($2::text is null or enterprise_id is not distinct from $2)
+         and team_id is not distinct from $3
+         and ($4::text is null or user_id = $4)
+       order by installed_at desc
+       limit 1`,
+      [this.clientId, lookup.enterpriseId, teamId, userId],
+    );
+    return result.rows[0];
   }
 }
 
