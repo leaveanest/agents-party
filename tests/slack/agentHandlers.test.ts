@@ -526,6 +526,61 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).not.toContain("model_routing_workspace_select");
   });
 
+  it("rejects cross-workspace channel configure actions before tenant reads", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findChannelSettings() {
+          throw new Error("should not read channel settings for unauthorized workspace");
+        },
+        async findWorkspaceSettings() {
+          throw new Error("should not read workspace settings for unauthorized workspace");
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          throw new Error("should not read credentials for unauthorized workspace");
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              channelId: "C1",
+              source: "channel",
+              teamId: "T-other",
+            }),
+          },
+        ],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(updatedViews[0])).toContain(
+      "Only Slack workspace admins and owners can configure model routing.",
+    );
+  });
+
   it("shows channel model selection when no agents are stored yet", async () => {
     const updatedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
@@ -813,6 +868,65 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain('\\"threadTs\\":\\"1712345678.000100\\"');
     expect(serialized).not.toContain("Workspace default model");
     expect(serialized).not.toContain("Enabled models");
+  });
+
+  it("rejects cross-workspace thread configure actions before tenant reads", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findSlackThread() {
+          throw new Error("should not read thread settings for unauthorized workspace");
+        },
+        async findChannelSettings() {
+          throw new Error("should not read channel settings for unauthorized workspace");
+        },
+        async findWorkspaceSettings() {
+          throw new Error("should not read workspace settings for unauthorized workspace");
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          throw new Error("should not read credentials for unauthorized workspace");
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              channelId: "C1",
+              source: "thread",
+              teamId: "T-other",
+              threadTs: "1712345678.000100",
+            }),
+          },
+        ],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(updatedViews[0])).toContain(
+      "Only Slack workspace admins and owners can configure model routing.",
+    );
   });
 
   it("saves workspace model routing settings from modal submissions", async () => {
@@ -1169,6 +1283,70 @@ describe("createAgentSlackHandlers", () => {
     ]);
     expect((saves[0] as { reasoningEffort?: unknown }).reasoningEffort).toBeUndefined();
     expect(JSON.stringify(updates[0])).toContain("Channel settings were saved.");
+  });
+
+  it("rejects cross-workspace channel submissions before tenant reads", async () => {
+    const acks: unknown[] = [];
+    const saves: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findChannelSettings() {
+          throw new Error("should not read channel settings for unauthorized workspace");
+        },
+        async findWorkspaceSettings() {
+          throw new Error("should not read workspace settings for unauthorized workspace");
+        },
+        async saveChannelSettings(input: unknown) {
+          saves.push(input);
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          throw new Error("should not read credentials for unauthorized workspace");
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => {
+            throw new Error("should not resolve Slack user for cross-workspace submission");
+          },
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          channelId: "C1",
+          source: "channel",
+          teamId: "T-other",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(saves).toEqual([]);
+    expect(JSON.stringify(acks[0])).toContain(
+      "Only Slack workspace admins and owners can configure model routing.",
+    );
   });
 
   it("does not persist inherited workspace reasoning as a channel override", async () => {
@@ -1549,6 +1727,75 @@ describe("createAgentSlackHandlers", () => {
     ]);
     expect((activations[0] as { reasoningEffort?: unknown }).reasoningEffort).toBeUndefined();
     expect(JSON.stringify(updates[0])).toContain("Thread settings were saved.");
+  });
+
+  it("rejects cross-workspace thread submissions before tenant reads", async () => {
+    const acks: unknown[] = [];
+    const activations: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async activateThreadAgent(input: unknown) {
+          activations.push(input);
+          return {};
+        },
+        async findSlackThread() {
+          throw new Error("should not read thread settings for unauthorized workspace");
+        },
+        async findChannelSettings() {
+          throw new Error("should not read channel settings for unauthorized workspace");
+        },
+        async findWorkspaceSettings() {
+          throw new Error("should not read workspace settings for unauthorized workspace");
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          throw new Error("should not read credentials for unauthorized workspace");
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => {
+            throw new Error("should not resolve Slack user for cross-workspace submission");
+          },
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, info() {} },
+      view: {
+        id: "VIEW1",
+        private_metadata: JSON.stringify({
+          channelId: "C1",
+          source: "thread",
+          teamId: "T-other",
+          threadTs: "1712345678.000100",
+        }),
+        state: {
+          values: {
+            model_routing_default_model: {
+              default_model: {
+                selected_option: { value: "openai:gpt-4o" },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(activations).toEqual([]);
+    expect(JSON.stringify(acks[0])).toContain(
+      "Only Slack workspace admins and owners can configure model routing.",
+    );
   });
 
   it("does not persist an inherited channel model as a thread override", async () => {
