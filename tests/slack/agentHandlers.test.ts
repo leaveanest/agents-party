@@ -60,7 +60,7 @@ describe("createAgentSlackHandlers", () => {
     const serialized = JSON.stringify(publishedViews[0]);
     expect(serialized).toContain("Model routing");
     expect(serialized).toContain("model_routing_configure");
-    expect(serialized).toContain('\\"selectedTeamId\\":\\"T2\\"');
+    expect(serialized).toContain('\\"selectedTeamId\\":\\"T-random\\"');
     expect(debugLogs[0]).toMatchObject({
       authorizationTeamId: "T-random",
       enterpriseId: "E1",
@@ -99,29 +99,20 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).not.toContain("workspaces");
   });
 
-  it("opens model routing modal with installed workspaces and stored model choices", async () => {
+  it("opens model routing modal for the current workspace with stored model choices", async () => {
     const openedViews: unknown[] = [];
     const operations: string[] = [];
     const updatedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       installedWorkspaceDirectory: {
-        async listInstalledWorkspaces(input) {
-          operations.push("listInstalledWorkspaces");
-          expect(input).toEqual({ enterpriseId: "E1" });
-          return [
-            {
-              enterpriseId: "E1",
-              installedAt: new Date("2026-05-15T00:00:00Z"),
-              teamId: "T2",
-              teamName: "Workspace Two",
-            },
-          ];
+        async listInstalledWorkspaces() {
+          throw new Error("workspace routing must not list workspaces during configuration");
         },
       },
       routingRepository: {
         async findWorkspaceSettings(teamId: string) {
           operations.push("findWorkspaceSettings");
-          expect(teamId).toBe("T2");
+          expect(teamId).toBe("T-random");
           return {
             default_model_id: "openai:gpt-4o",
             enabled_model_ids: ["openai:gpt-4o", "anthropic:claude-sonnet-4-20250514"],
@@ -131,7 +122,7 @@ describe("createAgentSlackHandlers", () => {
       workspaceCredentialSettings: {
         async listActiveProviderKinds(input) {
           operations.push("listActiveProviderKinds");
-          expect(input).toEqual({ teamId: "T2" });
+          expect(input).toEqual({ teamId: "T-random" });
           return ["openai", "anthropic"];
         },
         async saveProviderApiKey() {},
@@ -143,7 +134,7 @@ describe("createAgentSlackHandlers", () => {
         operations.push("ack");
       },
       body: {
-        actions: [{ value: JSON.stringify({ enterpriseId: "E1", selectedTeamId: "T2" }) }],
+        actions: [{ value: JSON.stringify({ enterpriseId: "E1", selectedTeamId: "T-random" }) }],
         enterprise: { id: "E1" },
         team: { id: "T-random" },
         trigger_id: "TRIGGER1",
@@ -176,7 +167,6 @@ describe("createAgentSlackHandlers", () => {
       "ack",
       "views.open",
       "users.info",
-      "listInstalledWorkspaces",
       "findWorkspaceSettings",
       "listActiveProviderKinds",
       "views.update",
@@ -201,7 +191,6 @@ describe("createAgentSlackHandlers", () => {
       }),
     ]);
     const serialized = JSON.stringify(updatedViews[0]);
-    expect(serialized).toContain("Workspace Two");
     expect(serialized).toContain("Enabled models");
     expect(serialized).toContain("Workspace default model");
     expect(serialized).toContain('"dispatch_action":true');
@@ -269,16 +258,8 @@ describe("createAgentSlackHandlers", () => {
     const updatedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       installedWorkspaceDirectory: {
-        async listInstalledWorkspaces(input) {
-          expect(input).toEqual({ enterpriseId: "E1" });
-          return [
-            {
-              enterpriseId: "E1",
-              installedAt: new Date("2026-05-15T00:00:00Z"),
-              teamId: "T2",
-              teamName: "Workspace Two",
-            },
-          ];
+        async listInstalledWorkspaces() {
+          throw new Error("unauthorized workspace routing must not list installed workspaces");
         },
       },
       routingRepository: {
@@ -841,22 +822,14 @@ describe("createAgentSlackHandlers", () => {
     let acked = false;
     const handlers = createAgentSlackHandlers({} as never, {
       installedWorkspaceDirectory: {
-        async listInstalledWorkspaces(input) {
-          expect(input).toEqual({ enterpriseId: "E1" });
-          return [
-            {
-              enterpriseId: "E1",
-              installedAt: new Date("2026-05-15T00:00:00Z"),
-              teamId: "T2",
-              teamName: "Workspace Two",
-            },
-          ];
+        async listInstalledWorkspaces() {
+          throw new Error("workspace routing submissions must not list installed workspaces");
         },
       },
       routingRepository: {
         async findWorkspaceSettings(teamId: string) {
           expect(acked).toBe(true);
-          expect(teamId).toBe("T2");
+          expect(teamId).toBe("T-random");
           return {
             default_agent_id: "assistant",
             default_model_id: "google:gemini-2.5-flash",
@@ -871,7 +844,7 @@ describe("createAgentSlackHandlers", () => {
       } as never,
       workspaceCredentialSettings: {
         async listActiveProviderKinds(input) {
-          expect(input).toEqual({ teamId: "T2" });
+          expect(input).toEqual({ teamId: "T-random" });
           return ["openai", "anthropic"];
         },
         async saveProviderApiKey() {},
@@ -903,7 +876,7 @@ describe("createAgentSlackHandlers", () => {
         id: "VIEW1",
         private_metadata: JSON.stringify({
           enterpriseId: "E1",
-          selectedTeamId: "T2",
+          selectedTeamId: "T-random",
           source: "app_home",
         }),
         state: {
@@ -942,7 +915,7 @@ describe("createAgentSlackHandlers", () => {
         defaultAgentId: "assistant",
         defaultModelId: "openai:gpt-4o",
         enabledModelIds: ["openai:gpt-4o", "anthropic:claude-sonnet-4-20250514"],
-        teamId: "T2",
+        teamId: "T-random",
         threadAutoReply: true,
       }),
     ]);
@@ -962,16 +935,8 @@ describe("createAgentSlackHandlers", () => {
     const updates: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       installedWorkspaceDirectory: {
-        async listInstalledWorkspaces(input) {
-          expect(input).toEqual({ enterpriseId: "E1" });
-          return [
-            {
-              enterpriseId: "E1",
-              installedAt: new Date("2026-05-15T00:00:00Z"),
-              teamId: "T2",
-              teamName: "Workspace Two",
-            },
-          ];
+        async listInstalledWorkspaces() {
+          throw new Error("unauthorized workspace routing must not list installed workspaces");
         },
       },
       routingRepository: {

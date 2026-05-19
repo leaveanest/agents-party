@@ -592,10 +592,7 @@ async function buildModelRoutingAppHomeBlocks(input: {
 }): Promise<Record<string, unknown>[]> {
   const { appHomeContext, translator } = input;
   const installedWorkspaces = await listAppHomeInstalledWorkspaces(input);
-  const selectedTeamId =
-    appHomeContext.mode === "enterprise_grid"
-      ? installedWorkspaces[0]?.teamId
-      : appHomeContext.sourceTeamId;
+  const selectedTeamId = appHomeContext.sourceTeamId;
   return [
     { type: "divider" },
     {
@@ -691,7 +688,7 @@ async function handleModelRoutingConfigureAction(
     return;
   }
   const translator = await resolveHandlerTranslator(
-    { enterpriseId, teamId: selectedTeamId ?? bodyTeamId },
+    { enterpriseId, teamId: bodyTeamId },
     slackUserId,
     options,
     logger,
@@ -736,28 +733,11 @@ async function handleModelRoutingConfigureAction(
     return;
   }
 
-  let installedWorkspaces: SlackInstalledWorkspace[] = [];
-  if (enterpriseId !== undefined && options.installedWorkspaceDirectory !== undefined) {
-    try {
-      installedWorkspaces = await options.installedWorkspaceDirectory.listInstalledWorkspaces({
-        enterpriseId,
-      });
-    } catch (error) {
-      logger.warn("Failed to list installed Slack workspaces for model routing modal.", {
-        enterpriseId,
-        error,
-      });
-    }
-  }
-  const effectiveTeamId =
-    enterpriseId === undefined
-      ? bodyTeamId
-      : (selectedTeamId ?? installedWorkspaces[0]?.teamId ?? bodyTeamId);
+  const effectiveTeamId = enterpriseId === undefined ? bodyTeamId : (selectedTeamId ?? bodyTeamId);
   if (
     effectiveTeamId !== undefined &&
     enterpriseId !== undefined &&
-    effectiveTeamId !== bodyTeamId &&
-    !installedWorkspaces.some((workspace) => workspace.teamId === effectiveTeamId)
+    effectiveTeamId !== bodyTeamId
   ) {
     await updateModelRoutingModal(
       client,
@@ -792,7 +772,7 @@ async function handleModelRoutingConfigureAction(
           selectedTeamId: effectiveTeamId,
           translator: userContext.translator,
           workspaceSettings,
-          workspaces: installedWorkspaces,
+          workspaces: [],
         }),
     logger,
   );
@@ -1323,15 +1303,10 @@ async function handleModelRoutingModalSubmission(
     });
     return;
   }
-  const isSelectedWorkspaceAllowed = await canManageSelectedModelRoutingWorkspace(
-    {
-      enterpriseId,
-      installedWorkspaceDirectory: options.installedWorkspaceDirectory,
-      selectedTeamId,
-      sourceTeamId: bodyTeamId,
-    },
-    logger,
-  );
+  const isSelectedWorkspaceAllowed = canManageSelectedModelRoutingWorkspace({
+    selectedTeamId,
+    sourceTeamId: bodyTeamId,
+  });
   if (!isSelectedWorkspaceAllowed) {
     await ack({
       response_action: "update",
@@ -1436,37 +1411,14 @@ async function handleModelRoutingModalSubmission(
   }
 }
 
-async function canManageSelectedModelRoutingWorkspace(
-  input: {
-    enterpriseId?: string;
-    installedWorkspaceDirectory?: SlackInstalledWorkspaceDirectory;
-    selectedTeamId: string;
-    sourceTeamId?: string;
-  },
-  logger: unknown,
-): Promise<boolean> {
+function canManageSelectedModelRoutingWorkspace(input: {
+  selectedTeamId: string;
+  sourceTeamId?: string;
+}): boolean {
   if (input.selectedTeamId === input.sourceTeamId) {
     return true;
   }
-  if (input.enterpriseId === undefined) {
-    return false;
-  }
-  if (input.installedWorkspaceDirectory === undefined) {
-    return false;
-  }
-  try {
-    const installedWorkspaces = await input.installedWorkspaceDirectory.listInstalledWorkspaces({
-      enterpriseId: input.enterpriseId,
-    });
-    return installedWorkspaces.some((workspace) => workspace.teamId === input.selectedTeamId);
-  } catch (error) {
-    logWarn(logger, "Failed to verify selected workspace for model routing settings.", {
-      enterpriseId: input.enterpriseId,
-      error,
-      selectedTeamId: input.selectedTeamId,
-    });
-    return false;
-  }
+  return false;
 }
 
 async function handleChannelModelRoutingModalSubmission(input: {
