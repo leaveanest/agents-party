@@ -22,7 +22,6 @@ import {
 } from "../i18n/index.js";
 import type { CredentialProviderKind } from "../providers/credentials.js";
 import {
-  LlmCapabilityId,
   LlmReasoningEffortId,
   llmProviders,
   type LlmProvider,
@@ -31,6 +30,7 @@ import {
 import {
   modelDefaultReasoningEffort,
   normalizeReasoningEffort,
+  supportedReasoningEffortsForModel,
 } from "../providers/reasoningOptions.js";
 import {
   salesforceAuthConfigSchema,
@@ -958,7 +958,7 @@ function buildModelRoutingModal(input: {
   );
   const defaultModelId = stringField(input.workspaceSettings, "default_model_id");
   const defaultInitialOption = modelOptions.find((option) => option.value === defaultModelId);
-  const shouldShowReasoningEffort = hasReasoningModel(modelOptions);
+  const shouldShowReasoningEffort = modelSupportsReasoningSettings(defaultModelId);
   blocks.push(
     {
       block_id: MODEL_ROUTING_ENABLED_MODELS_BLOCK_ID,
@@ -1003,6 +1003,7 @@ function buildModelRoutingModal(input: {
     blocks.push(
       buildReasoningEffortBlock({
         initialEffort: selectedReasoningEffort(input.workspaceSettings, defaultModelId),
+        modelId: defaultModelId,
         translator: input.translator,
       }),
     );
@@ -1060,13 +1061,14 @@ function buildChannelModelRoutingModal(input: {
       type: "input",
     },
   ];
-  if (hasReasoningModel(input.modelOptions)) {
+  if (modelSupportsReasoningSettings(defaultModelId)) {
     blocks.push(
       buildReasoningEffortBlock({
         initialEffort: selectedReasoningEffortFromSettings(
           [input.channelSettings, input.workspaceSettings],
           defaultModelId,
         ),
+        modelId: defaultModelId,
         translator: input.translator,
       }),
     );
@@ -1134,13 +1136,14 @@ function buildThreadModelRoutingModal(input: {
       type: "input",
     },
   ];
-  if (hasReasoningModel(input.modelOptions)) {
+  if (modelSupportsReasoningSettings(defaultModelId)) {
     blocks.push(
       buildReasoningEffortBlock({
         initialEffort: selectedReasoningEffortFromSettings(
           [input.threadSettings, input.channelSettings, input.workspaceSettings],
           defaultModelId,
         ),
+        modelId: defaultModelId,
         translator: input.translator,
       }),
     );
@@ -1232,13 +1235,7 @@ async function handleModelRoutingModalSubmission(
     MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
-  const reasoningEffort = normalizeReasoningEffort(
-    readSelectedOptionValue(
-      view,
-      MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
-      MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
-    ),
-  );
+  const reasoningEffort = readReasoningEffortValue(view, defaultModelId);
   const modelRegistry = createDefaultModelRegistry();
   const unknownModelIds = [...enabledModelIds, defaultModelId].filter(
     (modelId): modelId is string => modelId !== undefined && !modelRegistry.has(modelId),
@@ -1399,13 +1396,7 @@ async function handleChannelModelRoutingModalSubmission(input: {
     MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
-  const reasoningEffort = normalizeReasoningEffort(
-    readSelectedOptionValue(
-      input.view,
-      MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
-      MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
-    ),
-  );
+  const reasoningEffort = readReasoningEffortValue(input.view, defaultModelId);
   const [channelSettings, workspaceSettings, credentialedProviders] = await Promise.all([
     input.options.routingRepository.findChannelSettings(selectedTeamId, channelId),
     input.options.routingRepository.findWorkspaceSettings(selectedTeamId),
@@ -1566,13 +1557,7 @@ async function handleThreadModelRoutingModalSubmission(input: {
     MODEL_ROUTING_DEFAULT_MODEL_BLOCK_ID,
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
-  const reasoningEffort = normalizeReasoningEffort(
-    readSelectedOptionValue(
-      input.view,
-      MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
-      MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
-    ),
-  );
+  const reasoningEffort = readReasoningEffortValue(input.view, defaultModelId);
   const [threadSettings, channelSettings, workspaceSettings, credentialedProviders] =
     await Promise.all([
       input.options.routingRepository.findSlackThread(selectedTeamId, channelId, threadTs),
@@ -1751,47 +1736,63 @@ function channelModelOptions(input: {
     .slice(0, 100);
 }
 
-function reasoningEffortOptions(translator: Translator): SlackOption[] {
-  return [
+function reasoningEffortOptions(input: {
+  modelId?: string;
+  translator: Translator;
+}): SlackOption[] {
+  const allOptions: SlackOption[] = [
     {
-      text: { text: translator.t("modelRouting.reasoning.providerDefault"), type: "plain_text" },
+      text: {
+        text: input.translator.t("modelRouting.reasoning.providerDefault"),
+        type: "plain_text",
+      },
       value: LlmReasoningEffortId.ProviderDefault,
     },
     {
-      text: { text: translator.t("modelRouting.reasoning.none"), type: "plain_text" },
+      text: { text: input.translator.t("modelRouting.reasoning.none"), type: "plain_text" },
       value: LlmReasoningEffortId.None,
     },
     {
-      text: { text: translator.t("modelRouting.reasoning.minimal"), type: "plain_text" },
+      text: { text: input.translator.t("modelRouting.reasoning.minimal"), type: "plain_text" },
       value: LlmReasoningEffortId.Minimal,
     },
     {
-      text: { text: translator.t("modelRouting.reasoning.low"), type: "plain_text" },
+      text: { text: input.translator.t("modelRouting.reasoning.low"), type: "plain_text" },
       value: LlmReasoningEffortId.Low,
     },
     {
-      text: { text: translator.t("modelRouting.reasoning.medium"), type: "plain_text" },
+      text: { text: input.translator.t("modelRouting.reasoning.medium"), type: "plain_text" },
       value: LlmReasoningEffortId.Medium,
     },
     {
-      text: { text: translator.t("modelRouting.reasoning.high"), type: "plain_text" },
+      text: { text: input.translator.t("modelRouting.reasoning.high"), type: "plain_text" },
       value: LlmReasoningEffortId.High,
     },
     {
-      text: { text: translator.t("modelRouting.reasoning.xhigh"), type: "plain_text" },
+      text: { text: input.translator.t("modelRouting.reasoning.xhigh"), type: "plain_text" },
       value: LlmReasoningEffortId.XHigh,
     },
   ];
+  const supportedEfforts = supportedReasoningEfforts(input.modelId);
+  return allOptions.filter((option) => {
+    const effort = normalizeReasoningEffort(option.value);
+    return (
+      effort === LlmReasoningEffortId.ProviderDefault ||
+      (effort !== undefined && supportedEfforts.has(effort))
+    );
+  });
 }
 
-function hasReasoningModel(modelOptions: readonly SlackOption[]): boolean {
+function modelSupportsReasoningSettings(modelId: string | undefined): boolean {
+  return supportedReasoningEfforts(modelId).size > 0;
+}
+
+function supportedReasoningEfforts(modelId: string | undefined): ReadonlySet<LlmReasoningEffort> {
   const registry = createDefaultModelRegistry();
-  return modelOptions.some((option) => {
-    if (!registry.has(option.value)) {
-      return false;
-    }
-    return registry.get(option.value).capabilities.includes(LlmCapabilityId.Thinking);
-  });
+  if (modelId === undefined || !registry.has(modelId)) {
+    return new Set();
+  }
+  return new Set(supportedReasoningEffortsForModel(registry.get(modelId)));
 }
 
 function selectedReasoningEffort(
@@ -1844,11 +1845,35 @@ function reasoningEffortForScopedSave(input: {
   return input.selectedEffort === inheritedEffort ? undefined : input.selectedEffort;
 }
 
+function readReasoningEffortValue(
+  view: SlackViewArgs["view"],
+  modelId: string | undefined,
+): LlmReasoningEffort | undefined {
+  if (!modelSupportsReasoningSettings(modelId)) {
+    return undefined;
+  }
+  const selectedEffort = normalizeReasoningEffort(
+    readSelectedOptionValue(
+      view,
+      MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
+      MODEL_ROUTING_REASONING_EFFORT_ACTION_ID,
+    ),
+  );
+  if (selectedEffort === undefined || selectedEffort === LlmReasoningEffortId.ProviderDefault) {
+    return selectedEffort;
+  }
+  return supportedReasoningEfforts(modelId).has(selectedEffort) ? selectedEffort : undefined;
+}
+
 function buildReasoningEffortBlock(input: {
   initialEffort: LlmReasoningEffort;
+  modelId?: string;
   translator: Translator;
 }): Record<string, unknown> {
-  const options = reasoningEffortOptions(input.translator);
+  const options = reasoningEffortOptions({
+    modelId: input.modelId,
+    translator: input.translator,
+  });
   const providerDefaultOption = options[0] as SlackOption;
   return {
     block_id: MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,

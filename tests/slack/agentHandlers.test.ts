@@ -174,8 +174,8 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain("Workspace Two");
     expect(serialized).toContain("Enabled models");
     expect(serialized).toContain("Workspace default model");
-    expect(serialized).toContain("Reasoning effort");
-    expect(serialized).toContain("Provider default");
+    expect(serialized).not.toContain("Reasoning effort");
+    expect(serialized).not.toContain("Provider default");
     expect(serialized).toContain("anthropic:claude-3-5-sonnet-latest");
     expect(serialized).not.toContain("google:gemini-2.5-flash");
   });
@@ -355,7 +355,7 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).not.toContain("Channel default agent");
   });
 
-  it("opens unset workspace model settings with provider default reasoning selected", async () => {
+  it("does not show reasoning settings when workspace default model is unset", async () => {
     const updatedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       routingRepository: {
@@ -395,8 +395,57 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     const serialized = JSON.stringify(updatedViews[0]);
+    expect(serialized).not.toContain("Reasoning effort");
+    expect(serialized).not.toContain('"value":"provider_default"');
+  });
+
+  it("shows reasoning settings only for the selected workspace default model", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      routingRepository: {
+        async findWorkspaceSettings() {
+          return {
+            default_model_id: "openai:gpt-5.5",
+            enabled_model_ids: ["openai:gpt-5.5", "openai:gpt-4o"],
+          };
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          return ["openai"];
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T1" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const serialized = JSON.stringify(updatedViews[0]);
     expect(serialized).toContain("Reasoning effort");
     expect(serialized).toContain('"value":"provider_default"');
+    expect(serialized).toContain('"value":"minimal"');
+    expect(serialized).not.toContain('"value":"xhigh"');
   });
 
   it("opens thread model settings modal from mention menu actions", async () => {
@@ -570,11 +619,11 @@ describe("createAgentSlackHandlers", () => {
         defaultAgentId: "assistant",
         defaultModelId: "openai:gpt-4o",
         enabledModelIds: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
-        reasoningEffort: "high",
         teamId: "T2",
         threadAutoReply: true,
       }),
     ]);
+    expect((saves[0] as { reasoningEffort?: unknown }).reasoningEffort).toBeUndefined();
     expect(updates).toEqual([
       expect.objectContaining({
         view_id: "VIEW1",
@@ -743,6 +792,7 @@ describe("createAgentSlackHandlers", () => {
         threadAutoReply: true,
       }),
     ]);
+    expect((saves[0] as { reasoningEffort?: unknown }).reasoningEffort).toBeUndefined();
     expect(JSON.stringify(updates[0])).toContain("Channel settings were saved.");
   });
 
@@ -1044,12 +1094,12 @@ describe("createAgentSlackHandlers", () => {
         channelId: "C1",
         lastMessageTs: "1712345678.000200",
         modelId: "openai:gpt-4o",
-        reasoningEffort: "low",
         rootMessageTs: "1712345678.000100",
         teamId: "T1",
         threadTs: "1712345678.000100",
       }),
     ]);
+    expect((activations[0] as { reasoningEffort?: unknown }).reasoningEffort).toBeUndefined();
     expect(JSON.stringify(updates[0])).toContain("Thread settings were saved.");
   });
 

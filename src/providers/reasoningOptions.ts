@@ -56,10 +56,28 @@ const XAI_REASONING_EFFORTS = new Set<LlmReasoningEffort>([
   LlmReasoningEffortId.High,
 ]);
 
+export const selectableReasoningEfforts = [
+  LlmReasoningEffortId.None,
+  LlmReasoningEffortId.Minimal,
+  LlmReasoningEffortId.Low,
+  LlmReasoningEffortId.Medium,
+  LlmReasoningEffortId.High,
+  LlmReasoningEffortId.XHigh,
+] as const satisfies readonly LlmReasoningEffort[];
+
 export function modelDefaultReasoningEffort(model: ModelInfo): LlmReasoningEffort | undefined {
-  return model.capabilities.includes(LlmCapabilityId.Thinking)
+  return supportedReasoningEffortsForModel(model).length > 0
     ? LlmReasoningEffortId.ProviderDefault
     : undefined;
+}
+
+export function supportedReasoningEffortsForModel(model: ModelInfo): readonly LlmReasoningEffort[] {
+  if (!model.capabilities.includes(LlmCapabilityId.Thinking)) {
+    return [];
+  }
+  return selectableReasoningEfforts.filter((effort) =>
+    isModelReasoningEffortSupported(model, effort),
+  );
 }
 
 export function normalizeReasoningEffort(value: unknown): LlmReasoningEffort | undefined {
