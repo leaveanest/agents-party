@@ -141,6 +141,40 @@ describe("AgentRunner", () => {
     expect(router.requests[0]?.reasoningEffort).toBe("provider_default");
   });
 
+  it("runs structured agent requests without imposing an output token limit", async () => {
+    const router = new FakeProviderRouter({
+      content: "",
+      structuredOutput: { translatedText: "こんにちは" },
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.runStructured(
+      {
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "translate this",
+        userId: "U1",
+      },
+      {
+        jsonSchema: {
+          additionalProperties: false,
+          properties: { translatedText: { type: "string" } },
+          required: ["translatedText"],
+          type: "object",
+        },
+        type: "json",
+      },
+    );
+
+    expect(result.structuredOutput).toEqual({ translatedText: "こんにちは" });
+    expect(router.requests[0]?.maxOutputTokens).toBeUndefined();
+    expect(router.requests[0]?.responseFormat).toEqual(expect.objectContaining({ type: "json" }));
+  });
+
   it("returns a user-facing fallback when the provider returns no text after search", async () => {
     const router = new FakeProviderRouter({
       content: "",

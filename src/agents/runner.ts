@@ -6,7 +6,12 @@ import type {
   UserMessagePart,
 } from "../domain/messageHistory.js";
 import { createAiSdkAdapters } from "../providers/aiSdkAdapter.js";
-import type { LlmRequest, LlmResult, ModelInfo } from "../providers/contracts.js";
+import type {
+  LlmRequest,
+  LlmResponseFormat,
+  LlmResult,
+  ModelInfo,
+} from "../providers/contracts.js";
 import type { ProviderCredentialResolver } from "../providers/credentials.js";
 import { createNativeProviderAdapters } from "../providers/nativeProviderAdapters.js";
 import { ProviderRouter } from "../providers/providerRouter.js";
@@ -32,6 +37,12 @@ export type AgentRunnerResult = {
   raw?: unknown;
   structuredResult?: JsonValue;
   toolResults: AgentToolResult[];
+};
+
+export type AgentRunnerStructuredResult = {
+  model?: AgentRunnerModelTrace;
+  raw?: unknown;
+  structuredOutput: JsonValue;
 };
 
 export type AgentRunnerModelTrace = {
@@ -75,6 +86,44 @@ export class AgentRunner {
 
     try {
       return normalizeRunnerResult(decision, model, result, toolResults);
+    } catch (error) {
+      throw new AgentRunnerExecutionError(modelTrace(model), error);
+    }
+  }
+
+  async runStructured(
+    invocationInput: unknown,
+    responseFormat: Extract<LlmResponseFormat, { type: "json" }>,
+  ): Promise<AgentRunnerStructuredResult> {
+    const invocation = slackAgentInvocationSchema.parse(invocationInput);
+    const model = this.resolveModel(invocation.modelId);
+    try {
+      const result = await this.options.providerRouter.generate({
+        context: {
+          workspaceId: invocation.teamId,
+        },
+        history: buildAgentHistory({
+          invocation,
+          toolResults: [],
+        }),
+        metadata: {
+          slack_channel_id: invocation.channelId,
+          slack_team_id: invocation.teamId,
+          slack_user_id: invocation.userId,
+        },
+        model,
+        reasoningEffort: normalizeReasoningEffort(invocation.reasoningEffort),
+        responseFormat,
+        system: this.systemPrompt(),
+      });
+      if (result.structuredOutput === undefined) {
+        throw new Error("Provider returned no structured output.");
+      }
+      return {
+        model: modelTrace(model),
+        raw: result.raw,
+        structuredOutput: result.structuredOutput,
+      };
     } catch (error) {
       throw new AgentRunnerExecutionError(modelTrace(model), error);
     }

@@ -27,12 +27,9 @@ describe("ModelRegistry", () => {
     expect(registry.list("groq")).not.toHaveLength(0);
     expect(registry.list("mistral")).not.toHaveLength(0);
     expect(registry.list("nvidia")).not.toHaveLength(0);
-    expect(registry.list("plamo")).not.toHaveLength(0);
     expect(registry.list("perplexity")).not.toHaveLength(0);
     expect(registry.list("togetherai")).not.toHaveLength(0);
     expect(registry.list("xai")).not.toHaveLength(0);
-    expect(registry.list("dify")).not.toHaveLength(0);
-    expect(registry.list("litellm")).not.toHaveLength(0);
   });
 
   it("resolves legacy model aliases to explicit provider records", () => {
@@ -83,10 +80,6 @@ describe("ModelRegistry", () => {
       provider: "openai",
       providerModelId: "gpt-4o",
     });
-    expect(registry.get("azure.gpt-4o")).toMatchObject({
-      id: "azure_openai:gpt-4o",
-      provider: "azure_openai",
-    });
     expect(registry.get("gpt-image-1.5")).toMatchObject({
       capabilities: ["image_generation"],
       id: "openai:gpt-image-1.5",
@@ -125,6 +118,33 @@ describe("ModelRegistry", () => {
     expect(registry.get("openai:gpt-4o").capabilities).not.toContain("image_generation");
   });
 
+  it("does not register deprecated or unsupported chat model entries", () => {
+    const registry = createDefaultModelRegistry();
+
+    for (const modelId of [
+      "azure_openai:gpt-4o",
+      "azure.gpt-4o",
+      "anthropic:claude-3-5-sonnet-latest",
+      "claude-3-5-sonnet-latest",
+      "bedrock:anthropic.claude-3-5-sonnet-20240620",
+      "anthropic.claude-3-5-sonnet-20240620",
+      "groq:llama-3.1-70b-versatile",
+      "groq.llama-3.1-70b-versatile",
+      "nvidia:meta/llama-3.1-70b-instruct",
+      "nvidia.meta/llama-3.1-70b-instruct",
+      "plamo:plamo-beta",
+      "plamo-beta",
+      "xai:grok-2-latest",
+      "grok-2-latest",
+      "dify:chatflow",
+      "dify.chatflow",
+      "litellm:proxy",
+      "litellm.proxy",
+    ]) {
+      expect(() => registry.get(modelId)).toThrow(UnknownModelError);
+    }
+  });
+
   it("marks OpenAI reasoning models with thinking capability", () => {
     const registry = createDefaultModelRegistry();
 
@@ -139,7 +159,6 @@ describe("ModelRegistry", () => {
     expect(registry.get("anthropic:claude-sonnet-4-5").capabilities).toContain("web_search");
     expect(registry.get("google:gemini-2.5-pro").capabilities).toContain("web_search");
     expect(registry.get("perplexity:sonar").capabilities).toContain("web_search");
-    expect(registry.get("litellm:proxy").capabilities).not.toContain("web_search");
   });
 
   it("rejects unknown model names instead of inferring provider from strings", () => {

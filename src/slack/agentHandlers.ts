@@ -5,11 +5,13 @@ import type {
   SlackViewMiddlewareArgs,
   StringIndexed,
 } from "@slack/bolt";
+import { z } from "zod";
 
 import {
   AgentRunnerExecutionError,
   type AgentRunner,
   type AgentRunnerResult,
+  type AgentRunnerStructuredResult,
 } from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
 import {
@@ -24,6 +26,7 @@ import type { CredentialProviderKind } from "../providers/credentials.js";
 import {
   LlmReasoningEffortId,
   llmProviders,
+  type LlmResponseFormat,
   type LlmProvider,
   type LlmReasoningEffort,
 } from "../providers/contracts.js";
@@ -170,6 +173,27 @@ const THREAD_HISTORY_CONVERSATION_SUBTYPES = new Set([
   "me_message",
   "thread_broadcast",
 ]);
+const translationResultSchema = z
+  .object({
+    translatedText: z.string().trim().min(1),
+  })
+  .strict();
+const TRANSLATION_RESULT_RESPONSE_FORMAT: Extract<LlmResponseFormat, { type: "json" }> = {
+  jsonSchema: {
+    additionalProperties: false,
+    properties: {
+      translatedText: {
+        description: "The translated Slack message text.",
+        type: "string",
+      },
+    },
+    required: ["translatedText"],
+    type: "object",
+  },
+  jsonSchemaDescription: "A Slack message translation result.",
+  jsonSchemaName: "slack_message_translation",
+  type: "json",
+};
 export type SlackAgentClient = Pick<
   SlackClient,
   "chat" | "conversations" | "filesUploadV2" | "token" | "users"
@@ -1711,7 +1735,10 @@ async function handleThreadModelRoutingModalSubmission(input: {
       agentId: defaultAgentId,
       channelId,
       lastMessageTs: stringField(threadSettings, "last_message_ts") ?? threadTs,
-      modelId: defaultModelId,
+      modelId: modelIdForScopedSave({
+        inheritedSettings: [channelSettings, workspaceSettings],
+        selectedModelId: defaultModelId,
+      }),
       reasoningEffort: reasoningEffortForScopedSave({
         currentSettings: threadSettings,
         inheritedSettings: [channelSettings, workspaceSettings],
@@ -3151,6 +3178,10 @@ export async function processSlackAgentJob(
     await processAppMentionJob(job, input);
     return;
   }
+  if (job.eventType === "reaction_added") {
+    await processReactionAddedJob(job, input);
+    return;
+  }
   await processFollowUpMessageJob(job, input);
 }
 
@@ -3476,6 +3507,125 @@ async function processFollowUpMessageJob(
   });
 }
 
+async function processReactionAddedJob(
+  job: SlackAgentJob,
+  input: {
+    client: SlackAgentClient;
+    defaultLocale?: Locale;
+    logger: unknown;
+    retryContext?: SlackAgentJobRetryContext;
+    routingRepository?: SlackAgentRoutingRepository;
+    runner: AgentRunner;
+    userSettingsRepository?: UserSettingsRepository;
+  },
+): Promise<void> {
+  if (input.routingRepository === undefined || job.targetLanguage === undefined) {
+    return;
+  }
+  if (!(await input.routingRepository.isChannelEnabled(job.teamId, job.channelId))) {
+    return;
+  }
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: job.enterpriseId, teamId: job.teamId },
+    job.userId,
+    input,
+    input.logger,
+  );
+
+  let sourceText: string | undefined;
+  let threadTs = job.threadTs;
+  try {
+    const sourceMessage = await fetchSingleMessage(input.client, job.channelId, job.messageTs);
+    sourceText = readSlackMessageText(sourceMessage);
+    threadTs = readString(sourceMessage, "thread_ts") ?? job.threadTs;
+  } catch (error) {
+    logWarn(input.logger, "Could not fetch source message for translation reaction.", {
+      error,
+      teamId: job.teamId,
+      threadTs,
+    });
+  }
+  let text: string;
+  try {
+    const route = await resolveSlackAgentRoute(input.routingRepository, {
+      channelId: job.channelId,
+      teamId: job.teamId,
+      threadTs,
+    });
+    if (input.routingRepository.resolveAgent !== undefined && route === undefined) {
+      return;
+    }
+    await notifyModelFallback({
+      channelId: job.channelId,
+      client: input.client,
+      logger: input.logger,
+      route,
+      threadTs,
+      translator,
+      userId: job.userId,
+    });
+    if (sourceText === undefined || sourceText.trim() === "") {
+      await input.client.chat.postMessage({
+        channel: job.channelId,
+        text: translator.t("slack.error.unreadableReaction"),
+        thread_ts: threadTs,
+      });
+      return;
+    }
+    await setSlackAssistantThreadStatus({
+      channelId: job.channelId,
+      client: input.client,
+      logger: input.logger,
+      translator,
+      threadTs,
+    });
+    const result = await input.runner.runStructured(
+      {
+        channelId: job.channelId,
+        messageTs: job.messageTs,
+        modelId: route?.modelId,
+        reasoningEffort: route?.reasoningEffort,
+        teamId: job.teamId,
+        text:
+          `Translate the following Slack message to ${job.targetLanguage}.\n` +
+          "Return only the structured translation result. Preserve Slack mentions, URLs, emoji, and code blocks where possible.\n\n" +
+          sourceText,
+        threadTs,
+        userId: job.userId,
+        viewerContextChannelIds: [job.channelId],
+      },
+      TRANSLATION_RESULT_RESPONSE_FORMAT,
+    );
+    const translationResult = translationResultSchema.parse(result.structuredOutput);
+    text = translationResult.translatedText;
+    logStructuredAgentRunnerSuccess(input.logger, {
+      channelId: job.channelId,
+      eventType: "reaction_added",
+      messageTs: job.messageTs,
+      result,
+      teamId: job.teamId,
+      threadTs,
+    });
+  } catch (error) {
+    logError(input.logger, "TypeScript AgentRunner failed while handling translation reaction.", {
+      error,
+      ...runnerFailureLogFields(error),
+      teamId: job.teamId,
+      threadTs,
+    });
+    if (shouldRetryJobFailure(input.retryContext)) {
+      throw error;
+    }
+    text = translator.t("slack.error.translation");
+  }
+
+  await input.client.chat.postMessage({
+    channel: job.channelId,
+    text,
+    thread_ts: threadTs,
+  });
+}
+
 async function activateMentionMenuThread(input: {
   channelId: string;
   logger: unknown;
@@ -3752,12 +3902,37 @@ async function handleReactionAdded(
     options,
     logger,
   );
+  if (options.agentJobQueue !== undefined) {
+    await enqueueSlackAgentJob({
+      body,
+      client,
+      eventType: "reaction_added",
+      job: {
+        channelId,
+        enterpriseId: readSlackEnterpriseId(body),
+        eventId: readSlackEventId(body),
+        eventType: "reaction_added",
+        isEnterpriseInstall: readSlackEnterpriseInstall(body),
+        messageTs,
+        teamId,
+        targetLanguage,
+        text: "",
+        threadTs: messageTs,
+        userId: readString(event, "user") ?? "unknown",
+      },
+      logger,
+      queue: options.agentJobQueue,
+      translator,
+      threadTs: messageTs,
+    });
+    return;
+  }
 
   let sourceText: string | undefined;
   let threadTs = messageTs;
   try {
     const sourceMessage = await fetchSingleMessage(client, channelId, messageTs);
-    sourceText = readString(sourceMessage, "text");
+    sourceText = readSlackMessageText(sourceMessage);
     threadTs = readString(sourceMessage, "thread_ts") ?? messageTs;
   } catch (error) {
     logger.warn("Could not fetch source message for translation reaction.", {
@@ -3766,7 +3941,6 @@ async function handleReactionAdded(
       threadTs,
     });
   }
-
   let text: string;
   try {
     const route = await resolveSlackAgentRoute(options.routingRepository, {
@@ -3794,19 +3968,33 @@ async function handleReactionAdded(
       });
       return;
     }
-    const result = await runner.run({
+    await setSlackAssistantThreadStatus({
       channelId,
-      messageTs,
-      modelId: route?.modelId,
-      reasoningEffort: route?.reasoningEffort,
-      teamId,
-      text: `Translate the following Slack message to ${targetLanguage}:\n\n${sourceText}`,
+      client,
+      logger,
+      translator,
       threadTs,
-      userId: readString(event, "user") ?? "unknown",
-      viewerContextChannelIds: [channelId],
     });
-    text = result.message;
-    logAgentRunnerSuccess(logger, {
+    const result = await runner.runStructured(
+      {
+        channelId,
+        messageTs,
+        modelId: route?.modelId,
+        reasoningEffort: route?.reasoningEffort,
+        teamId,
+        text:
+          `Translate the following Slack message to ${targetLanguage}.\n` +
+          "Return only the structured translation result. Preserve Slack mentions, URLs, emoji, and code blocks where possible.\n\n" +
+          sourceText,
+        threadTs,
+        userId: readString(event, "user") ?? "unknown",
+        viewerContextChannelIds: [channelId],
+      },
+      TRANSLATION_RESULT_RESPONSE_FORMAT,
+    );
+    const translationResult = translationResultSchema.parse(result.structuredOutput);
+    text = translationResult.translatedText;
+    logStructuredAgentRunnerSuccess(logger, {
       channelId,
       eventType: "reaction_added",
       messageTs,
@@ -4223,6 +4411,29 @@ function logAgentRunnerSuccess(
   });
 }
 
+function logStructuredAgentRunnerSuccess(
+  logger: unknown,
+  input: {
+    channelId: string;
+    eventType: "reaction_added";
+    messageTs: string;
+    result: AgentRunnerStructuredResult;
+    teamId: string;
+    threadTs: string;
+  },
+): void {
+  logInfo(logger, "TypeScript AgentRunner completed structured Slack event.", {
+    channelId: input.channelId,
+    eventType: input.eventType,
+    hasStructuredResult: true,
+    messageTs: input.messageTs,
+    modelId: input.result.model?.id,
+    provider: input.result.model?.provider,
+    teamId: input.teamId,
+    threadTs: input.threadTs,
+  });
+}
+
 function logInfo(logger: unknown, message: string, metadata: Record<string, unknown>): void {
   if (isRecord(logger) && typeof logger.info === "function") {
     logger.info(message, metadata);
@@ -4355,23 +4566,36 @@ function mediaExtension(media: GeneratedSlackMedia): string {
 }
 
 async function fetchSingleMessage(
-  client: SlackEventArgs<"reaction_added">["client"],
+  client: SlackAgentClient,
   channelId: string,
   messageTs: string,
 ): Promise<StringIndexed> {
-  const response = await client.conversations.history({
+  const historyResponse = await client.conversations.history({
     channel: channelId,
     inclusive: true,
     latest: messageTs,
     limit: 1,
     oldest: messageTs,
   });
-  const messages = Array.isArray(response.messages) ? response.messages : [];
-  const message = messages[0];
-  if (!isRecord(message)) {
-    throw new Error("Slack history response did not contain a message.");
+  const historyMessages = Array.isArray(historyResponse.messages) ? historyResponse.messages : [];
+  const historyMessage = historyMessages[0];
+  if (isRecord(historyMessage)) {
+    return historyMessage;
   }
-  return message;
+  const repliesResponse = await client.conversations.replies({
+    channel: channelId,
+    inclusive: true,
+    latest: messageTs,
+    limit: 1,
+    oldest: messageTs,
+    ts: messageTs,
+  });
+  const replyMessages = Array.isArray(repliesResponse.messages) ? repliesResponse.messages : [];
+  const replyMessage = replyMessages[0];
+  if (!isRecord(replyMessage)) {
+    throw new Error("Slack history and replies responses did not contain a message.");
+  }
+  return replyMessage;
 }
 
 function buildWorkspaceCredentialModal(
@@ -5606,6 +5830,140 @@ function escapeRegExp(value: string): string {
 function readString(value: StringIndexed, field: string): string | undefined {
   const fieldValue = value[field];
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function readSlackMessageText(message: StringIndexed): string | undefined {
+  return firstNonEmptyText([
+    readString(message, "text"),
+    readSlackBlocksText(message.blocks),
+    readSlackAttachmentsText(message.attachments),
+  ]);
+}
+
+function readSlackBlocksText(value: unknown): string | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return joinNonEmptyLines(value.flatMap((block) => readSlackBlockTextParts(block)));
+}
+
+function readSlackBlockTextParts(value: unknown): string[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+  return [
+    readSlackTextObjectText(value.text),
+    ...(Array.isArray(value.fields)
+      ? value.fields.map((field) => readSlackTextObjectText(field))
+      : []),
+    ...(Array.isArray(value.elements)
+      ? value.elements.map((element) => readSlackBlockElementText(element))
+      : []),
+  ].filter((text): text is string => text !== undefined);
+}
+
+function readSlackBlockElementText(value: unknown): string | undefined {
+  return readSlackTextObjectText(value) ?? readSlackRichTextElementText(value);
+}
+
+function readSlackRichTextElementText(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const type = readOptionalString(value.type);
+  const text = readOptionalString(value.text);
+  if (type === "text" && text !== undefined) {
+    return text;
+  }
+  if (type === "link") {
+    const url = readOptionalString(value.url);
+    if (url === undefined) {
+      return text;
+    }
+    return text === undefined ? url : `<${url}|${text}>`;
+  }
+  if (type === "emoji") {
+    const name = readOptionalString(value.name);
+    return name === undefined ? undefined : `:${name}:`;
+  }
+  if (type === "user") {
+    const userId = readOptionalString(value.user_id);
+    return userId === undefined ? undefined : `<@${userId}>`;
+  }
+  if (type === "channel") {
+    const channelId = readOptionalString(value.channel_id);
+    return channelId === undefined ? undefined : `<#${channelId}>`;
+  }
+  if (type === "usergroup") {
+    const usergroupId = readOptionalString(value.usergroup_id);
+    return usergroupId === undefined ? undefined : `<!subteam^${usergroupId}>`;
+  }
+  if (type === "broadcast") {
+    const range = readOptionalString(value.range);
+    return range === undefined ? undefined : `<!${range}>`;
+  }
+  if (type === "date") {
+    const timestamp = readOptionalString(value.timestamp);
+    const format = readOptionalString(value.format);
+    const fallback = readOptionalString(value.fallback);
+    if (timestamp === undefined || format === undefined) {
+      return fallback;
+    }
+    return fallback === undefined
+      ? `<!date^${timestamp}^${format}>`
+      : `<!date^${timestamp}^${format}|${fallback}>`;
+  }
+  if (Array.isArray(value.elements)) {
+    const separator = type === "rich_text_section" ? "" : "\n";
+    const joined = value.elements
+      .map((element) => readSlackBlockElementText(element))
+      .filter((part): part is string => part !== undefined && part !== "")
+      .join(separator);
+    return joined === "" ? undefined : joined;
+  }
+  return undefined;
+}
+
+function readSlackAttachmentsText(value: unknown): string | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  return joinNonEmptyLines(
+    value.flatMap((attachment) => {
+      if (!isRecord(attachment)) {
+        return [];
+      }
+      return [
+        readSlackTextObjectText(attachment.text) ?? readOptionalString(attachment.text),
+        readSlackTextObjectText(attachment.pretext) ?? readOptionalString(attachment.pretext),
+        ...(Array.isArray(attachment.blocks)
+          ? attachment.blocks.flatMap((block) => readSlackBlockTextParts(block))
+          : []),
+      ].filter((text): text is string => text !== undefined);
+    }),
+  );
+}
+
+function readSlackTextObjectText(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim() !== "") {
+    return value;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return readOptionalString(value.text);
+}
+
+function firstNonEmptyText(values: readonly (string | undefined)[]): string | undefined {
+  return values.find((value) => value !== undefined && value.trim() !== "");
+}
+
+function joinNonEmptyLines(values: readonly (string | undefined)[]): string | undefined {
+  const text = values
+    .map((value) => value?.trim())
+    .filter((value): value is string => value !== undefined && value !== "")
+    .join("\n");
+  return text === "" ? undefined : text;
 }
 
 function readOptionalContextValue(value: unknown): string | undefined {

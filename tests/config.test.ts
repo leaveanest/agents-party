@@ -85,9 +85,7 @@ describe("loadSettings", () => {
   });
 
   it("allows the TypeScript AgentRunner model to be configured explicitly", () => {
-    expect(loadSettings({ AGENT_MODEL: "anthropic:claude-3-5-sonnet-latest" }).agentModelId).toBe(
-      "anthropic:claude-3-5-sonnet-latest",
-    );
+    expect(loadSettings({ AGENT_MODEL: "openai:gpt-4o" }).agentModelId).toBe("openai:gpt-4o");
   });
 
   it("requires AGENT_MODEL for Heroku-like runtime configuration", () => {
