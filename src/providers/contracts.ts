@@ -58,6 +58,8 @@ export type LlmResponseFormat =
       type: "text";
     }
   | {
+      jsonSchemaDescription?: string;
+      jsonSchemaName?: string;
       jsonSchema?: JsonValue;
       type: "json";
     };
@@ -95,6 +97,7 @@ export type LlmResult = {
   finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error" | "unknown";
   raw?: unknown;
   sources?: readonly LlmSource[];
+  structuredOutput?: JsonValue;
   toolCalls?: readonly LlmToolCall[];
   usage?: LlmUsage;
 };

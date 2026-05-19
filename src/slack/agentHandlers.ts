@@ -5,11 +5,13 @@ import type {
   SlackViewMiddlewareArgs,
   StringIndexed,
 } from "@slack/bolt";
+import { z } from "zod";
 
 import {
   AgentRunnerExecutionError,
   type AgentRunner,
   type AgentRunnerResult,
+  type AgentRunnerStructuredResult,
 } from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
 import {
@@ -269,6 +271,34 @@ type SlackAgentJobRetryContext = {
 type SlackUserSettingsScope = {
   enterpriseId?: string;
   teamId?: string;
+};
+
+const translationResultSchema = z
+  .object({
+    translatedText: z.string().trim().min(1),
+  })
+  .strict();
+
+const TRANSLATION_RESULT_RESPONSE_FORMAT = {
+  jsonSchema: {
+    additionalProperties: false,
+    properties: {
+      translatedText: {
+        description: "The translated Slack message text only. Do not include explanations.",
+        type: "string",
+      },
+    },
+    required: ["translatedText"],
+    type: "object",
+  },
+  jsonSchemaDescription: "A Slack message translation result.",
+  jsonSchemaName: "slack_message_translation",
+  type: "json",
+} as const satisfies {
+  jsonSchema: JsonObject;
+  jsonSchemaDescription: string;
+  jsonSchemaName: string;
+  type: "json";
 };
 
 export function createAgentSlackHandlers(
@@ -2263,18 +2293,25 @@ async function handleReactionAdded(
       });
       return;
     }
-    const result = await runner.run({
-      channelId,
-      messageTs,
-      modelId: route?.modelId,
-      teamId,
-      text: `Translate the following Slack message to ${targetLanguage}:\n\n${sourceText}`,
-      threadTs,
-      userId: readString(event, "user") ?? "unknown",
-      viewerContextChannelIds: [channelId],
-    });
-    text = result.message;
-    logAgentRunnerSuccess(logger, {
+    const result = await runner.runStructured(
+      {
+        channelId,
+        messageTs,
+        modelId: route?.modelId,
+        teamId,
+        text:
+          `Translate the following Slack message to ${targetLanguage}.\n` +
+          "Return only the structured translation result. Preserve Slack mentions, URLs, emoji, and code blocks where possible.\n\n" +
+          sourceText,
+        threadTs,
+        userId: readString(event, "user") ?? "unknown",
+        viewerContextChannelIds: [channelId],
+      },
+      TRANSLATION_RESULT_RESPONSE_FORMAT,
+    );
+    const translationResult = translationResultSchema.parse(result.structuredOutput);
+    text = translationResult.translatedText;
+    logStructuredAgentRunnerSuccess(logger, {
       channelId,
       eventType: "reaction_added",
       messageTs,
@@ -2446,6 +2483,29 @@ function logAgentRunnerSuccess(
     teamId: input.teamId,
     threadTs: input.threadTs,
     toolResultCount: input.result.toolResults.length,
+  });
+}
+
+function logStructuredAgentRunnerSuccess(
+  logger: unknown,
+  input: {
+    channelId: string;
+    eventType: "reaction_added";
+    messageTs: string;
+    result: AgentRunnerStructuredResult;
+    teamId: string;
+    threadTs: string;
+  },
+): void {
+  logInfo(logger, "TypeScript AgentRunner completed structured Slack event.", {
+    channelId: input.channelId,
+    eventType: input.eventType,
+    hasStructuredResult: true,
+    messageTs: input.messageTs,
+    modelId: input.result.model?.id,
+    provider: input.result.model?.provider,
+    teamId: input.teamId,
+    threadTs: input.threadTs,
   });
 }
 

@@ -15,15 +15,15 @@ const model: ModelInfo = {
 };
 const explicitModel: ModelInfo = {
   capabilities: ["text", "tool_calling"],
-  id: "anthropic:claude-3-5-sonnet-latest",
-  provider: "anthropic",
-  providerModelId: "claude-3-5-sonnet-latest",
+  id: "openai:gpt-4o",
+  provider: "openai",
+  providerModelId: "gpt-4o",
 };
 const textOnlyModel: ModelInfo = {
   capabilities: ["text"],
-  id: "plamo:plamo-2.0-mini",
-  provider: "plamo",
-  providerModelId: "plamo-2.0-mini",
+  id: "openai:text-only",
+  provider: "openai",
+  providerModelId: "text-only",
 };
 
 describe("AgentRunner", () => {
@@ -82,10 +82,44 @@ describe("AgentRunner", () => {
     });
 
     expect(result.model).toEqual({
-      id: "anthropic:claude-3-5-sonnet-latest",
-      provider: "anthropic",
+      id: "openai:gpt-4o",
+      provider: "openai",
     });
     expect(router.requests[0]?.model.id).toBe(explicitModel.id);
+  });
+
+  it("runs structured agent requests without imposing an output token limit", async () => {
+    const router = new FakeProviderRouter({
+      content: "",
+      structuredOutput: { translatedText: "こんにちは" },
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.runStructured(
+      {
+        channelId: "C1",
+        messageTs: "1.0",
+        teamId: "T1",
+        text: "translate this",
+        userId: "U1",
+      },
+      {
+        jsonSchema: {
+          additionalProperties: false,
+          properties: { translatedText: { type: "string" } },
+          required: ["translatedText"],
+          type: "object",
+        },
+        type: "json",
+      },
+    );
+
+    expect(result.structuredOutput).toEqual({ translatedText: "こんにちは" });
+    expect(router.requests[0]?.maxOutputTokens).toBeUndefined();
+    expect(router.requests[0]?.responseFormat).toEqual(expect.objectContaining({ type: "json" }));
   });
 
   it("adds transient audio transcripts to provider history without persistence types", async () => {

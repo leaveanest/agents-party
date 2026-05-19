@@ -10,20 +10,13 @@ import {
 } from "../../src/providers/modelRegistry.js";
 
 describe("ModelRegistry", () => {
-  it("registers every target provider in the default capability matrix", () => {
+  it("registers active default provider entries", () => {
     const registry = createDefaultModelRegistry();
 
     expect(registry.list("openai")).not.toHaveLength(0);
     expect(registry.list("azure_openai")).not.toHaveLength(0);
-    expect(registry.list("anthropic")).not.toHaveLength(0);
     expect(registry.list("google")).not.toHaveLength(0);
-    expect(registry.list("bedrock")).not.toHaveLength(0);
     expect(registry.list("groq")).not.toHaveLength(0);
-    expect(registry.list("nvidia")).not.toHaveLength(0);
-    expect(registry.list("plamo")).not.toHaveLength(0);
-    expect(registry.list("xai")).not.toHaveLength(0);
-    expect(registry.list("dify")).not.toHaveLength(0);
-    expect(registry.list("litellm")).not.toHaveLength(0);
   });
 
   it("resolves legacy model aliases to explicit provider records", () => {
@@ -33,10 +26,6 @@ describe("ModelRegistry", () => {
       id: "openai:gpt-4o",
       provider: "openai",
       providerModelId: "gpt-4o",
-    });
-    expect(registry.get("azure.gpt-4o")).toMatchObject({
-      id: "azure_openai:gpt-4o",
-      provider: "azure_openai",
     });
     expect(registry.get("gpt-image-1.5")).toMatchObject({
       capabilities: ["image_generation"],
@@ -68,6 +57,33 @@ describe("ModelRegistry", () => {
       provider: "groq",
       providerModelId: "whisper-large-v3",
     });
+  });
+
+  it("does not register deprecated or unsupported chat model entries", () => {
+    const registry = createDefaultModelRegistry();
+
+    for (const modelId of [
+      "azure_openai:gpt-4o",
+      "azure.gpt-4o",
+      "anthropic:claude-3-5-sonnet-latest",
+      "claude-3-5-sonnet-latest",
+      "bedrock:anthropic.claude-3-5-sonnet-20240620",
+      "anthropic.claude-3-5-sonnet-20240620",
+      "groq:llama-3.1-70b-versatile",
+      "groq.llama-3.1-70b-versatile",
+      "nvidia:meta/llama-3.1-70b-instruct",
+      "nvidia.meta/llama-3.1-70b-instruct",
+      "plamo:plamo-beta",
+      "plamo-beta",
+      "xai:grok-2-latest",
+      "grok-2-latest",
+      "dify:chatflow",
+      "dify.chatflow",
+      "litellm:proxy",
+      "litellm.proxy",
+    ]) {
+      expect(() => registry.get(modelId)).toThrow(UnknownModelError);
+    }
   });
 
   it("does not advertise text models as direct image generation models", () => {

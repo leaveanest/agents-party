@@ -94,7 +94,7 @@ describe("createAgentSlackHandlers", () => {
           expect(teamId).toBe("T2");
           return {
             default_model_id: "openai:gpt-4o",
-            enabled_model_ids: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
+            enabled_model_ids: ["openai:gpt-4o", "google:gemini-2.5-flash"],
           };
         },
       } as never,
@@ -165,7 +165,7 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).toContain("Workspace Two");
     expect(serialized).toContain("Enabled models");
     expect(serialized).toContain("Workspace default model");
-    expect(serialized).toContain("anthropic:claude-3-5-sonnet-latest");
+    expect(serialized).toContain("google:gemini-2.5-flash");
   });
 
   it("saves workspace model routing settings from modal submissions", async () => {
@@ -231,7 +231,7 @@ describe("createAgentSlackHandlers", () => {
               enabled_models: {
                 selected_options: [
                   { value: "openai:gpt-4o" },
-                  { value: "anthropic:claude-3-5-sonnet-latest" },
+                  { value: "google:gemini-2.5-flash" },
                 ],
               },
             },
@@ -250,7 +250,7 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         defaultAgentId: "assistant",
         defaultModelId: "openai:gpt-4o",
-        enabledModelIds: ["openai:gpt-4o", "anthropic:claude-3-5-sonnet-latest"],
+        enabledModelIds: ["openai:gpt-4o", "google:gemini-2.5-flash"],
         teamId: "T2",
         threadAutoReply: true,
       }),
@@ -1421,7 +1421,7 @@ describe("createAgentSlackHandlers", () => {
         return {
           decision: { action: "respond", reason: "forced_invocation" },
           message: "configured route",
-          model: { id: "anthropic:claude-3-5-sonnet-latest", provider: "anthropic" },
+          model: { id: "google:gemini-2.5-flash", provider: "google" },
           toolResults: [],
         };
       },
@@ -1431,7 +1431,7 @@ describe("createAgentSlackHandlers", () => {
       route: {
         agent: { name: "translation-agent" },
         agentId: "configured-translator",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "google:gemini-2.5-flash",
         modelScope: "channel",
         scope: "channel",
       },
@@ -1462,7 +1462,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(invocations).toEqual([
       expect.objectContaining({
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "google:gemini-2.5-flash",
       }),
     ]);
     expect(repository.activations).toEqual([
@@ -2768,13 +2768,13 @@ describe("createAgentSlackHandlers", () => {
 
   it("translates flag reactions through the AgentRunner and replies in-thread", async () => {
     const invocations: unknown[] = [];
+    const responseFormats: unknown[] = [];
     const runner = {
-      async run(invocation: unknown) {
+      async runStructured(invocation: unknown, responseFormat: unknown) {
         invocations.push(invocation);
+        responseFormats.push(responseFormat);
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };
@@ -2784,7 +2784,7 @@ describe("createAgentSlackHandlers", () => {
       route: {
         agent: { name: "translation-agent" },
         agentId: "translation",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "google:gemini-2.5-flash",
         modelScope: "channel",
         scope: "channel",
       },
@@ -2824,11 +2824,20 @@ describe("createAgentSlackHandlers", () => {
     expect(invocations).toEqual([
       expect.objectContaining({
         channelId: "C1",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "google:gemini-2.5-flash",
         teamId: "T1",
-        text: "Translate the following Slack message to ja:\n\nhello",
+        text: expect.stringContaining("Translate the following Slack message to ja."),
         threadTs: "1712345678.000100",
         userId: "U1",
+      }),
+    ]);
+    expect(invocations).toEqual([
+      expect.objectContaining({ text: expect.stringContaining("hello") }),
+    ]);
+    expect(responseFormats).toEqual([
+      expect.objectContaining({
+        jsonSchemaName: "slack_message_translation",
+        type: "json",
       }),
     ]);
     expect(posts).toEqual([
@@ -2843,12 +2852,10 @@ describe("createAgentSlackHandlers", () => {
   it("translates flag reactions from block-only Slack messages", async () => {
     const invocations: unknown[] = [];
     const runner = {
-      async run(invocation: unknown) {
+      async runStructured(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "Translated block text",
-          toolResults: [],
+          structuredOutput: { translatedText: "Translated block text" },
         };
       },
     };
@@ -2909,10 +2916,10 @@ describe("createAgentSlackHandlers", () => {
 
     expect(invocations).toEqual([
       expect.objectContaining({
-        text:
-          "Translate the following Slack message to en:\n\n" +
+        text: expect.stringContaining(
           "日本中心で、今日（2026/5/19）の政治ニュースをざっと検索しました。\n" +
-          "必要なら「3分で読める要約」に絞って続けます。",
+            "必要なら「3分で読める要約」に絞って続けます。",
+        ),
       }),
     ]);
   });
@@ -2920,12 +2927,10 @@ describe("createAgentSlackHandlers", () => {
   it("translates flag reactions from context-only Block Kit messages", async () => {
     const invocations: unknown[] = [];
     const runner = {
-      async run(invocation: unknown) {
+      async runStructured(invocation: unknown) {
         invocations.push(invocation);
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "Translated context text",
-          toolResults: [],
+          structuredOutput: { translatedText: "Translated context text" },
         };
       },
     };
@@ -2975,10 +2980,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(invocations).toEqual([
       expect.objectContaining({
-        text:
-          "Translate the following Slack message to ja:\n\n" +
-          "Context headline\n" +
-          "Plain context detail",
+        text: expect.stringContaining("Context headline\nPlain context detail"),
       }),
     ]);
   });
@@ -2986,12 +2988,10 @@ describe("createAgentSlackHandlers", () => {
   it("does not translate reactions in disabled channels", async () => {
     let runs = 0;
     const runner = {
-      async run() {
+      async runStructured() {
         runs += 1;
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };
@@ -3021,12 +3021,10 @@ describe("createAgentSlackHandlers", () => {
   it("translates reactions through resolved agents without specialist validation", async () => {
     let runs = 0;
     const runner = {
-      async run() {
+      async runStructured() {
         runs += 1;
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };
@@ -3035,7 +3033,7 @@ describe("createAgentSlackHandlers", () => {
       route: {
         agent: { name: "legacy-agent" },
         agentId: "bad-agent",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "google:gemini-2.5-flash",
         modelScope: "channel",
         scope: "channel",
       },
@@ -3107,12 +3105,10 @@ describe("createAgentSlackHandlers", () => {
   it("translates reactions through any resolved agent route", async () => {
     let runs = 0;
     const runner = {
-      async run() {
+      async runStructured() {
         runs += 1;
         return {
-          decision: { action: "respond", reason: "test" },
-          message: "こんにちは",
-          toolResults: [],
+          structuredOutput: { translatedText: "こんにちは" },
         };
       },
     };
@@ -3121,7 +3117,7 @@ describe("createAgentSlackHandlers", () => {
       route: {
         agent: { name: "assistant-agent" },
         agentId: "assistant",
-        modelId: "anthropic:claude-3-5-sonnet-latest",
+        modelId: "google:gemini-2.5-flash",
         modelScope: "channel",
         scope: "channel",
       },
