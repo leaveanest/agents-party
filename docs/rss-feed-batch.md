@@ -23,6 +23,14 @@ vp run rss:batch
 
 The packaged entrypoint is `dist/rssFeedWorker.mjs`, and the `Procfile` includes `rss_worker` for scheduler-style deployment.
 
+Production scheduling is platform-specific:
+
+- AWS uses EventBridge Scheduler to run `dist/rssFeedWorker.mjs` as a Fargate one-off task when
+  `terraform/environments/aws` has `enable_rss_feed_schedule = true`.
+- Heroku uses the Heroku Scheduler add-on provisioned by `terraform/environments/dev` when
+  `enable_scheduler = true`; register the command `node dist/rssFeedWorker.mjs` in the Scheduler
+  dashboard.
+
 Batch behavior:
 
 - loads enabled subscriptions

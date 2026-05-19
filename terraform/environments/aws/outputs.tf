@@ -23,6 +23,21 @@ output "seed_task_definition_arn" {
   value       = aws_ecs_task_definition.seed.arn
 }
 
+output "rss_feed_task_definition_arn" {
+  description = "Scheduled ECS task definition ARN for RSS feed batch jobs."
+  value       = aws_ecs_task_definition.rss_feed.arn
+}
+
+output "rss_feed_schedule_arn" {
+  description = "EventBridge Scheduler schedule ARN for RSS feed batch jobs, when enabled."
+  value       = var.enable_rss_feed_schedule ? aws_scheduler_schedule.rss_feed[0].arn : null
+}
+
+output "rss_feed_scheduler_dlq_arn" {
+  description = "SQS dead-letter queue ARN for EventBridge Scheduler target delivery failures."
+  value       = aws_sqs_queue.rss_feed_scheduler_dlq.arn
+}
+
 output "postgres_endpoint" {
   description = "RDS PostgreSQL endpoint."
   value       = aws_db_instance.postgres.endpoint

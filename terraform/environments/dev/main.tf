@@ -38,6 +38,13 @@ resource "heroku_addon" "bucketeer" {
   plan   = var.bucketeer_plan
 }
 
+resource "heroku_addon" "scheduler" {
+  count = var.enable_scheduler ? 1 : 0
+
+  app_id = heroku_app.app.id
+  plan   = var.scheduler_plan
+}
+
 resource "heroku_formation" "web" {
   count = var.manage_web_formation ? 1 : 0
 

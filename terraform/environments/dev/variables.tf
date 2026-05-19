@@ -53,6 +53,24 @@ variable "object_storage_prefix" {
   default     = null
 }
 
+variable "enable_scheduler" {
+  description = "Whether to provision the Heroku Scheduler add-on. Individual scheduler jobs are configured in Heroku Scheduler after provisioning."
+  type        = bool
+  default     = false
+}
+
+variable "scheduler_plan" {
+  description = "Heroku Scheduler add-on plan."
+  type        = string
+  default     = "scheduler:standard"
+}
+
+variable "rss_feed_scheduler_command" {
+  description = "Command to register in Heroku Scheduler for RSS feed batch processing."
+  type        = string
+  default     = "node dist/rssFeedWorker.mjs"
+}
+
 variable "manage_web_formation" {
   description = "Whether Terraform manages the web dyno formation. The app must already have a release with a web process."
   type        = bool

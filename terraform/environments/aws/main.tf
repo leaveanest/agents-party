@@ -2,12 +2,17 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+data "aws_caller_identity" "current" {}
+
+data "aws_partition" "current" {}
+
 locals {
   name_prefix                        = "${var.project_name}-${var.environment}"
   bucket_name                        = coalesce(var.object_storage_bucket_name, "${local.name_prefix}-objects")
   object_storage_prefix              = var.object_storage_prefix == null ? null : trimprefix(trimsuffix(var.object_storage_prefix, "/"), "/")
   object_storage_object_resource_arn = local.object_storage_prefix == null || local.object_storage_prefix == "" ? "${aws_s3_bucket.objects.arn}/*" : "${aws_s3_bucket.objects.arn}/${local.object_storage_prefix}/*"
   object_storage_list_prefixes       = local.object_storage_prefix == null || local.object_storage_prefix == "" ? ["*"] : [local.object_storage_prefix, "${local.object_storage_prefix}/*"]
+  rss_feed_schedule_arn              = "arn:${data.aws_partition.current.partition}:scheduler:${var.aws_region}:${data.aws_caller_identity.current.account_id}:schedule/default/${local.name_prefix}-rss-feed"
   common_tags = {
     Application = var.project_name
     Environment = var.environment
@@ -345,6 +350,11 @@ resource "aws_cloudwatch_log_group" "worker" {
   retention_in_days = 30
 }
 
+resource "aws_cloudwatch_log_group" "rss_feed" {
+  name              = "/ecs/${local.name_prefix}/rss-feed"
+  retention_in_days = 30
+}
+
 resource "aws_cloudwatch_log_group" "migrate" {
   name              = "/ecs/${local.name_prefix}/migrate"
   retention_in_days = 30
@@ -361,6 +371,29 @@ data "aws_iam_policy_document" "ecs_tasks_assume_role" {
 
     principals {
       identifiers = ["ecs-tasks.amazonaws.com"]
+      type        = "Service"
+    }
+  }
+}
+
+data "aws_iam_policy_document" "scheduler_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    condition {
+      test     = "StringEquals"
+      values   = [data.aws_caller_identity.current.account_id]
+      variable = "aws:SourceAccount"
+    }
+
+    condition {
+      test     = "ArnLike"
+      values   = [local.rss_feed_schedule_arn]
+      variable = "aws:SourceArn"
+    }
+
+    principals {
+      identifiers = ["scheduler.amazonaws.com"]
       type        = "Service"
     }
   }
@@ -401,6 +434,17 @@ resource "aws_iam_role" "task" {
 resource "aws_iam_role" "maintenance_task" {
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume_role.json
   name               = "${local.name_prefix}-maintenance-task"
+}
+
+resource "aws_iam_role" "scheduler" {
+  assume_role_policy = data.aws_iam_policy_document.scheduler_assume_role.json
+  name               = "${local.name_prefix}-scheduler"
+}
+
+resource "aws_sqs_queue" "rss_feed_scheduler_dlq" {
+  message_retention_seconds = 1209600
+  name                      = "${local.name_prefix}-rss-feed-scheduler-dlq"
+  sqs_managed_sse_enabled   = true
 }
 
 data "aws_iam_policy_document" "object_storage" {
@@ -502,6 +546,34 @@ resource "aws_ecs_task_definition" "worker" {
   task_role_arn            = aws_iam_role.task.arn
 }
 
+resource "aws_ecs_task_definition" "rss_feed" {
+  container_definitions = jsonencode([
+    {
+      command     = ["node", "dist/rssFeedWorker.mjs"]
+      environment = [for name, value in local.base_environment : { name = name, value = value }]
+      essential   = true
+      image       = var.container_image
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.rss_feed.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "rss-feed"
+        }
+      }
+      name    = "rss-feed"
+      secrets = local.container_secrets
+    }
+  ])
+  cpu                      = var.rss_feed_task_cpu
+  execution_role_arn       = aws_iam_role.task_execution.arn
+  family                   = "${local.name_prefix}-rss-feed"
+  memory                   = var.rss_feed_task_memory
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  task_role_arn            = aws_iam_role.maintenance_task.arn
+}
+
 resource "aws_ecs_task_definition" "migrate" {
   container_definitions = jsonencode([
     {
@@ -556,6 +628,77 @@ resource "aws_ecs_task_definition" "seed" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.maintenance_task.arn
+}
+
+data "aws_iam_policy_document" "scheduler_rss_feed" {
+  statement {
+    actions   = ["ecs:RunTask"]
+    resources = [aws_ecs_task_definition.rss_feed.arn]
+  }
+
+  statement {
+    actions = ["iam:PassRole"]
+    resources = [
+      aws_iam_role.maintenance_task.arn,
+      aws_iam_role.task_execution.arn,
+    ]
+
+    condition {
+      test     = "StringEquals"
+      values   = ["ecs-tasks.amazonaws.com"]
+      variable = "iam:PassedToService"
+    }
+  }
+
+  statement {
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.rss_feed_scheduler_dlq.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "scheduler_rss_feed" {
+  name   = "${local.name_prefix}-scheduler-rss-feed"
+  policy = data.aws_iam_policy_document.scheduler_rss_feed.json
+  role   = aws_iam_role.scheduler.id
+}
+
+resource "aws_scheduler_schedule" "rss_feed" {
+  count = var.enable_rss_feed_schedule ? 1 : 0
+
+  description         = "Run RSS feed batch processing for ${local.name_prefix}."
+  name                = "${local.name_prefix}-rss-feed"
+  schedule_expression = var.rss_feed_schedule_expression
+  state               = "ENABLED"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  target {
+    arn      = aws_ecs_cluster.main.arn
+    role_arn = aws_iam_role.scheduler.arn
+
+    dead_letter_config {
+      arn = aws_sqs_queue.rss_feed_scheduler_dlq.arn
+    }
+
+    ecs_parameters {
+      launch_type         = "FARGATE"
+      task_count          = 1
+      task_definition_arn = aws_ecs_task_definition.rss_feed.arn
+
+      network_configuration {
+        assign_public_ip = var.assign_public_ip
+        security_groups  = [aws_security_group.ecs.id]
+        subnets          = aws_subnet.public[*].id
+      }
+    }
+
+    retry_policy {
+      maximum_event_age_in_seconds = 3600
+      maximum_retry_attempts       = 1
+    }
+  }
 }
 
 resource "aws_ecs_service" "web" {

@@ -5,6 +5,7 @@ This Terraform environment creates an AWS deployment target for Party on Slack i
 
 - ECS Fargate services for `web` and `worker`
 - ECS one-off task definitions for `migrate` and `seed`
+- EventBridge Scheduler for the RSS feed batch processor
 - One ALB target group for the web process
 - RDS PostgreSQL 16
 - ElastiCache Redis for BullMQ handoff
@@ -62,6 +63,18 @@ Run database migrations as a one-off ECS task before scaling application service
 requires schema changes. The `migrate_task_definition_arn` output identifies the task definition to
 use with `aws ecs run-task`.
 
+## RSS Feed Schedule
+
+Set `enable_rss_feed_schedule = true` to run `node dist/rssFeedWorker.mjs` from EventBridge
+Scheduler as an ECS Fargate one-off task. The default schedule is `rate(10 minutes)` to match the
+minimum interval available in Heroku Scheduler.
+
+The scheduled task uses the same runtime environment and secrets as the app tasks, writes logs to
+`/ecs/<project>-<environment>/rss-feed`, and uses the maintenance task role without S3 object
+storage permissions. Scheduler target delivery failures are sent to the SQS DLQ exposed by
+`rss_feed_scheduler_dlq_arn`; monitor that queue before enabling the schedule in production. Keep
+the schedule disabled until database migrations and Slack/provider secrets are in place.
+
 ## Cost Notes
 
 The default shape is intended to approximate the current Heroku production resource tier while
@@ -69,8 +82,10 @@ keeping AWS costs explicit:
 
 - Fargate web default: 2 vCPU / 16 GiB
 - Fargate worker default: 1 vCPU / 2 GiB
+- Scheduled RSS task default: 0.5 vCPU / 1 GiB per run
 - RDS default: `db.r7g.large`, Single-AZ, gp3 512 GB
 - Redis default: `cache.t4g.micro`
+- SQS DLQ for Scheduler delivery failures: request-based, normally negligible
 - S3: charged by storage, requests, and data transfer
 
 Use Multi-AZ RDS, NAT Gateway, larger Redis nodes, or additional Fargate tasks only after deciding

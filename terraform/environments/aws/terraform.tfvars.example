@@ -14,3 +14,7 @@ runtime_secret_arns = {
 }
 
 object_storage_prefix = "prod"
+
+# Enable the RSS batch scheduler after migrations and Slack/provider secrets are configured.
+enable_rss_feed_schedule      = false
+rss_feed_schedule_expression = "rate(10 minutes)"

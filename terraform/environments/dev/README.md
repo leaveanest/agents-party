@@ -1,8 +1,8 @@
 # Dev Environment Terraform
 
 This Terraform environment creates the Heroku dev app, Heroku Postgres, Heroku Redis/KVS,
-optional Bucketeer object storage, buildpack configuration, non-secret app config vars, and
-optional dyno formation.
+optional Bucketeer object storage, optional Heroku Scheduler, buildpack configuration, non-secret
+app config vars, and optional dyno formation.
 
 Secret values are intentionally not managed by Terraform. Set Slack, OAuth, encryption, Salesforce,
 and external API secrets with `heroku config:set` or CI secret injection after applying
@@ -26,6 +26,19 @@ secret values into managed app config.
 
 `versions.tf` keeps `set_addon_config_vars_in_state = false`; do not change that unless the team
 accepts storing add-on credentials in Terraform state.
+
+## Scheduler
+
+Set `enable_scheduler = true` to provision Heroku Scheduler. The Terraform provider can provision
+the add-on, but it does not expose Scheduler job definitions as Terraform resources. After the app
+is deployed, add a Scheduler job in the Heroku Dashboard using:
+
+```bash
+node dist/rssFeedWorker.mjs
+```
+
+Use the same cadence as AWS, normally every 10 minutes. Heroku Scheduler itself is free, but each
+run uses a one-off dyno and counts toward dyno usage.
 
 ## First Apply
 
@@ -66,6 +79,7 @@ for the first apply. After the first Heroku release has created the process type
 manage_web_formation      = true
 manage_worker_formation   = true
 slack_agent_queue_enabled = true
+enable_scheduler          = true
 ```
 
 Then re-run:

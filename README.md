@@ -409,6 +409,7 @@ Heroku production deploys use:
 - root `Procfile`
   - `web: node dist/main.mjs`
   - `worker: node dist/worker.mjs`
+  - `rss_worker: node dist/rssFeedWorker.mjs`
 - `package.json`, `pnpm-lock.yaml`, and `pnpm-workspace.yaml` for the TypeScript runtime
 - Heroku Postgres add-on for `DATABASE_URL`
 - Heroku Key-Value Store/Redis add-on for `REDIS_URL`
@@ -459,6 +460,8 @@ git push heroku main
 ```
 
 4. After the first release has created the `web` and `worker` process types, set `manage_web_formation = true`, `manage_worker_formation = true`, and `slack_agent_queue_enabled = true` in `terraform.tfvars` and re-apply Terraform if you want Terraform to own dyno quantity and size and route Slack AI chat work through Redis.
+
+5. To run RSS feed batches on Heroku, set `enable_scheduler = true`, re-apply Terraform, then add a Heroku Scheduler job for `node dist/rssFeedWorker.mjs` at the same cadence as AWS, normally every 10 minutes. Terraform provisions the Scheduler add-on, but Heroku Scheduler job definitions are managed in the Heroku Scheduler UI.
 
 Slack AI chat handling uses Redis-backed worker processing when `SLACK_AGENT_QUEUE_ENABLED=true`, `REDIS_URL`, and `DATABASE_URL` are configured. The web dyno verifies Slack requests, performs lightweight policy checks, enqueues `app_mention` and active thread follow-up work, and returns independently from provider execution. The worker dyno consumes the queue, runs `AgentRunner`, persists thread route state, and posts the final Slack thread reply. If queue mode is not enabled, local development keeps the existing in-process execution path.
 

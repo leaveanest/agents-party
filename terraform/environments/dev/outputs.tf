@@ -22,3 +22,13 @@ output "heroku_bucketeer_addon_name" {
   description = "Bucketeer add-on name, when object storage is enabled."
   value       = var.enable_bucketeer ? heroku_addon.bucketeer[0].name : null
 }
+
+output "heroku_scheduler_addon_name" {
+  description = "Heroku Scheduler add-on name, when Scheduler is enabled."
+  value       = var.enable_scheduler ? heroku_addon.scheduler[0].name : null
+}
+
+output "heroku_rss_feed_scheduler_command" {
+  description = "Command to register in Heroku Scheduler for RSS feed batch processing."
+  value       = var.rss_feed_scheduler_command
+}

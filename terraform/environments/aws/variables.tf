@@ -105,6 +105,30 @@ variable "worker_memory" {
   default     = 2048
 }
 
+variable "enable_rss_feed_schedule" {
+  description = "Whether to run the RSS feed batch processor on an EventBridge Scheduler schedule."
+  type        = bool
+  default     = false
+}
+
+variable "rss_feed_schedule_expression" {
+  description = "EventBridge Scheduler expression for the RSS feed batch processor."
+  type        = string
+  default     = "rate(10 minutes)"
+}
+
+variable "rss_feed_task_cpu" {
+  description = "Fargate CPU units for scheduled RSS feed batch tasks."
+  type        = number
+  default     = 512
+}
+
+variable "rss_feed_task_memory" {
+  description = "Fargate memory in MiB for scheduled RSS feed batch tasks."
+  type        = number
+  default     = 1024
+}
+
 variable "runtime_secret_arns" {
   description = "Map of ECS environment variable names to Secrets Manager or SSM Parameter ARNs. Include DATABASE_URL and Slack/OAuth/encryption secrets here."
   type        = map(string)

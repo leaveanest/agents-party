@@ -15,4 +15,9 @@ enable_bucketeer     = false
 bucketeer_plan       = "bucketeer:micro"
 object_storage_prefix = "dev"
 
+# Enable to provision Heroku Scheduler. Add the RSS job in the Scheduler dashboard using this command.
+enable_scheduler          = false
+scheduler_plan            = "scheduler:standard"
+rss_feed_scheduler_command = "node dist/rssFeedWorker.mjs"
+
 additional_config_vars = {}
