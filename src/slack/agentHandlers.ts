@@ -753,6 +753,23 @@ async function handleModelRoutingConfigureAction(
     enterpriseId === undefined
       ? bodyTeamId
       : (selectedTeamId ?? installedWorkspaces[0]?.teamId ?? bodyTeamId);
+  if (
+    effectiveTeamId !== undefined &&
+    enterpriseId !== undefined &&
+    effectiveTeamId !== bodyTeamId &&
+    !installedWorkspaces.some((workspace) => workspace.teamId === effectiveTeamId)
+  ) {
+    await updateModelRoutingModal(
+      client,
+      openedView,
+      buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.error.unauthorized"),
+        userContext.translator,
+      ),
+      logger,
+    );
+    return;
+  }
   const workspaceSettings =
     effectiveTeamId === undefined
       ? undefined
@@ -1284,6 +1301,47 @@ async function handleModelRoutingModalSubmission(
   const unknownModelIds = [...enabledModelIds, defaultModelId].filter(
     (modelId): modelId is string => modelId !== undefined && !modelRegistry.has(modelId),
   );
+  if (enabledModelIds.length === 0 || defaultModelId === undefined) {
+    await ack({
+      errors: {
+        [MODEL_ROUTING_ENABLED_MODELS_BLOCK_ID]: translator.t(
+          "modelRouting.error.enabledModelsRequired",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
+  if (!userContext.isWorkspaceAdmin) {
+    await ack({
+      response_action: "update",
+      view: buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.error.unauthorized"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
+  const isSelectedWorkspaceAllowed = await canManageSelectedModelRoutingWorkspace(
+    {
+      enterpriseId,
+      installedWorkspaceDirectory: options.installedWorkspaceDirectory,
+      selectedTeamId,
+      sourceTeamId: bodyTeamId,
+    },
+    logger,
+  );
+  if (!isSelectedWorkspaceAllowed) {
+    await ack({
+      response_action: "update",
+      view: buildModelRoutingResultModal(
+        userContext.translator.t("modelRouting.error.unauthorized"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
   const credentialedProviders = await listWorkspaceCredentialedLlmProviders(
     selectedTeamId,
     options,
@@ -1297,17 +1355,6 @@ async function handleModelRoutingModalSubmission(
       return !credentialedProviders.includes(modelRegistry.get(modelId).provider);
     },
   );
-  if (enabledModelIds.length === 0 || defaultModelId === undefined) {
-    await ack({
-      errors: {
-        [MODEL_ROUTING_ENABLED_MODELS_BLOCK_ID]: translator.t(
-          "modelRouting.error.enabledModelsRequired",
-        ),
-      },
-      response_action: "errors",
-    });
-    return;
-  }
   if (
     unknownModelIds.length > 0 ||
     uncredentialedModelIds.length > 0 ||
@@ -1330,40 +1377,6 @@ async function handleModelRoutingModalSubmission(
       translator,
     ) as never,
   });
-  const userContext = await resolveSlackUserContext(client, slackUserId, translator, logger);
-  if (!userContext.isWorkspaceAdmin) {
-    await updateModelRoutingModal(
-      client,
-      view,
-      buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-      ),
-      logger,
-    );
-    return;
-  }
-  const isSelectedWorkspaceAllowed = await canManageSelectedModelRoutingWorkspace(
-    {
-      enterpriseId,
-      installedWorkspaceDirectory: options.installedWorkspaceDirectory,
-      selectedTeamId,
-      sourceTeamId: bodyTeamId,
-    },
-    logger,
-  );
-  if (!isSelectedWorkspaceAllowed) {
-    await updateModelRoutingModal(
-      client,
-      view,
-      buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-      ),
-      logger,
-    );
-    return;
-  }
   try {
     const existing = await options.routingRepository.findWorkspaceSettings(selectedTeamId);
     const defaultAgentId = stringField(existing, "default_agent_id") ?? DEFAULT_AGENT_OPTION.id;

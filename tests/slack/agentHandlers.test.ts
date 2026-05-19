@@ -265,6 +265,72 @@ describe("createAgentSlackHandlers", () => {
     expect(serialized).not.toContain("T-other");
   });
 
+  it("rejects model routing configure actions for unverified selected workspaces before tenant reads", async () => {
+    const updatedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces(input) {
+          expect(input).toEqual({ enterpriseId: "E1" });
+          return [
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T2",
+              teamName: "Workspace Two",
+            },
+          ];
+        },
+      },
+      routingRepository: {
+        async findWorkspaceSettings() {
+          throw new Error("should not read settings for unauthorized workspace");
+        },
+      } as never,
+      workspaceCredentialSettings: {
+        async listActiveProviderKinds() {
+          throw new Error("should not read credentials for unauthorized workspace");
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleModelRoutingConfigureAction({
+      ack: async () => undefined,
+      body: {
+        actions: [
+          { value: JSON.stringify({ enterpriseId: "E1", selectedTeamId: "T-unauthorized" }) },
+        ],
+        enterprise: { id: "E1" },
+        team: { id: "T-random" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async () => ({ view: { id: "VIEW1" } }),
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(updatedViews).toEqual([
+      expect.objectContaining({
+        view_id: "VIEW1",
+        view: expect.objectContaining({ type: "modal" }),
+      }),
+    ]);
+    expect(JSON.stringify(updatedViews[0])).toContain(
+      "Only Slack workspace admins and owners can configure model routing.",
+    );
+  });
+
   it("removes reasoning selector when default model changes to a non-reasoning model", async () => {
     const updates: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never);
@@ -494,7 +560,7 @@ describe("createAgentSlackHandlers", () => {
       } as never,
       workspaceCredentialSettings: {
         async listActiveProviderKinds() {
-          return ["openai"];
+          throw new Error("should not read credentials for unauthorized workspace");
         },
         async saveProviderApiKey() {},
       },
@@ -821,7 +887,7 @@ describe("createAgentSlackHandlers", () => {
       client: {
         users: {
           info: async () => {
-            expect(acked).toBe(true);
+            expect(acked).toBe(false);
             return { user: { is_admin: true } };
           },
         },
@@ -971,13 +1037,8 @@ describe("createAgentSlackHandlers", () => {
       }),
     ]);
     expect(saves).toEqual([]);
-    expect(updates).toEqual([
-      expect.objectContaining({
-        view_id: "VIEW1",
-        view: expect.objectContaining({ type: "modal" }),
-      }),
-    ]);
-    expect(JSON.stringify(updates[0])).toContain(
+    expect(updates).toEqual([]);
+    expect(JSON.stringify(acks[0])).toContain(
       "Only Slack workspace admins and owners can configure model routing.",
     );
   });
