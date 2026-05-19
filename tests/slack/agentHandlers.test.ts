@@ -2550,7 +2550,7 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(publishedViews[0])).toContain("workspace_credential_configure");
   });
 
-  it("publishes feature settings entry point only when image generation API key exists", async () => {
+  it("publishes feature settings entry point when a supported image provider API key exists", async () => {
     const publishedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       featureSettingsHome: {
@@ -2581,6 +2581,35 @@ describe("createAgentSlackHandlers", () => {
 
     expect(JSON.stringify(publishedViews[0])).toContain("Feature settings");
     expect(JSON.stringify(publishedViews[0])).toContain("feature_settings_configure");
+
+    const alternateProviderViews: unknown[] = [];
+    const alternateProviderHandlers = createAgentSlackHandlers({} as never, {
+      featureSettingsHome: {
+        imageGenerationModelId: "google:gemini-2.5-flash-image",
+        repository: new MemoryFeatureSettingsRepository(),
+      },
+      workspaceCredentialSettings: {
+        async resolveProviderCredential(input) {
+          return input.provider === "openai" ? { apiKey: "sk-test" } : undefined;
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+    await alternateProviderHandlers.handleAppHomeOpened({
+      body: { team_id: "T1" },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            alternateProviderViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { user: "U1" },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(alternateProviderViews[0])).toContain("feature_settings_configure");
 
     const hiddenViews: unknown[] = [];
     const hiddenHandlers = createAgentSlackHandlers({} as never, {
@@ -2859,6 +2888,51 @@ describe("createAgentSlackHandlers", () => {
 
     expect(repository.workspaceSetting?.enabled).toBe(false);
     expect(repository.allowedChannelIds).toEqual([]);
+    expect(JSON.stringify(updatedViews)).toContain("Feature settings were saved.");
+  });
+
+  it("saves image generation settings when OpenAI API key exists and the configured image model is Google", async () => {
+    const updatedViews: unknown[] = [];
+    const repository = new MemoryFeatureSettingsRepository();
+    const handlers = createAgentSlackHandlers({} as never, {
+      featureSettingsHome: {
+        imageGenerationModelId: "google:gemini-2.5-flash-image",
+        repository,
+      },
+      workspaceCredentialSettings: {
+        async resolveProviderCredential(input) {
+          return input.provider === "openai" ? { apiKey: "sk-test" } : undefined;
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleFeatureSettingsModalSubmission({
+      ack: async (payload?: unknown) => {
+        updatedViews.push(["ack", payload]);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: validFeatureSettingsView({
+        channelIds: ["C2"],
+        enabled: true,
+        teamId: "T1",
+      }),
+    } as never);
+
+    expect(repository.workspaceSetting?.enabled).toBe(true);
+    expect(repository.allowedChannelIds).toEqual(["C2"]);
     expect(JSON.stringify(updatedViews)).toContain("Feature settings were saved.");
   });
 

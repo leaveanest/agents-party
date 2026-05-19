@@ -9,16 +9,34 @@ import type { ModelRegistry } from "../../providers/modelRegistry.js";
 import type { WorkspaceFeatureSettingsRepository } from "../../repositories/workspaceFeatureSettings.js";
 import type { AgentToolDefinition } from "../toolContracts.js";
 
+export const defaultImageGenerationFallbackModelIds = [
+  "openai:gpt-image-1.5",
+  "google:gemini-2.5-flash-image",
+] as const;
+
 export type MediaGenerationToolContext = {
   channelId: string;
   teamId: string;
+};
+
+type MediaGateway = {
+  generateImage(input: { model: ModelInfo; prompt: string }): Promise<{
+    dataBase64?: string;
+    mimeType?: string;
+    uri?: string;
+  }>;
 };
 
 export type MediaGenerationToolOptions = {
   context: MediaGenerationToolContext;
   credentialResolver?: ProviderCredentialResolver;
   featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
+  imageGenerationFallbackModelIds?: readonly string[];
   imageGenerationModelId: string;
+  mediaGatewayFactory?: (
+    model: ModelInfo,
+    credential: { apiKey: string; baseURL?: string },
+  ) => MediaGateway | undefined;
   modelRegistry: Pick<ModelRegistry, "assertCapabilities" | "get">;
 };
 
@@ -96,21 +114,16 @@ async function generateImageTool(
     );
   }
 
-  const model = options.modelRegistry.get(options.imageGenerationModelId);
-  options.modelRegistry.assertCapabilities(model, ["image_generation"]);
-  const credential = await options.credentialResolver?.resolveProviderCredential({
-    credentialName: "api_key",
-    provider: model.provider,
-    workspaceId: options.context.teamId,
-  });
-  if (credential === undefined) {
+  const resolution = await resolveImageGenerationModelCredential(options);
+  if (resolution === undefined) {
     return failure(
       "missing_provider_credential",
-      `No active ${model.provider} API key is configured for image generation in this workspace.`,
+      "No active OpenAI or Google API key is configured for image generation in this workspace.",
     );
   }
+  const { credential, model } = resolution;
 
-  const gateway = mediaGatewayForModel(model, credential);
+  const gateway = (options.mediaGatewayFactory ?? mediaGatewayForModel)(model, credential);
   if (gateway === undefined) {
     return failure(
       "unsupported_image_provider",
@@ -135,6 +148,54 @@ async function generateImageTool(
     message: "Image generated.",
     ok: true,
   };
+}
+
+async function resolveImageGenerationModelCredential(
+  options: MediaGenerationToolOptions,
+): Promise<{ credential: { apiKey: string; baseURL?: string }; model: ModelInfo } | undefined> {
+  const configuredModel = options.modelRegistry.get(options.imageGenerationModelId);
+  options.modelRegistry.assertCapabilities(configuredModel, ["image_generation"]);
+  const models = [
+    configuredModel,
+    ...candidateFallbackModelIds(options)
+      .map((modelId) => resolveFallbackImageGenerationModel(modelId, options))
+      .filter((model): model is ModelInfo => model !== undefined),
+  ];
+  const seenProviders = new Set<string>();
+  for (const model of models) {
+    if (seenProviders.has(model.provider)) {
+      continue;
+    }
+    seenProviders.add(model.provider);
+    const credential = await options.credentialResolver?.resolveProviderCredential({
+      credentialName: "api_key",
+      provider: model.provider,
+      workspaceId: options.context.teamId,
+    });
+    if (credential !== undefined) {
+      return { credential, model };
+    }
+  }
+  return undefined;
+}
+
+function candidateFallbackModelIds(options: MediaGenerationToolOptions): string[] {
+  return [...new Set(options.imageGenerationFallbackModelIds ?? [])].filter(
+    (modelId) => modelId !== options.imageGenerationModelId,
+  );
+}
+
+function resolveFallbackImageGenerationModel(
+  modelId: string,
+  options: MediaGenerationToolOptions,
+): ModelInfo | undefined {
+  try {
+    const model = options.modelRegistry.get(modelId);
+    options.modelRegistry.assertCapabilities(model, ["image_generation"]);
+    return model.provider === "openai" || model.provider === "google" ? model : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function mediaGatewayForModel(model: ModelInfo, credential: { apiKey: string; baseURL?: string }) {

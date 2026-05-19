@@ -17,7 +17,10 @@ import { createNativeProviderAdapters } from "../providers/nativeProviderAdapter
 import { ProviderRouter } from "../providers/providerRouter.js";
 import { normalizeReasoningEffort } from "../providers/reasoningOptions.js";
 import type { WorkspaceFeatureSettingsRepository } from "../repositories/workspaceFeatureSettings.js";
-import { createMediaGenerationAgentTools } from "./mediaGeneration/tools.js";
+import {
+  createMediaGenerationAgentTools,
+  defaultImageGenerationFallbackModelIds,
+} from "./mediaGeneration/tools.js";
 import {
   type AgentRouterDecision,
   type SlackAgentInvocation,
@@ -234,6 +237,7 @@ export function createDefaultAgentRunner(
           },
           credentialResolver: options.credentialResolver,
           featureSettingsRepository: options.featureSettingsRepository,
+          imageGenerationFallbackModelIds: defaultImageGenerationFallbackModelIds,
           imageGenerationModelId: settings.imageGenerationModelId,
           modelRegistry: providerRouter.registry,
         }),

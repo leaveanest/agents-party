@@ -38,6 +38,7 @@ services:
       AGENT_MODEL: ${AGENT_MODEL:-google:gemini-2.5-flash}
       APP_ENV: ${APP_ENV:-local}
       APP_HOST: 0.0.0.0
+      IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL:-google:gemini-2.5-flash-image}
       NODE_ENV: development
       DATABASE_URL: postgresql://agents_party:agents_party@postgres:5432/agents_party
       LLM_API_KEY_ENCRYPTION_KEY: ${LLM_API_KEY_ENCRYPTION_KEY:-}
@@ -51,6 +52,7 @@ services:
       SLACK_SIGNING_SECRET: ${SLACK_SIGNING_SECRET:-}
       SLACK_STATE_SECRET: ${SLACK_STATE_SECRET:-}
       SLACK_USER_SCOPES: ${SLACK_USER_SCOPES:-}
+      VIDEO_GENERATION_MODEL: ${VIDEO_GENERATION_MODEL:-google:veo-3.1-fast-generate-001}
 
   seed:
     build: .

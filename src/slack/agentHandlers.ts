@@ -412,6 +412,8 @@ type SlackUserSettingsScope = {
   teamId?: string;
 };
 
+const imageGenerationCredentialProviderKinds = ["google", "openai"] as const;
+
 export function createAgentSlackHandlers(
   runner: AgentRunner,
   options: AgentSlackHandlerOptions = {},
@@ -641,14 +643,15 @@ async function buildFeatureSettingsAppHomeBlocks(input: {
     input.options.featureSettingsHome.imageGenerationModelId,
     input.logger,
   );
-  const hasImageCredential =
-    imageModel !== undefined &&
-    (await hasWorkspaceProviderApiKey(
-      selectedTeamId,
-      imageModel.provider,
-      input.options,
-      input.logger,
-    ));
+  if (imageModel === undefined) {
+    return [];
+  }
+  const hasImageCredential = await hasAnyWorkspaceProviderApiKey(
+    selectedTeamId,
+    imageGenerationCredentialProviderKinds,
+    input.options,
+    input.logger,
+  );
   if (!hasImageCredential && workspaceSetting?.enabled !== true) {
     return [];
   }
@@ -2426,6 +2429,20 @@ async function hasWorkspaceProviderApiKey(
   }
 }
 
+async function hasAnyWorkspaceProviderApiKey(
+  teamId: string,
+  providerKinds: readonly CredentialProviderKind[],
+  options: AgentSlackHandlerOptions,
+  logger: unknown,
+): Promise<boolean> {
+  for (const providerKind of providerKinds) {
+    if (await hasWorkspaceProviderApiKey(teamId, providerKind, options, logger)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function parseModelRoutingSource(value: unknown): ModelRoutingActionValue["source"] | undefined {
   return value === "app_home" || value === "channel" || value === "thread" ? value : undefined;
 }
@@ -2631,16 +2648,27 @@ async function handleFeatureSettingsConfigureAction(
     options.featureSettingsHome.imageGenerationModelId,
     logger,
   );
-  const hasImageCredential =
-    imageModel !== undefined &&
-    (await hasWorkspaceProviderApiKey(selectedTeamId, imageModel.provider, options, logger));
+  if (imageModel === undefined) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.notConfigured"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
+  const hasImageCredential = await hasAnyWorkspaceProviderApiKey(
+    selectedTeamId,
+    imageGenerationCredentialProviderKinds,
+    options,
+    logger,
+  );
   if (!hasImageCredential && workspaceSetting?.enabled !== true) {
     await client.views.open({
       trigger_id: triggerId,
       view: buildFeatureSettingsResultModal(
-        imageModel === undefined
-          ? userContext.translator.t("featureSettings.error.notConfigured")
-          : userContext.translator.t("featureSettings.error.missingImageCredential"),
+        userContext.translator.t("featureSettings.error.missingImageCredential"),
         userContext.translator,
       ) as never,
     });
@@ -2775,7 +2803,12 @@ async function handleFeatureSettingsModalSubmission(
   if (
     enabled &&
     imageModel !== undefined &&
-    !(await hasWorkspaceProviderApiKey(teamId, imageModel.provider, options, logger))
+    !(await hasAnyWorkspaceProviderApiKey(
+      teamId,
+      imageGenerationCredentialProviderKinds,
+      options,
+      logger,
+    ))
   ) {
     await updateFeatureSettingsModal(
       client,

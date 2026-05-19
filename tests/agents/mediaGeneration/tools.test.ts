@@ -98,6 +98,61 @@ describe("createMediaGenerationAgentTools", () => {
       },
     ]);
   });
+
+  it("falls back to another supported image provider when the configured provider key is missing", async () => {
+    const googleModel = {
+      capabilities: ["image_generation"],
+      id: "google:image-test",
+      provider: "google",
+      providerModelId: "image-test",
+    } satisfies ModelInfo;
+    const credentialCalls: unknown[] = [];
+    const tool = createMediaGenerationAgentTools({
+      context: { channelId: "C1", teamId: "T1" },
+      credentialResolver: {
+        async resolveProviderCredential(input) {
+          credentialCalls.push(input);
+          return input.provider === "openai" ? { apiKey: "sk-test" } : undefined;
+        },
+      },
+      featureSettingsRepository: new MemoryFeatureSettingsRepository({
+        allowedChannelIds: ["C1"],
+        workspaceEnabled: true,
+      }),
+      imageGenerationFallbackModelIds: [model.id],
+      imageGenerationModelId: googleModel.id,
+      mediaGatewayFactory: (selectedModel) => ({
+        async generateImage(input) {
+          return {
+            dataBase64: "ZmFrZQ==",
+            mimeType: selectedModel.provider === input.model.provider ? "image/png" : undefined,
+          };
+        },
+      }),
+      modelRegistry: new ModelRegistry([googleModel, model]),
+    })[0];
+
+    await expect(tool.execute({ prompt: "draw a diagram" })).resolves.toMatchObject({
+      media: {
+        mimeType: "image/png",
+        modelId: model.id,
+        provider: "openai",
+      },
+      ok: true,
+    });
+    expect(credentialCalls).toEqual([
+      {
+        credentialName: "api_key",
+        provider: "google",
+        workspaceId: "T1",
+      },
+      {
+        credentialName: "api_key",
+        provider: "openai",
+        workspaceId: "T1",
+      },
+    ]);
+  });
 });
 
 class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsRepository {
