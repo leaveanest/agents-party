@@ -30,6 +30,7 @@ try {
   await repository.saveWorkspaceSettings({
     defaultAgentId: agentId,
     defaultModelId: model.id,
+    enabledModelIds: [model.id],
     payload: {
       bootstrap_source: "seedBootstrap",
       enabled_channel_ids: enabledChannelIds,

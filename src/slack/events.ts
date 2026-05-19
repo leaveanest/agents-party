@@ -11,6 +11,11 @@ import type {
 import type { SlackEventDeduplicator } from "./idempotency.js";
 import { readSlackEventId } from "./idempotency.js";
 import {
+  MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID,
+  MODEL_ROUTING_CONFIGURE_ACTION_ID,
+  MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
+  MODEL_ROUTING_MODAL_CALLBACK_ID,
+  MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
   WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
@@ -23,6 +28,15 @@ export type SlackEventFeatureHandlers = {
   handleAppMention(args: SlackEventArgs<"app_mention">): Promise<void>;
   handleWorkspaceCredentialConfigureAction(
     args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
+  handleModelRoutingConfigureAction(
+    args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
+  handleModelRoutingDefaultModelSelectAction(
+    args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
+  handleModelRoutingModalSubmission(
+    args: SlackViewMiddlewareArgs & AllMiddlewareArgs,
   ): Promise<void>;
   handleWorkspaceCredentialProviderSelectAction(
     args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
@@ -74,6 +88,18 @@ export function registerSlackEventHandlers(
   app.action(WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID, async (args) =>
     handlers.handleWorkspaceCredentialConfigureAction(args),
   );
+  app.action(MODEL_ROUTING_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleModelRoutingConfigureAction(args),
+  );
+  app.action(MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleModelRoutingConfigureAction(args),
+  );
+  app.action(MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleModelRoutingConfigureAction(args),
+  );
+  app.action(MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID, async (args) =>
+    handlers.handleModelRoutingDefaultModelSelectAction(args),
+  );
   app.action(WORKSPACE_CREDENTIAL_PROVIDER_ACTION_ID, async (args) =>
     handlers.handleWorkspaceCredentialProviderSelectAction(args),
   );
@@ -82,6 +108,9 @@ export function registerSlackEventHandlers(
   );
   app.view(WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleWorkspaceCredentialModalSubmission(args),
+  );
+  app.view(MODEL_ROUTING_MODAL_CALLBACK_ID, async (args) =>
+    handlers.handleModelRoutingModalSubmission(args),
   );
   app.view(SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleSalesforcePdfWorkflowModalSubmission(args),
@@ -140,6 +169,15 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
       });
     },
     async handleWorkspaceCredentialConfigureAction({ ack }) {
+      await ack();
+    },
+    async handleModelRoutingConfigureAction({ ack }) {
+      await ack();
+    },
+    async handleModelRoutingDefaultModelSelectAction({ ack }) {
+      await ack();
+    },
+    async handleModelRoutingModalSubmission({ ack }) {
       await ack();
     },
     async handleWorkspaceCredentialProviderSelectAction({ ack }) {

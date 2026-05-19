@@ -11,6 +11,7 @@ import {
   PostgresOAuthRepository,
   PostgresSalesforcePdfWorkflowRepository,
 } from "./infrastructure/postgres/appRepositories.js";
+import { PostgresSlackInstallationRepository } from "./infrastructure/postgres/slackInstallationRepository.js";
 import { PostgresUserSettingsRepository } from "./infrastructure/postgres/userSettingsRepository.js";
 import { createBullMqSlackAgentJobQueue } from "./queues/slackAgentJobs.js";
 import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
@@ -38,6 +39,12 @@ const userSettingsRepository =
   appRepositoryPool === undefined
     ? undefined
     : new PostgresUserSettingsRepository(appRepositoryPool);
+const slackInstallationRepository =
+  appRepositoryPool === undefined || settings.slackClientId === undefined
+    ? undefined
+    : new PostgresSlackInstallationRepository(settings.slackClientId, {
+        pool: appRepositoryPool,
+      });
 const agentJobQueue =
   !settings.slackAgentQueueEnabled ||
   settings.redisUrl === undefined ||
@@ -78,6 +85,7 @@ const slackGateway = settings.slackEnabled
         agentJobQueue,
         audioTranscriptionGateway,
         defaultLocale: settings.defaultLocale,
+        installedWorkspaceDirectory: slackInstallationRepository,
         routingRepository,
         salesforceConnectionHome:
           settings.salesforceOAuthEnabled &&

@@ -364,4 +364,18 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         on app_user_settings (updated_at desc);
     `,
   },
+  {
+    id: "20260515_0009",
+    name: "workspace_enabled_model_ids",
+    upSql: `
+      alter table workspace_app_settings
+        add column if not exists enabled_model_ids jsonb not null default '[]'::jsonb;
+
+      update workspace_app_settings
+      set enabled_model_ids = jsonb_build_array(default_model_id)
+      where default_model_id is not null
+        and btrim(default_model_id) <> ''
+        and enabled_model_ids = '[]'::jsonb;
+    `,
+  },
 ];

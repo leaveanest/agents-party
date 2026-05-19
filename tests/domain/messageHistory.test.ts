@@ -7,11 +7,6 @@ describe("ConversationHistory", () => {
     const history: ConversationHistory = {
       messages: [
         {
-          content: "You are helpful.",
-          id: "system-1",
-          role: "system",
-        },
-        {
           author: { id: "U1", kind: "user" },
           content: [
             { text: "Please summarize these.", type: "text" },
@@ -67,6 +62,6 @@ describe("ConversationHistory", () => {
       ],
     };
 
-    expect(history.messages).toHaveLength(4);
+    expect(history.messages).toHaveLength(3);
   });
 });

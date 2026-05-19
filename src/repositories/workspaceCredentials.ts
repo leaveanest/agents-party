@@ -46,6 +46,7 @@ export type WorkspaceCredentialRepository = {
     providerKind: CredentialProviderKind;
     teamId: string;
   }): Promise<WorkspaceCredentialDocument | undefined>;
+  listActiveProviderKinds(input: { teamId: string }): Promise<CredentialProviderKind[]>;
   saveWorkspaceCredential(document: WorkspaceCredentialDocument): Promise<void>;
 };
 
@@ -122,6 +123,10 @@ export class EncryptedWorkspaceCredentialService implements ProviderCredentialRe
       baseURL: stringPayloadField(document.payload, "base_url"),
       payload: document.payload,
     };
+  }
+
+  async listActiveProviderKinds(input: { teamId: string }): Promise<CredentialProviderKind[]> {
+    return this.repository.listActiveProviderKinds(input);
   }
 }
 

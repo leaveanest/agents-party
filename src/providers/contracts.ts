@@ -3,14 +3,23 @@ import type { ConversationHistory, JsonValue } from "../domain/messageHistory.js
 export const LlmProviderId = {
   Anthropic: "anthropic",
   AzureOpenAI: "azure_openai",
+  Baseten: "baseten",
   Bedrock: "bedrock",
+  Cerebras: "cerebras",
+  Cohere: "cohere",
+  DeepInfra: "deepinfra",
+  DeepSeek: "deepseek",
   Dify: "dify",
+  Fireworks: "fireworks",
   Google: "google",
   Groq: "groq",
   LiteLLM: "litellm",
+  Mistral: "mistral",
   Nvidia: "nvidia",
   OpenAI: "openai",
   PLaMo: "plamo",
+  Perplexity: "perplexity",
+  TogetherAI: "togetherai",
   XAI: "xai",
 } as const;
 
@@ -62,6 +71,18 @@ export type LlmResponseFormat =
       type: "json";
     };
 
+export const LlmReasoningEffortId = {
+  High: "high",
+  Low: "low",
+  Medium: "medium",
+  Minimal: "minimal",
+  None: "none",
+  ProviderDefault: "provider_default",
+  XHigh: "xhigh",
+} as const;
+
+export type LlmReasoningEffort = (typeof LlmReasoningEffortId)[keyof typeof LlmReasoningEffortId];
+
 export type LlmInvocationContext = {
   workspaceId?: string;
 };
@@ -73,8 +94,10 @@ export type LlmRequest = {
   metadata?: Record<string, JsonValue>;
   model: ModelInfo;
   providerOptions?: Record<string, Record<string, JsonValue>>;
+  reasoningEffort?: LlmReasoningEffort;
   requiredCapabilities?: readonly LlmCapability[];
   responseFormat?: LlmResponseFormat;
+  system?: string;
   temperature?: number;
   tools?: readonly LlmToolDefinition[];
 };
@@ -82,6 +105,7 @@ export type LlmRequest = {
 export type LlmUsage = {
   inputTokens?: number;
   outputTokens?: number;
+  reasoningTokens?: number;
   totalTokens?: number;
 };
 

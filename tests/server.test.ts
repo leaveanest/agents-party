@@ -174,6 +174,40 @@ describe("createAppServer", () => {
     expect(delegatedPath).toBe("/slack/events");
   });
 
+  it("does not delegate non-POST Slack event requests", async () => {
+    let delegated = false;
+    const server = createAppServer(settings, {
+      slackGateway: {
+        async close() {},
+        handle() {
+          delegated = true;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/slack/events`);
+
+    expect(response.status).toBe(405);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "method_not_allowed",
+    });
+    expect(delegated).toBe(false);
+  });
+
   it("returns 503 for Slack routes when Slack is not configured", async () => {
     const server = createAppServer(settings);
     await new Promise<void>((resolve) => {

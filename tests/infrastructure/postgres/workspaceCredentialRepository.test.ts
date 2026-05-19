@@ -76,6 +76,23 @@ describe("workspace credential repository", () => {
     });
   });
 
+  it("lists active provider kinds without exposing secrets", async () => {
+    const pool = new RecordingPool([{ provider_kind: "anthropic" }, { provider_kind: "openai" }]);
+    const service = new EncryptedWorkspaceCredentialService(
+      new PostgresWorkspaceCredentialRepository(pool as never),
+      new FernetTextCipher(fernetKey),
+    );
+
+    await expect(service.listActiveProviderKinds({ teamId: "T1" })).resolves.toEqual([
+      "anthropic",
+      "openai",
+    ]);
+
+    expect(pool.queries[0]).toMatchObject({ values: ["T1"] });
+    expect(pool.queries[0]?.text).toContain("select distinct provider_kind");
+    expect(pool.queries[0]?.text).not.toContain("secret_encrypted");
+  });
+
   it("rejects secret-like payload fields before storing metadata", async () => {
     const pool = new RecordingPool();
     const service = new EncryptedWorkspaceCredentialService(
