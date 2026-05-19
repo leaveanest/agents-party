@@ -5,6 +5,9 @@ locals {
       APP_ENV                   = "heroku"
       SLACK_AGENT_QUEUE_ENABLED = tostring(var.slack_agent_queue_enabled)
     },
+    var.object_storage_prefix == null ? {} : {
+      OBJECT_STORAGE_PREFIX = var.object_storage_prefix
+    },
     var.additional_config_vars,
   )
 }
@@ -26,6 +29,20 @@ resource "heroku_addon" "postgres" {
 resource "heroku_addon" "redis" {
   app_id = heroku_app.app.id
   plan   = var.heroku_redis_plan
+}
+
+resource "heroku_addon" "bucketeer" {
+  count = var.enable_bucketeer ? 1 : 0
+
+  app_id = heroku_app.app.id
+  plan   = var.bucketeer_plan
+}
+
+resource "heroku_addon" "scheduler" {
+  count = var.enable_scheduler ? 1 : 0
+
+  app_id = heroku_app.app.id
+  plan   = var.scheduler_plan
 }
 
 resource "heroku_formation" "web" {

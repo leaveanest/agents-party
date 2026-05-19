@@ -20,6 +20,7 @@ import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCre
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
+import { createSlackInstallationMcpTokenResolver } from "./slack/mcpTokenResolver.js";
 
 const settings = loadSettings();
 const appRepositoryPool =
@@ -80,6 +81,10 @@ const agentRunner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
   featureSettingsRepository,
   salesforcePdfTools,
+  slackMcpTokenResolver:
+    slackInstallationRepository === undefined
+      ? undefined
+      : createSlackInstallationMcpTokenResolver(slackInstallationRepository),
 });
 const audioTranscriptionGateway = createDefaultTranscriptionGateway(settings, {
   credentialResolver: workspaceCredentialResolver,

@@ -25,6 +25,14 @@ oauth_config:
       - mpim:history
       - reactions:read
       - users:read
+    user:
+      - channels:history
+      - groups:history
+      - im:history
+      - mpim:history
+      - search:read.public
+      - users:read
+      - users:read.email
 settings:
   event_subscriptions:
     request_url: https://agents-party.example.com/slack/events
@@ -42,4 +50,4 @@ settings:
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false
-  is_mcp_enabled: false
+  is_mcp_enabled: true

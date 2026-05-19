@@ -29,6 +29,7 @@ import {
   createSalesforcePdfAgentTools,
   type SalesforcePdfToolOptions,
 } from "./salesforcePdf/index.js";
+import { createSlackMcpAgentTools, type SlackMcpTokenResolver } from "./slackMcp/index.js";
 import { createSoracomAgentTools } from "./soracom/index.js";
 import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 
@@ -207,6 +208,7 @@ export function createDefaultAgentRunner(
     credentialResolver?: ProviderCredentialResolver;
     featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
     salesforcePdfTools?: Omit<SalesforcePdfToolOptions, "context">;
+    slackMcpTokenResolver?: SlackMcpTokenResolver;
   } = {},
 ): AgentRunner {
   const salesforcePdfTools = options.salesforcePdfTools;
@@ -251,6 +253,18 @@ export function createDefaultAgentRunner(
                 teamId: invocation.teamId,
               },
               credentialResolver: options.credentialResolver,
+            })),
+        ...(options.slackMcpTokenResolver === undefined
+          ? []
+          : createSlackMcpAgentTools({
+              context: {
+                enterpriseId: invocation.enterpriseId,
+                isEnterpriseInstall: invocation.isEnterpriseInstall,
+                teamId: invocation.teamId,
+                userId: invocation.userId,
+                viewerContextChannelIds: invocation.viewerContextChannelIds,
+              },
+              tokenResolver: options.slackMcpTokenResolver,
             })),
       ];
       return new AgentToolRegistry(tools);

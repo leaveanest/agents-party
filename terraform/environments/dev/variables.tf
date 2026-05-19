@@ -35,6 +35,42 @@ variable "heroku_redis_plan" {
   default     = "heroku-redis:premium-0"
 }
 
+variable "enable_bucketeer" {
+  description = "Whether to provision Bucketeer for S3-compatible object storage."
+  type        = bool
+  default     = false
+}
+
+variable "bucketeer_plan" {
+  description = "Bucketeer add-on plan for S3-compatible object storage."
+  type        = string
+  default     = "bucketeer:micro"
+}
+
+variable "object_storage_prefix" {
+  description = "Optional key prefix for object storage objects, such as dev or prod."
+  type        = string
+  default     = null
+}
+
+variable "enable_scheduler" {
+  description = "Whether to provision the Heroku Scheduler add-on. Individual scheduler jobs are configured in Heroku Scheduler after provisioning."
+  type        = bool
+  default     = false
+}
+
+variable "scheduler_plan" {
+  description = "Heroku Scheduler add-on plan."
+  type        = string
+  default     = "scheduler:standard"
+}
+
+variable "rss_feed_scheduler_command" {
+  description = "Command to register in Heroku Scheduler for RSS feed batch processing."
+  type        = string
+  default     = "node dist/rssFeedWorker.mjs"
+}
+
 variable "manage_web_formation" {
   description = "Whether Terraform manages the web dyno formation. The app must already have a release with a web process."
   type        = bool

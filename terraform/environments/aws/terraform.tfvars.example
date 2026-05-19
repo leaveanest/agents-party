@@ -1,0 +1,20 @@
+container_image = "123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/agents-party:latest"
+
+# Optional HTTPS listener. Leave null for HTTP-only test environments.
+certificate_arn = null
+
+# Store DATABASE_URL, Slack/OAuth secrets, and encryption keys outside Terraform state.
+runtime_secret_arns = {
+  DATABASE_URL                   = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:agents-party/prod/database-url"
+  LLM_API_KEY_ENCRYPTION_KEY     = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:agents-party/prod/llm-api-key-encryption-key"
+  SLACK_CLIENT_ID                = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:agents-party/prod/slack-client-id"
+  SLACK_CLIENT_SECRET            = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:agents-party/prod/slack-client-secret"
+  SLACK_SIGNING_SECRET           = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:agents-party/prod/slack-signing-secret"
+  SLACK_STATE_SECRET             = "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:agents-party/prod/slack-state-secret"
+}
+
+object_storage_prefix = "prod"
+
+# Enable the RSS batch scheduler after migrations and Slack/provider secrets are configured.
+enable_rss_feed_schedule      = false
+rss_feed_schedule_expression = "rate(10 minutes)"

@@ -10,4 +10,14 @@ manage_worker_formation = false
 # Enable together with worker formation after the worker process is deployed and scaled.
 slack_agent_queue_enabled = false
 
+# Enable to provision Bucketeer for S3-compatible object storage on Heroku.
+enable_bucketeer     = false
+bucketeer_plan       = "bucketeer:micro"
+object_storage_prefix = "dev"
+
+# Enable to provision Heroku Scheduler. Add the RSS job in the Scheduler dashboard using this command.
+enable_scheduler          = false
+scheduler_plan            = "scheduler:standard"
+rss_feed_scheduler_command = "node dist/rssFeedWorker.mjs"
+
 additional_config_vars = {}

@@ -11,6 +11,15 @@ export type AppSettings = {
   redisUrl?: string;
   imageGenerationModelId: string;
   llmApiKeyEncryptionKey: string | undefined;
+  objectStorageAccessKeyId: string | undefined;
+  objectStorageBucket: string | undefined;
+  objectStorageEnabled: boolean;
+  objectStorageEndpoint: string | undefined;
+  objectStorageForcePathStyle: boolean;
+  objectStoragePrefix: string | undefined;
+  objectStoragePublicBaseUrl: string | undefined;
+  objectStorageRegion: string | undefined;
+  objectStorageSecretAccessKey: string | undefined;
   googleOAuthCallbackPath: string;
   googleOAuthCallbackUrl: string;
   googleOAuthClientId: string | undefined;
@@ -68,6 +77,15 @@ const DEFAULT_SLACK_SCOPES = [
   "reactions:read",
   "users:read",
 ];
+const DEFAULT_SLACK_USER_SCOPES = [
+  "channels:history",
+  "groups:history",
+  "im:history",
+  "mpim:history",
+  "search:read.public",
+  "users:read",
+  "users:read.email",
+];
 
 /**
  * Read application settings from environment variables.
@@ -82,6 +100,22 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
   const databaseUrl = readText(env.DATABASE_URL);
   const redisUrl = readText(env.REDIS_URL);
   const llmApiKeyEncryptionKey = readText(env.LLM_API_KEY_ENCRYPTION_KEY);
+  const objectStorageBucket =
+    readText(env.OBJECT_STORAGE_BUCKET) ?? readText(env.BUCKETEER_BUCKET_NAME);
+  const objectStorageRegion =
+    readText(env.OBJECT_STORAGE_REGION) ?? readText(env.BUCKETEER_AWS_REGION);
+  const objectStorageAccessKeyId =
+    readText(env.OBJECT_STORAGE_ACCESS_KEY_ID) ?? readText(env.BUCKETEER_AWS_ACCESS_KEY_ID);
+  const objectStorageSecretAccessKey =
+    readText(env.OBJECT_STORAGE_SECRET_ACCESS_KEY) ?? readText(env.BUCKETEER_AWS_SECRET_ACCESS_KEY);
+  const objectStorageEndpoint = readAbsoluteBaseUrl(
+    env.OBJECT_STORAGE_ENDPOINT,
+    "OBJECT_STORAGE_ENDPOINT",
+  );
+  const objectStoragePublicBaseUrl = readAbsoluteBaseUrl(
+    env.OBJECT_STORAGE_PUBLIC_BASE_URL,
+    "OBJECT_STORAGE_PUBLIC_BASE_URL",
+  );
   assertProductionProviderCredentialSettings(env, appEnv, {
     databaseUrl,
     llmApiKeyEncryptionKey,
@@ -161,6 +195,15 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     imageGenerationModelId:
       readText(env.IMAGE_GENERATION_MODEL) ?? DEFAULT_IMAGE_GENERATION_MODEL_ID,
     llmApiKeyEncryptionKey,
+    objectStorageAccessKeyId,
+    objectStorageBucket,
+    objectStorageEnabled: objectStorageBucket !== undefined,
+    objectStorageEndpoint,
+    objectStorageForcePathStyle: parseBoolean(env.OBJECT_STORAGE_FORCE_PATH_STYLE, false),
+    objectStoragePrefix: readObjectStoragePrefix(env.OBJECT_STORAGE_PREFIX),
+    objectStoragePublicBaseUrl,
+    objectStorageRegion,
+    objectStorageSecretAccessKey,
     googleOAuthCallbackPath,
     googleOAuthCallbackUrl: buildCallbackUrl(googleOAuthRedirectBaseUrl, googleOAuthCallbackPath),
     googleOAuthClientId,
@@ -192,7 +235,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     slackScopes: parseList(env.SLACK_SCOPES, DEFAULT_SLACK_SCOPES),
     slackSigningSecret,
     slackStateSecret,
-    slackUserScopes: parseList(env.SLACK_USER_SCOPES, []),
+    slackUserScopes: parseList(env.SLACK_USER_SCOPES, DEFAULT_SLACK_USER_SCOPES),
     salesforceOAuthCallbackPath,
     salesforceOAuthCallbackUrl: buildCallbackUrl(
       salesforceOAuthRedirectBaseUrl,
@@ -342,7 +385,12 @@ function readAbsoluteBaseUrl(value: string | undefined, envName: string): string
   if (text === undefined) {
     return undefined;
   }
-  const parsed = new URL(text);
+  let parsed: URL;
+  try {
+    parsed = new URL(text);
+  } catch {
+    throw new Error(`${envName} must be an absolute http(s) URL.`);
+  }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new Error(`${envName} must be an absolute http(s) URL.`);
   }
@@ -350,6 +398,14 @@ function readAbsoluteBaseUrl(value: string | undefined, envName: string): string
     throw new Error(`${envName} must not include a query string or fragment.`);
   }
   return text.replace(/\/+$/, "");
+}
+
+function readObjectStoragePrefix(value: string | undefined): string | undefined {
+  const text = readText(value);
+  if (text === undefined) {
+    return undefined;
+  }
+  return text.replace(/^\/+|\/+$/g, "");
 }
 
 function buildCallbackUrl(baseUrl: string | undefined, path: string): string {
