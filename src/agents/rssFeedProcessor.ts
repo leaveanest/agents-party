@@ -17,10 +17,6 @@ export type RssFeedFetcher = {
   fetchFeed(feedUrl: string): Promise<{ body: string; cacheStatus: string } | undefined>;
 };
 
-export type RssArticleContentFetcher = {
-  fetchArticleContent(articleUrl: string): Promise<string | undefined>;
-};
-
 export type RssArticlePost = {
   articleKey: string;
   articleUrl: string;
@@ -38,7 +34,6 @@ export type RssArticlePublisher = {
 };
 
 export type RssFeedProcessorOptions = {
-  articleContentFetcher: RssArticleContentFetcher;
   articlePublisher: RssArticlePublisher;
   feedFetcher: RssFeedFetcher;
   logger?: RssProcessorLogger;
@@ -113,7 +108,18 @@ export class RssFeedProcessor {
     subscription: RssFeedSubscription,
     feedBody: string,
   ): Promise<{ failedArticles: number; postedArticles: number; skipped: boolean }> {
-    const resolvedModel = await this.resolveModel(subscription);
+    let resolvedModel: { model: ModelInfo; source: "channel" | "workspace" } | undefined;
+    try {
+      resolvedModel = await this.resolveModel(subscription);
+    } catch (error) {
+      this.options.logger?.warn?.("RSS subscription skipped because web search is unavailable.", {
+        channelId: subscription.channelId,
+        error,
+        subscriptionId: subscription.id,
+        teamId: subscription.teamId,
+      });
+      return { failedArticles: 0, postedArticles: 0, skipped: true };
+    }
     if (resolvedModel === undefined) {
       this.options.logger?.warn?.("RSS subscription skipped because no model is configured.", {
         channelId: subscription.channelId,
@@ -129,22 +135,31 @@ export class RssFeedProcessor {
       return { failedArticles: 0, postedArticles: 0, skipped: false };
     }
 
-    const posts: RssArticlePost[] = [];
     let failedArticles = 0;
-    for (const candidate of candidates) {
+    let posts: RssArticlePost[];
+    try {
+      posts = await this.draftFeedPosts({
+        candidates,
+        model: resolvedModel.model,
+        subscription,
+      });
+    } catch (error) {
+      this.options.logger?.error?.("RSS feed item drafting failed.", {
+        error,
+        subscriptionId: subscription.id,
+      });
+      return { failedArticles: candidates.length, postedArticles: 0, skipped: false };
+    }
+
+    const reservedPosts: RssArticlePost[] = [];
+    for (const post of posts) {
+      const candidate = candidates.find((item) => item.articleKey === post.articleKey);
+      if (candidate === undefined) {
+        continue;
+      }
       try {
-        const content =
-          candidate.article.content ??
-          (await this.options.articleContentFetcher.fetchArticleContent(
-            candidate.article.articleUrl,
-          ));
-        const text = await this.summarizeArticle({
-          article: { ...candidate.article, content },
-          model: resolvedModel.model,
-          subscription,
-        });
         const reserved = await this.options.repository.reserveProcessedArticle({
-          articleKey: candidate.articleKey,
+          articleKey: post.articleKey,
           articleUrl: candidate.article.articleUrl,
           payload: { status: "reserved" },
           processedAt: this.now(),
@@ -155,27 +170,22 @@ export class RssFeedProcessor {
         if (!reserved) {
           continue;
         }
-        posts.push({
-          articleKey: candidate.articleKey,
-          articleUrl: candidate.article.articleUrl,
-          text,
-          title: candidate.article.title,
-        });
+        reservedPosts.push(post);
       } catch (error) {
         failedArticles += 1;
         this.options.logger?.error?.("RSS article processing failed.", {
-          articleKey: candidate.articleKey,
+          articleKey: post.articleKey,
           error,
           subscriptionId: subscription.id,
         });
       }
     }
 
-    if (posts.length === 0) {
+    if (reservedPosts.length === 0) {
       return { failedArticles, postedArticles: 0, skipped: false };
     }
     const postedArticles: Array<{ article: RssArticle; articleKey: string }> = [];
-    for (const post of posts) {
+    for (const post of reservedPosts) {
       let slackMessageTs: string;
       try {
         slackMessageTs = await this.options.articlePublisher.publishFeedArticle({
@@ -269,39 +279,41 @@ export class RssFeedProcessor {
     if (channelModelId === undefined && workspaceModelId === undefined) {
       return undefined;
     }
-    const resolved = this.options.providerRouter.resolveModel({
-      channelModelId,
-      workspaceModelId,
-    });
+    const resolved = this.options.providerRouter.resolveModel(
+      {
+        channelModelId,
+        workspaceModelId,
+      },
+      ["web_search"],
+    );
     return {
       model: resolved.model,
       source: resolved.source === "channel" ? "channel" : "workspace",
     };
   }
 
-  private async summarizeArticle(input: {
-    article: RssArticle;
+  private async draftFeedPosts(input: {
+    candidates: ReadonlyArray<{ article: RssArticle; articleKey: string }>;
     model: ModelInfo;
     subscription: RssFeedSubscription;
-  }): Promise<string> {
+  }): Promise<RssArticlePost[]> {
     const result = await this.options.providerRouter.generate({
       context: {
         workspaceId: input.subscription.teamId,
       },
-      history: rssArticleHistory(input.article),
-      maxOutputTokens: 700,
+      history: rssFeedSelectionHistory(input.subscription.feedUrl, input.candidates),
+      maxOutputTokens: 1200,
       metadata: {
-        rss_article_url: input.article.articleUrl,
         rss_channel_id: input.subscription.channelId,
         rss_feed_url: input.subscription.feedUrl,
         rss_subscription_id: input.subscription.id,
+        rss_web_search: true,
       },
       model: input.model,
-      requiredCapabilities: ["text"],
-      system:
-        "You write concise Slack mrkdwn updates for RSS articles. Summarize the article in Japanese, include why it matters, and keep the response under 900 characters.",
+      requiredCapabilities: ["web_search"],
+      system: `You review RSS feed items for a Slack channel. The user message contains feed-provided title, URL, author, published timestamp, summary, and feed content. Use the available web search tool to inspect or verify linked article URLs when needed, and avoid relying on unstated assumptions. Pick up to ${input.candidates.length} items worth posting. For each selected item, write a concise Japanese Slack mrkdwn update. Return strict JSON with a top-level "posts" array of objects containing "articleKey" and "text".`,
     } satisfies LlmRequest);
-    return result.content.trim();
+    return parseDraftedFeedPosts(result.content, input.candidates);
   }
 
   private now(): Date {
@@ -309,33 +321,107 @@ export class RssFeedProcessor {
   }
 }
 
-function rssArticleHistory(article: RssArticle): ConversationHistory {
+function rssFeedSelectionHistory(
+  feedUrl: string,
+  candidates: ReadonlyArray<{ article: RssArticle; articleKey: string }>,
+): ConversationHistory {
   return {
     messages: [
       {
         author: { id: "rss-feed", kind: "system" },
         content: [
           {
-            text: [
-              `Title: ${article.title}`,
-              `URL: ${article.articleUrl}`,
-              article.publishedAt === undefined
-                ? undefined
-                : `Published: ${article.publishedAt.toISOString()}`,
-              article.author === undefined ? undefined : `Author: ${article.author}`,
-              article.summary === undefined ? undefined : `Summary: ${article.summary}`,
-              article.content === undefined ? undefined : `Content: ${article.content}`,
-            ]
-              .filter((line): line is string => line !== undefined)
-              .join("\n\n"),
+            text: [`Feed URL: ${feedUrl}`, "Articles:", ...candidates.map(formatFeedItem)]
+              .join("\n\n")
+              .trim(),
             type: "text",
           },
         ],
-        id: "rss-article",
+        id: "rss-feed-items",
         role: "user",
       },
     ],
   };
+}
+
+function formatFeedItem(
+  candidate: { article: RssArticle; articleKey: string },
+  index: number,
+): string {
+  const { article, articleKey } = candidate;
+  return [
+    `${index + 1}. Article Key: ${articleKey}`,
+    `Title: ${article.title}`,
+    `URL: ${article.articleUrl}`,
+    article.publishedAt === undefined
+      ? undefined
+      : `Published: ${article.publishedAt.toISOString()}`,
+    article.author === undefined ? undefined : `Author: ${article.author}`,
+    article.summary === undefined ? undefined : `Summary: ${truncateFeedText(article.summary)}`,
+    article.content === undefined
+      ? undefined
+      : `Feed Content: ${truncateFeedText(article.content)}`,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
+function parseDraftedFeedPosts(
+  value: string,
+  candidates: ReadonlyArray<{ article: RssArticle; articleKey: string }>,
+): RssArticlePost[] {
+  const parsed = parseJsonObject(value);
+  const posts = Array.isArray(parsed?.posts) ? parsed.posts : [];
+  const candidatesByKey = new Map(candidates.map((candidate) => [candidate.articleKey, candidate]));
+  const drafted: RssArticlePost[] = [];
+  const seen = new Set<string>();
+  for (const post of posts) {
+    if (!isRecord(post)) {
+      continue;
+    }
+    const articleKey = stringValue(post.articleKey);
+    const text = stringValue(post.text)?.trim();
+    if (
+      articleKey === undefined ||
+      text === undefined ||
+      text.length === 0 ||
+      seen.has(articleKey)
+    ) {
+      continue;
+    }
+    const candidate = candidatesByKey.get(articleKey);
+    if (candidate === undefined) {
+      continue;
+    }
+    seen.add(articleKey);
+    drafted.push({
+      articleKey,
+      articleUrl: candidate.article.articleUrl,
+      text,
+      title: candidate.article.title,
+    });
+  }
+  return drafted;
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | undefined {
+  const trimmed = value.trim();
+  const jsonText = /^```(?:json)?\s*[\s\S]*```$/iu.test(trimmed)
+    ? trimmed.replace(/^```(?:json)?\s*/iu, "").replace(/\s*```$/u, "")
+    : trimmed;
+  try {
+    const parsed = JSON.parse(jsonText) as unknown;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function truncateFeedText(value: string): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length > MAX_FEED_FIELD_CHARS
+    ? `${normalized.slice(0, MAX_FEED_FIELD_CHARS)}...`
+    : normalized;
 }
 
 function newestPublishedAt(articles: readonly RssArticle[]): Date | undefined {
@@ -359,3 +445,13 @@ function stringField(
   const value = record?.[field];
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
 }
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+const MAX_FEED_FIELD_CHARS = 2_000;

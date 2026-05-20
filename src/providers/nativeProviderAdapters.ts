@@ -152,14 +152,14 @@ export function createNativeProviderAdapters(
 
 export const nativeProviderAdapterSpecs: readonly NativeProviderAdapterSpec[] = [
   {
-    capabilities: ["image_generation", "web_search"],
+    capabilities: ["image_generation"],
     provider: "openai",
-    reason: "Use a future OpenAI Responses/native tools adapter instead of the AI SDK common lane.",
+    reason: "Use a future OpenAI Responses/native image adapter instead of the AI SDK common lane.",
   },
   {
-    capabilities: ["thinking", "web_search"],
+    capabilities: ["thinking"],
     provider: "anthropic",
-    reason: "Use a future Anthropic native adapter for thinking and web-search options.",
+    reason: "Use a future Anthropic native adapter for thinking options.",
   },
   {
     capabilities: ["file_input"],

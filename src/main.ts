@@ -11,6 +11,7 @@ import {
   PostgresOAuthRepository,
   PostgresSalesforcePdfWorkflowRepository,
 } from "./infrastructure/postgres/appRepositories.js";
+import { PostgresRssFeedRepository } from "./infrastructure/postgres/rssFeedRepository.js";
 import { PostgresSlackInstallationRepository } from "./infrastructure/postgres/slackInstallationRepository.js";
 import { PostgresUserSettingsRepository } from "./infrastructure/postgres/userSettingsRepository.js";
 import { createBullMqSlackAgentJobQueue } from "./queues/slackAgentJobs.js";
@@ -46,6 +47,8 @@ const featureSettingsRepository =
   appRepositoryPool === undefined
     ? undefined
     : new PostgresWorkspaceFeatureSettingsRepository(appRepositoryPool);
+const rssFeedRepository =
+  appRepositoryPool === undefined ? undefined : new PostgresRssFeedRepository(appRepositoryPool);
 const slackInstallationRepository =
   appRepositoryPool === undefined || settings.slackClientId === undefined
     ? undefined
@@ -112,6 +115,8 @@ const slackGateway = settings.slackEnabled
                 textToSpeechModelId: settings.textToSpeechModelId,
               },
         routingRepository,
+        rssFeedHome:
+          rssFeedRepository === undefined ? undefined : { repository: rssFeedRepository },
         salesforceConnectionHome:
           settings.salesforceOAuthEnabled &&
           salesforceHomeContextSigningSecret !== undefined &&

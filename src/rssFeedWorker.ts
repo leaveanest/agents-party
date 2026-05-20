@@ -6,7 +6,6 @@ import { FernetTextCipher } from "./integrations/oauth/fernet.js";
 import { PostgresAgentRoutingRepository } from "./infrastructure/postgres/appRepositories.js";
 import { PostgresRssFeedRepository } from "./infrastructure/postgres/rssFeedRepository.js";
 import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
-import { ArticleContentGateway } from "./infrastructure/rss/articleContentGateway.js";
 import { RssFeedFetchGateway } from "./infrastructure/rss/rssFetchGateway.js";
 import { createAiSdkAdapters } from "./providers/aiSdkAdapter.js";
 import { createNativeProviderAdapters } from "./providers/nativeProviderAdapters.js";
@@ -37,7 +36,6 @@ const providerRouter = new ProviderRouter([
 ]);
 const slackClients = createSlackWebClientProvider(settings, { pool });
 const processor = new RssFeedProcessor({
-  articleContentFetcher: new ArticleContentGateway({ repository: rssRepository }),
   articlePublisher: createSlackRssArticlePublisher({
     clientProvider: slackClients,
     defaultLocale: settings.defaultLocale,

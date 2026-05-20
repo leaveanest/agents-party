@@ -18,6 +18,8 @@ import {
   MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   MODEL_ROUTING_MODAL_CALLBACK_ID,
   MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID,
+  RSS_FEED_CONFIGURE_ACTION_ID,
+  RSS_FEED_MODAL_CALLBACK_ID,
   SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
   WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID,
@@ -64,6 +66,8 @@ export type SlackEventFeatureHandlers = {
   handleFeatureSettingsModalSubmission(
     args: SlackViewMiddlewareArgs & AllMiddlewareArgs,
   ): Promise<void>;
+  handleRssFeedConfigureAction(args: SlackActionMiddlewareArgs & AllMiddlewareArgs): Promise<void>;
+  handleRssFeedModalSubmission(args: SlackViewMiddlewareArgs & AllMiddlewareArgs): Promise<void>;
 };
 
 type SlackAppRegistration = Pick<App, "action" | "event" | "use" | "view">;
@@ -127,6 +131,9 @@ export function registerSlackEventHandlers(
   app.action(FEATURE_SETTINGS_CONFIGURE_ACTION_ID, async (args) =>
     handlers.handleFeatureSettingsConfigureAction(args),
   );
+  app.action(RSS_FEED_CONFIGURE_ACTION_ID, async (args) =>
+    handlers.handleRssFeedConfigureAction(args),
+  );
   app.view(WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleWorkspaceCredentialModalSubmission(args),
   );
@@ -139,6 +146,7 @@ export function registerSlackEventHandlers(
   app.view(FEATURE_SETTINGS_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleFeatureSettingsModalSubmission(args),
   );
+  app.view(RSS_FEED_MODAL_CALLBACK_ID, async (args) => handlers.handleRssFeedModalSubmission(args));
 }
 
 export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
@@ -234,6 +242,12 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
       await ack();
     },
     async handleFeatureSettingsModalSubmission({ ack }) {
+      await ack();
+    },
+    async handleRssFeedConfigureAction({ ack }) {
+      await ack();
+    },
+    async handleRssFeedModalSubmission({ ack }) {
       await ack();
     },
   };

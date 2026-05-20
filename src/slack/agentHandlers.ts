@@ -7,6 +7,7 @@ import type {
   StringIndexed,
 } from "@slack/bolt";
 import { ErrorCode } from "@slack/web-api";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import {
@@ -18,6 +19,7 @@ import {
   type AgentRunnerStructuredResult,
 } from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
+import { normalizeRssFeedUrl } from "../domain/rssFeeds.js";
 import {
   FALLBACK_LOCALE,
   createTranslator,
@@ -54,10 +56,12 @@ import {
   type SalesforcePdfWorkflowSettings,
 } from "../domain/salesforcePdfWorkflows.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
+import { validateRssFeedUrl } from "../infrastructure/rss/rssFeedValidator.js";
 import type { TranscriptionGateway } from "../providers/transcriptionGateway.js";
 import { createDefaultModelRegistry } from "../providers/modelRegistry.js";
 import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
 import type { UserSettingsRepository } from "../repositories/userSettings.js";
+import type { RssFeedRepository } from "../repositories/rssFeeds.js";
 import type { WorkspaceFeatureSettingsRepository } from "../repositories/workspaceFeatureSettings.js";
 import {
   SlackAudioProcessingError,
@@ -107,6 +111,12 @@ import {
   MODEL_ROUTING_REASONING_EFFORT_BLOCK_ID,
   MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_WORKSPACE_SELECT_ACTION_ID,
+  RSS_FEED_CHANNEL_ACTION_ID,
+  RSS_FEED_CHANNEL_BLOCK_ID,
+  RSS_FEED_CONFIGURE_ACTION_ID,
+  RSS_FEED_MODAL_CALLBACK_ID,
+  RSS_FEED_URL_ACTION_ID,
+  RSS_FEED_URL_BLOCK_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_BLOCK_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STATUSES_ACTION_ID,
@@ -200,6 +210,12 @@ type ValidatedSlackAgentRoute =
       skippedModelIds: string[];
       valid: false;
     };
+type RssFeedActionValue = {
+  enterpriseId?: string;
+  selectedTeamId?: string;
+  source?: "app_home";
+  teamId?: string;
+};
 
 const DEFAULT_AGENT_OPTION = {
   description: "General Slack assistant.",
@@ -442,6 +458,10 @@ export type WorkspaceCredentialSettingsHome = {
   }): Promise<void>;
 };
 
+export type RssFeedHome = {
+  repository: Pick<RssFeedRepository, "saveSubscription">;
+};
+
 export type SlackInstalledWorkspaceDirectory = {
   listInstalledWorkspaces(input: { enterpriseId?: string }): Promise<SlackInstalledWorkspace[]>;
 };
@@ -463,6 +483,8 @@ export type AgentSlackHandlerOptions = {
   installedWorkspaceDirectory?: SlackInstalledWorkspaceDirectory;
   featureSettingsHome?: WorkspaceFeatureSettingsHome;
   routingRepository?: SlackAgentRoutingRepository;
+  rssFeedFetchFn?: typeof fetch;
+  rssFeedHome?: RssFeedHome;
   salesforceConnectionHome?: SalesforceConnectionHome;
   salesforcePdfWorkflowHome?: SalesforcePdfWorkflowHome;
   slackTeamClients?: SlackTeamClientProviderForHandlers;
@@ -578,6 +600,12 @@ export function createAgentSlackHandlers(
     async handleFeatureSettingsModalSubmission(args) {
       await handleFeatureSettingsModalSubmission(args, options);
     },
+    async handleRssFeedConfigureAction(args) {
+      await handleRssFeedConfigureAction(args, options);
+    },
+    async handleRssFeedModalSubmission(args) {
+      await handleRssFeedModalSubmission(args, options);
+    },
   };
 }
 
@@ -605,6 +633,7 @@ async function buildAppHomeBlocks(input: {
   ];
   blocks.push(...(await buildModelRoutingAppHomeBlocks(input)));
   blocks.push(...(await buildFeatureSettingsAppHomeBlocks(input)));
+  blocks.push(...buildRssFeedAppHomeBlocks(input));
   if (input.options.workspaceCredentialSettings !== undefined && input.teamId !== undefined) {
     blocks.push({ type: "divider" });
     blocks.push({
@@ -836,6 +865,41 @@ async function buildModelRoutingAppHomeBlocks(input: {
                 count: installedWorkspaces.length,
               })
             : translator.t("appHome.modelRouting.body"),
+        type: "mrkdwn",
+      },
+      type: "section",
+    },
+  ];
+}
+
+function buildRssFeedAppHomeBlocks(input: {
+  appHomeContext: SlackAppHomeContext;
+  options: AgentSlackHandlerOptions;
+  teamId: string | undefined;
+  translator: Translator;
+}): Record<string, unknown>[] {
+  if (input.options.rssFeedHome === undefined || input.teamId === undefined) {
+    return [];
+  }
+  return [
+    { type: "divider" },
+    {
+      text: { text: input.translator.t("appHome.rssFeeds.title"), type: "plain_text" },
+      type: "header",
+    },
+    {
+      accessory: {
+        action_id: RSS_FEED_CONFIGURE_ACTION_ID,
+        text: { text: input.translator.t("appHome.rssFeeds.add"), type: "plain_text" },
+        type: "button",
+        value: JSON.stringify({
+          enterpriseId: input.appHomeContext.enterpriseId,
+          selectedTeamId: input.teamId,
+          source: "app_home",
+        }),
+      },
+      text: {
+        text: input.translator.t("appHome.rssFeeds.body"),
         type: "mrkdwn",
       },
       type: "section",
@@ -2716,6 +2780,26 @@ function parseFeatureSettingsActionValue(
   }
 }
 
+function parseRssFeedActionValue(value: string | undefined): RssFeedActionValue | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) {
+      return undefined;
+    }
+    return {
+      enterpriseId: stringRecordField(parsed, "enterpriseId"),
+      selectedTeamId: stringRecordField(parsed, "selectedTeamId"),
+      source: parsed.source === "app_home" ? "app_home" : undefined,
+      teamId: stringRecordField(parsed, "teamId"),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function stringRecordField(value: Record<string, unknown>, field: string): string | undefined {
   const fieldValue = value[field];
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
@@ -3054,6 +3138,231 @@ async function updateOpenedWorkspaceCredentialModalLocale(input: {
     input.view(translator),
     input.logger,
   );
+}
+
+async function handleRssFeedConfigureAction(
+  { ack, body, client, logger }: SlackActionArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  await ack();
+  const actionValue = parseRssFeedActionValue(readActionValue(body));
+  const enterpriseId = actionValue?.enterpriseId ?? readSlackEnterpriseId(body);
+  const bodyTeamId = readTeamId(body, {});
+  const selectedTeamId = actionValue?.selectedTeamId ?? actionValue?.teamId ?? bodyTeamId;
+  const slackUserId = readSlackUserId(body);
+  const triggerId = isRecord(body) ? readString(body, "trigger_id") : undefined;
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId, teamId: selectedTeamId ?? bodyTeamId },
+    slackUserId,
+    options,
+    logger,
+  );
+  if (slackUserId === undefined || triggerId === undefined || selectedTeamId === undefined) {
+    logWarn(logger, "Ignoring RSS feed configuration action with missing Slack context.", {});
+    return;
+  }
+  const userContext = await resolveSlackUserContext(
+    client,
+    slackUserId,
+    translator,
+    logger,
+    selectedTeamId,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildRssFeedResultModal(
+        userContext.translator.t("rssFeeds.error.unauthorized"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
+  if (options.rssFeedHome === undefined) {
+    await client.views.open({
+      trigger_id: triggerId,
+      view: buildRssFeedResultModal(
+        userContext.translator.t("rssFeeds.error.notConfigured"),
+        userContext.translator,
+      ) as never,
+    });
+    return;
+  }
+  await client.views.open({
+    trigger_id: triggerId,
+    view: buildRssFeedModal({
+      enterpriseId,
+      teamId: selectedTeamId,
+      translator: userContext.translator,
+    }) as never,
+  });
+}
+
+async function handleRssFeedModalSubmission(
+  { ack, body, client, logger, view }: SlackViewArgs,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  const metadata = parseRssFeedActionValue(
+    readString(view as unknown as StringIndexed, "private_metadata"),
+  );
+  const metadataTeamId = metadata?.teamId ?? metadata?.selectedTeamId;
+  const bodyTeamId = readTeamId(body, {});
+  const teamId =
+    metadata?.enterpriseId === undefined
+      ? (bodyTeamId ?? metadataTeamId)
+      : (metadataTeamId ?? bodyTeamId);
+  const slackUserId = readSlackUserId(body);
+  const translator = await resolveHandlerTranslator(
+    { enterpriseId: metadata?.enterpriseId ?? readSlackEnterpriseId(body), teamId },
+    slackUserId,
+    options,
+    logger,
+  );
+  if (options.rssFeedHome === undefined || teamId === undefined || slackUserId === undefined) {
+    await ack({
+      errors: {
+        [RSS_FEED_URL_BLOCK_ID]: translator.t("rssFeeds.error.notConfigured"),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  if (
+    metadata?.enterpriseId === undefined &&
+    metadataTeamId !== undefined &&
+    bodyTeamId !== undefined &&
+    metadataTeamId !== bodyTeamId
+  ) {
+    await ack({
+      errors: {
+        [RSS_FEED_CHANNEL_BLOCK_ID]: translator.t("rssFeeds.error.contextMismatch"),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  const parsed = parseRssFeedModal(view, translator);
+  if ("errors" in parsed) {
+    await ack({
+      errors: parsed.errors,
+      response_action: "errors",
+    });
+    return;
+  }
+
+  await ack({
+    response_action: "update",
+    view: buildRssFeedResultModal(translator.t("rssFeeds.result.saving"), translator) as never,
+  });
+
+  const userContext = await resolveSlackUserContext(
+    client,
+    slackUserId,
+    translator,
+    logger,
+    teamId,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    await updateRssFeedModal(
+      client,
+      view,
+      buildRssFeedResultModal(
+        userContext.translator.t("rssFeeds.error.unauthorized"),
+        userContext.translator,
+      ),
+      logger,
+    );
+    return;
+  }
+
+  const feedValidation = await validateRssFeedUrl({
+    feedUrl: parsed.feedUrl,
+    fetchFn: options.rssFeedFetchFn,
+  });
+  if (!feedValidation.ok) {
+    const messageKey =
+      feedValidation.reason === "unreachable"
+        ? "rssFeeds.error.unreachableFeedUrl"
+        : "rssFeeds.error.notFeedUrl";
+    await updateRssFeedModal(
+      client,
+      view,
+      buildRssFeedResultModal(userContext.translator.t(messageKey), userContext.translator),
+      logger,
+    );
+    logWarn(logger, "Rejected RSS feed subscription with invalid feed URL.", {
+      feedUrl: parsed.feedUrl,
+      reason: feedValidation.reason,
+      teamId,
+    });
+    return;
+  }
+
+  const joinResult = await joinRssFeedChannel(client, parsed.channelId);
+  if (!joinResult.ok) {
+    await updateRssFeedModal(
+      client,
+      view,
+      buildRssFeedResultModal(
+        userContext.translator.t(joinResult.messageKey),
+        userContext.translator,
+      ),
+      logger,
+    );
+    logWarn(logger, "Could not join RSS feed channel before saving subscription.", {
+      channelId: parsed.channelId,
+      errorCode: joinResult.errorCode,
+      teamId,
+    });
+    return;
+  }
+
+  try {
+    const now = new Date();
+    await options.rssFeedHome.repository.saveSubscription({
+      channelId: parsed.channelId,
+      createdAt: now,
+      enabled: true,
+      feedUrl: parsed.feedUrl,
+      id: randomUUID(),
+      payload: {
+        created_by_slack_user_id: slackUserId,
+        source: "slack_app_home",
+      },
+      teamId,
+      updatedAt: now,
+    });
+    logInfo(logger, "Saved RSS feed subscription from Slack modal.", {
+      channelId: parsed.channelId,
+      feedUrl: parsed.feedUrl,
+      teamId,
+    });
+    await updateRssFeedModal(
+      client,
+      view,
+      buildRssFeedResultModal(
+        userContext.translator.t("rssFeeds.result.saved"),
+        userContext.translator,
+      ),
+      logger,
+    );
+  } catch (error) {
+    logError(logger, "Failed to save RSS feed subscription from Slack modal.", {
+      channelId: parsed.channelId,
+      error,
+      feedUrl: parsed.feedUrl,
+      teamId,
+    });
+    await updateRssFeedModal(
+      client,
+      view,
+      buildRssFeedResultModal(
+        userContext.translator.t("rssFeeds.error.saveFailed"),
+        userContext.translator,
+      ),
+      logger,
+    );
+  }
 }
 
 async function handleFeatureSettingsConfigureAction(
@@ -3499,6 +3808,162 @@ async function handleFeatureSettingsModalSubmission(
       ),
       logger,
     );
+  }
+}
+
+function buildRssFeedModal(input: {
+  enterpriseId?: string;
+  teamId: string;
+  translator: Translator;
+}): Record<string, unknown> {
+  return {
+    blocks: [
+      {
+        text: {
+          text: input.translator.t("rssFeeds.modal.intro"),
+          type: "mrkdwn",
+        },
+        type: "section",
+      },
+      {
+        block_id: RSS_FEED_URL_BLOCK_ID,
+        element: {
+          action_id: RSS_FEED_URL_ACTION_ID,
+          placeholder: { text: "https://example.com/feed.xml", type: "plain_text" },
+          type: "plain_text_input",
+        },
+        label: { text: input.translator.t("rssFeeds.label.feedUrl"), type: "plain_text" },
+        type: "input",
+      },
+      {
+        block_id: RSS_FEED_CHANNEL_BLOCK_ID,
+        element: {
+          action_id: RSS_FEED_CHANNEL_ACTION_ID,
+          filter: {
+            exclude_bot_users: true,
+            include: ["public"],
+          },
+          placeholder: {
+            text: input.translator.t("rssFeeds.channel.placeholder"),
+            type: "plain_text",
+          },
+          type: "conversations_select",
+        },
+        label: { text: input.translator.t("rssFeeds.label.channel"), type: "plain_text" },
+        type: "input",
+      },
+    ],
+    callback_id: RSS_FEED_MODAL_CALLBACK_ID,
+    close: { text: input.translator.t("common.cancel"), type: "plain_text" },
+    private_metadata: JSON.stringify({
+      enterpriseId: input.enterpriseId,
+      source: "app_home",
+      teamId: input.teamId,
+    }),
+    submit: { text: input.translator.t("common.save"), type: "plain_text" },
+    title: { text: input.translator.t("rssFeeds.title"), type: "plain_text" },
+    type: "modal",
+  };
+}
+
+function buildRssFeedResultModal(message: string, translator: Translator): Record<string, unknown> {
+  return {
+    blocks: [
+      {
+        text: { text: message, type: "mrkdwn" },
+        type: "section",
+      },
+    ],
+    close: { text: translator.t("common.close"), type: "plain_text" },
+    title: { text: translator.t("rssFeeds.title"), type: "plain_text" },
+    type: "modal",
+  };
+}
+
+function parseRssFeedModal(
+  view: unknown,
+  translator: Translator,
+): { channelId: string; feedUrl: string } | { errors: Record<string, string> } {
+  const rawFeedUrl = readModalInputValue(view, RSS_FEED_URL_BLOCK_ID, RSS_FEED_URL_ACTION_ID);
+  let feedUrl: string | undefined;
+  try {
+    feedUrl = rawFeedUrl === undefined ? undefined : normalizeRssFeedUrl(rawFeedUrl);
+  } catch {
+    feedUrl = undefined;
+  }
+  const channelId = readSelectedConversationValue(
+    view,
+    RSS_FEED_CHANNEL_BLOCK_ID,
+    RSS_FEED_CHANNEL_ACTION_ID,
+  );
+  const errors: Record<string, string> = {};
+  if (feedUrl === undefined || !isHttpUrl(feedUrl)) {
+    errors[RSS_FEED_URL_BLOCK_ID] = translator.t("rssFeeds.error.invalidFeedUrl");
+  }
+  if (channelId === undefined) {
+    errors[RSS_FEED_CHANNEL_BLOCK_ID] = translator.t("rssFeeds.error.channelRequired");
+  }
+  if (Object.keys(errors).length > 0) {
+    return { errors };
+  }
+  if (channelId === undefined || feedUrl === undefined) {
+    return {
+      errors: {
+        [RSS_FEED_CHANNEL_BLOCK_ID]: translator.t("rssFeeds.error.channelRequired"),
+      },
+    };
+  }
+  return { channelId, feedUrl };
+}
+
+async function joinRssFeedChannel(
+  client: SlackClient,
+  channelId: string,
+): Promise<
+  | { ok: true }
+  | {
+      errorCode?: string;
+      messageKey: "rssFeeds.error.joinMissingScope" | "rssFeeds.error.joinFailed";
+      ok: false;
+    }
+> {
+  try {
+    await client.conversations.join({ channel: channelId });
+    return { ok: true };
+  } catch (error) {
+    const errorCode = readSlackApiErrorCode(error);
+    if (errorCode === "already_in_channel") {
+      return { ok: true };
+    }
+    return {
+      errorCode,
+      messageKey:
+        errorCode === "missing_scope"
+          ? "rssFeeds.error.joinMissingScope"
+          : "rssFeeds.error.joinFailed",
+      ok: false,
+    };
+  }
+}
+
+async function updateRssFeedModal(
+  client: SlackClient,
+  view: unknown,
+  modal: Record<string, unknown>,
+  logger: unknown,
+): Promise<void> {
+  const viewId = isRecord(view) ? readString(view, "id") : undefined;
+  if (viewId === undefined) {
+    logWarn(logger, "Could not update RSS feed modal without Slack view id.", {});
+    return;
+  }
+  try {
+    await client.views.update({
+      view: modal as never,
+      view_id: viewId,
+    });
+  } catch (error) {
+    logWarn(logger, "Failed to update RSS feed modal.", { error, viewId });
   }
 }
 
@@ -7191,6 +7656,17 @@ function logError(logger: unknown, message: string, metadata: Record<string, unk
   }
 }
 
+function readSlackApiErrorCode(error: unknown): string | undefined {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+  const data = error.data;
+  if (isRecord(data) && typeof data.error === "string") {
+    return data.error;
+  }
+  return typeof error.code === "string" ? error.code : undefined;
+}
+
 async function resolveHandlerTranslator(
   scope: SlackUserSettingsScope,
   userId: string | undefined,
@@ -8478,6 +8954,17 @@ function readSelectedConversationValues(
     (conversation): conversation is string =>
       typeof conversation === "string" && conversation.length > 0,
   );
+}
+
+function readSelectedConversationValue(
+  view: unknown,
+  blockId: string,
+  actionId: string,
+): string | undefined {
+  const element = readModalElement(view, blockId, actionId);
+  return isRecord(element) && typeof element.selected_conversation === "string"
+    ? element.selected_conversation
+    : undefined;
 }
 
 function readModalElement(view: unknown, blockId: string, actionId: string): unknown {

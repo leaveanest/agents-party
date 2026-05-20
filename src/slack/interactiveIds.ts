@@ -48,6 +48,13 @@ export const FEATURE_SETTINGS_TTS_MODEL_ACTION_ID = "text_to_speech_model";
 export const FEATURE_SETTINGS_TTS_CHANNELS_BLOCK_ID = "feature_settings_text_to_speech_channels";
 export const FEATURE_SETTINGS_TTS_CHANNELS_ACTION_ID = "text_to_speech_channels";
 
+export const RSS_FEED_CONFIGURE_ACTION_ID = "rss_feed_configure";
+export const RSS_FEED_MODAL_CALLBACK_ID = "rss_feed_modal";
+export const RSS_FEED_URL_BLOCK_ID = "rss_feed_url";
+export const RSS_FEED_URL_ACTION_ID = "feed_url";
+export const RSS_FEED_CHANNEL_BLOCK_ID = "rss_feed_channel";
+export const RSS_FEED_CHANNEL_ACTION_ID = "channel_id";
+
 export const SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID = "salesforce_pdf_workflow_configure";
 export const SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID = "salesforce_pdf_workflow_modal";
 
