@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 
 import type { AppSettings } from "../../src/config.js";
 import { createSlackApp } from "../../src/slack/app.js";
@@ -98,4 +100,53 @@ describe("createSlackApp", () => {
     expect(result.installationStore).toBeDefined();
     await result.close();
   });
+
+  it("serves the OAuth install page with configured user scopes", async () => {
+    const result = createSlackApp({
+      ...baseSettings,
+      databaseUrl: "postgres://localhost/app",
+      slackClientId: "123.456",
+      slackClientSecret: "client-secret",
+      slackEnabled: true,
+      slackInstallationStoreEnabled: true,
+      slackOAuthInstallEnabled: true,
+      slackSigningSecret: "secret",
+      slackStateSecret: "state-secret",
+      slackUserScopes: ["search:read.public", "users:read"],
+    });
+    const server = createServer((request, response) => {
+      result.receiver.requestListener(request, response);
+    });
+    try {
+      await listen(server);
+      const address = server.address() as AddressInfo;
+
+      const response = await fetch(`http://127.0.0.1:${address.port}/slack/install`);
+      const body = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(body).toContain("user_scope=search%3Aread.public%2Cusers%3Aread");
+    } finally {
+      await closeServer(server);
+      await result.close();
+    }
+  });
 });
+
+function listen(server: Server): Promise<void> {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}

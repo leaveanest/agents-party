@@ -4,6 +4,7 @@ import {
   createSlackMcpAgentTools,
   type SlackMcpTokenResolver,
 } from "../../../src/agents/slackMcp/index.js";
+import { AgentToolRegistry } from "../../../src/agents/toolContracts.js";
 
 describe("createSlackMcpAgentTools", () => {
   it("exposes a focused set of Slack MCP read/search tools", () => {
@@ -44,6 +45,45 @@ describe("createSlackMcpAgentTools", () => {
 
     await expect(tool?.execute({ query: "from:<@U1> on:2026-05-19" })).resolves.toMatchObject({
       ok: true,
+      toolName: "slack_search_public",
+    });
+    expect(calls).toEqual([
+      {
+        arguments: { query: "from:<@U1> on:2026-05-19" },
+        name: "slack_search_public",
+        token: "xoxp-token",
+      },
+    ]);
+  });
+
+  it("treats a blank optional cursor as omitted", async () => {
+    const calls: unknown[] = [];
+    const registry = new AgentToolRegistry(
+      createSlackMcpAgentTools({
+        client: {
+          async callTool(input) {
+            calls.push(input);
+            return {
+              content: [{ text: "search result", type: "text" }],
+            };
+          },
+        },
+        context: context(),
+        tokenResolver: tokenResolver("xoxp-token"),
+      }),
+    );
+
+    await expect(
+      registry.execute({
+        input: { cursor: "", query: "from:<@U1> on:2026-05-19" },
+        toolCallId: "call-1",
+        toolName: "slack_search_public",
+      }),
+    ).resolves.toMatchObject({
+      output: {
+        ok: true,
+        toolName: "slack_search_public",
+      },
       toolName: "slack_search_public",
     });
     expect(calls).toEqual([

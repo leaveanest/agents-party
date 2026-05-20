@@ -439,6 +439,59 @@ describe("AgentRunner", () => {
     expect(JSON.stringify(router.requests[1]?.history)).toContain("[redacted]");
   });
 
+  it("allows multiple tool rounds before the final provider response", async () => {
+    const registry = new AgentToolRegistry([
+      {
+        description: "Echo a string.",
+        execute: async (input) => ({ echoed: readText(input) }),
+        name: "echo",
+        outputSchema: z.object({ echoed: z.string() }) as never,
+        parameters: {
+          additionalProperties: false,
+          properties: { text: { type: "string" } },
+          required: ["text"],
+          type: "object",
+        },
+        schema: z.object({ text: z.string() }) as never,
+      },
+    ]);
+    const router = new SequencedProviderRouter([
+      {
+        content: "",
+        finishReason: "tool_call",
+        toolCalls: [{ input: { text: "first" }, toolCallId: "call-1", toolName: "echo" }],
+      },
+      {
+        content: "",
+        finishReason: "tool_call",
+        toolCalls: [{ input: { text: "second" }, toolCallId: "call-2", toolName: "echo" }],
+      },
+      {
+        content: "final",
+      },
+    ]);
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+      toolRegistry: registry,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "echo twice",
+      userId: "U1",
+    });
+
+    expect(result.message).toBe("final");
+    expect(result.toolResults.map((toolResult) => toolResult.toolCallId)).toEqual([
+      "call-1",
+      "call-2",
+    ]);
+    expect(router.requests).toHaveLength(3);
+  });
+
   it("lets tool registry factories gate tools by resolved model capability", async () => {
     const router = new FakeProviderRouter({
       content: "text only",

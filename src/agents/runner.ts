@@ -85,6 +85,7 @@ export type AgentRunnerOptions = {
 
 const DEFAULT_SYSTEM_PROMPT =
   "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.";
+const DEFAULT_MAX_TOOL_ROUNDS = 3;
 
 export class AgentRunner {
   constructor(private readonly options: AgentRunnerOptions) {}
@@ -165,7 +166,7 @@ export class AgentRunner {
         system: this.systemPrompt(),
         tools: toolRegistry?.definitions(),
       };
-      const maxToolRounds = this.options.maxToolRounds ?? 1;
+      const maxToolRounds = this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
       for (let round = 0; round <= maxToolRounds; round += 1) {
         const result = await this.options.providerRouter.generate({ ...requestBase, history });
         if ((result.toolCalls?.length ?? 0) === 0) {

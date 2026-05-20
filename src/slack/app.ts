@@ -4,7 +4,7 @@ import {
   type Authorize,
   type AuthorizeResult,
   type AuthorizeSourceData,
-  type HTTPReceiverOptions,
+  type AppOptions,
   type Installation,
   type InstallationStore,
 } from "@slack/bolt";
@@ -70,17 +70,8 @@ export function createSlackApp(
   if (installationStore === undefined) {
     throw new Error("Slack installation storage is required.");
   }
-  const receiver = new HTTPReceiver(buildReceiverOptions(settings, installationStore));
-  const app = settings.slackOAuthInstallEnabled
-    ? new App({
-        ignoreSelf: true,
-        receiver,
-      })
-    : new App({
-        authorize: buildAuthorize(settings, installationStore),
-        ignoreSelf: true,
-        receiver,
-      });
+  const app = new App(buildAppOptions(settings, installationStore));
+  const receiver = getHttpReceiver(app);
 
   registerSlackEventHandlers(
     app,
@@ -113,22 +104,19 @@ function buildInstallationStore(settings: AppSettings): {
   };
 }
 
-function buildReceiverOptions(
-  settings: AppSettings,
-  installationStore: InstallationStore | undefined,
-): HTTPReceiverOptions {
+function buildAppOptions(settings: AppSettings, installationStore: InstallationStore): AppOptions {
   if (settings.slackSigningSecret === undefined) {
-    throw new Error("SLACK_SIGNING_SECRET is required for Slack HTTP receiver setup.");
+    throw new Error("SLACK_SIGNING_SECRET is required for Slack app setup.");
   }
 
-  const options: HTTPReceiverOptions = {
+  const options: AppOptions = {
     endpoints: settings.slackEventsPath,
+    ignoreSelf: true,
     processBeforeResponse: false,
     signingSecret: settings.slackSigningSecret,
-    unhandledRequestTimeoutMillis: 2500,
   };
 
-  if (settings.slackOAuthInstallEnabled && installationStore !== undefined) {
+  if (settings.slackOAuthInstallEnabled) {
     options.clientId = settings.slackClientId;
     options.clientSecret = settings.slackClientSecret;
     options.installationStore = installationStore;
@@ -140,9 +128,19 @@ function buildReceiverOptions(
     };
     options.scopes = settings.slackScopes;
     options.stateSecret = settings.slackStateSecret;
+  } else {
+    options.authorize = buildAuthorize(settings, installationStore);
   }
 
   return options;
+}
+
+function getHttpReceiver(app: App): HTTPReceiver {
+  const receiver = (app as unknown as { receiver?: unknown }).receiver;
+  if (!(receiver instanceof HTTPReceiver)) {
+    throw new Error("Slack app did not initialize an HTTP receiver.");
+  }
+  return receiver;
 }
 
 function buildAuthorize(

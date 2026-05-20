@@ -32,7 +32,7 @@ export type SlackMcpToolOptions = {
 
 const searchMessagesInputSchema = z
   .object({
-    cursor: z.string().trim().min(1).optional(),
+    cursor: z.string().trim().optional(),
     query: z.string().trim().min(1),
   })
   .passthrough();
@@ -40,16 +40,16 @@ const searchMessagesInputSchema = z
 const readChannelInputSchema = z
   .object({
     channel_id: z.string().trim().min(1),
-    cursor: z.string().trim().min(1).optional(),
+    cursor: z.string().trim().optional(),
     limit: z.number().int().min(1).max(100).optional(),
-    message_ts: z.string().trim().min(1).optional(),
+    message_ts: z.string().trim().optional(),
   })
   .passthrough();
 
 const readThreadInputSchema = z
   .object({
     channel_id: z.string().trim().min(1),
-    cursor: z.string().trim().min(1).optional(),
+    cursor: z.string().trim().optional(),
     thread_ts: z.string().trim().min(1),
   })
   .passthrough();
@@ -140,7 +140,7 @@ async function executeSlackMcpTool(
 
   try {
     const result = await (options.client ?? new SlackMcpClient()).callTool({
-      arguments: input,
+      arguments: normalizeSlackMcpToolInput(input),
       name: toolName,
       token: resolution.token,
     });
@@ -153,6 +153,16 @@ async function executeSlackMcpTool(
       true,
     );
   }
+}
+
+function normalizeSlackMcpToolInput(input: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...input };
+  for (const key of ["cursor", "message_ts"]) {
+    if (typeof normalized[key] === "string" && normalized[key].trim().length === 0) {
+      delete normalized[key];
+    }
+  }
+  return normalized;
 }
 
 function validateSlackMcpToolAccess(
