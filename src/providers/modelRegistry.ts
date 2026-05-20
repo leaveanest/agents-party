@@ -456,6 +456,14 @@ export const defaultModelRegistryEntries: readonly ModelInfo[] = [
     providerModelId: "gpt-4o",
   },
   {
+    aliases: ["gpt-image-2"],
+    capabilities: ["image_generation"],
+    displayName: "GPT Image 2",
+    id: "openai:gpt-image-2",
+    provider: "openai",
+    providerModelId: "gpt-image-2",
+  },
+  {
     aliases: ["gpt-image-1.5"],
     capabilities: ["image_generation"],
     displayName: "GPT Image 1.5",

@@ -73,6 +73,8 @@ export const englishTranslations = {
   "featureSettings.error.unauthorized":
     "Only Slack workspace admins and owners can configure workspace features.",
   "featureSettings.image.enabled": "Enable image generation",
+  "featureSettings.image.model": "Image generation model",
+  "featureSettings.image.modelPlaceholder": "Choose a model",
   "featureSettings.image.title": "Image generation",
   "featureSettings.modal.intro":
     "Control workspace features and the channels where they are allowed.",
@@ -248,6 +250,8 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "featureSettings.error.unauthorized":
     "ワークスペース機能を設定できるのはSlackワークスペースの管理者またはオーナーのみです。",
   "featureSettings.image.enabled": "画像生成を有効にする",
+  "featureSettings.image.model": "画像生成モデル",
+  "featureSettings.image.modelPlaceholder": "モデルを選択",
   "featureSettings.image.title": "画像生成",
   "featureSettings.modal.intro": "ワークスペース機能と、利用を許可するチャンネルを管理します。",
   "featureSettings.result.saved": "機能設定を保存しました。",

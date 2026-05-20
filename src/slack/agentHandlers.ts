@@ -75,6 +75,8 @@ import {
   FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
   FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID,
   FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID,
+  FEATURE_SETTINGS_IMAGE_MODEL_ACTION_ID,
+  FEATURE_SETTINGS_IMAGE_MODEL_BLOCK_ID,
   FEATURE_SETTINGS_MODAL_CALLBACK_ID,
   MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_CONFIGURE_ACTION_ID,
@@ -2443,6 +2445,45 @@ async function hasAnyWorkspaceProviderApiKey(
   return false;
 }
 
+async function imageGenerationModelOptions(input: {
+  logger: unknown;
+  options: AgentSlackHandlerOptions;
+  teamId: string;
+}): Promise<SlackOption[]> {
+  const registry = createDefaultModelRegistry();
+  const credentialedProviders = await Promise.all(
+    imageGenerationCredentialProviderKinds.map(async (providerKind) => ({
+      hasCredential: await hasWorkspaceProviderApiKey(
+        input.teamId,
+        providerKind,
+        input.options,
+        input.logger,
+      ),
+      providerKind,
+    })),
+  );
+  const allowedProviders = new Set(
+    credentialedProviders.filter((item) => item.hasCredential).map((item) => item.providerKind),
+  );
+  return registry
+    .list()
+    .filter(
+      (model) =>
+        model.capabilities.includes("image_generation") &&
+        allowedProviders.has(
+          model.provider as (typeof imageGenerationCredentialProviderKinds)[number],
+        ),
+    )
+    .map((model) => ({
+      text: {
+        text: model.displayName ?? model.id,
+        type: "plain_text" as const,
+      },
+      value: model.id,
+    }))
+    .slice(0, 100);
+}
+
 function parseModelRoutingSource(value: unknown): ModelRoutingActionValue["source"] | undefined {
   return value === "app_home" || value === "channel" || value === "thread" ? value : undefined;
 }
@@ -2680,6 +2721,14 @@ async function handleFeatureSettingsConfigureAction(
       allowedChannelIds: allowedChannels.map((channel) => channel.channelId),
       enabled: workspaceSetting?.enabled === true,
       enterpriseId,
+      imageGenerationModelId:
+        stringField(workspaceSetting?.payload, "image_generation_model_id") ??
+        options.featureSettingsHome.imageGenerationModelId,
+      imageGenerationModelOptions: await imageGenerationModelOptions({
+        logger,
+        options,
+        teamId: selectedTeamId,
+      }),
       teamId: selectedTeamId,
       translator: userContext.translator,
     }) as never,
@@ -2747,11 +2796,28 @@ async function handleFeatureSettingsModalSubmission(
     FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
     FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID,
   );
+  const selectedImageGenerationModelId =
+    readSelectedOptionValue(
+      view,
+      FEATURE_SETTINGS_IMAGE_MODEL_BLOCK_ID,
+      FEATURE_SETTINGS_IMAGE_MODEL_ACTION_ID,
+    ) ?? options.featureSettingsHome?.imageGenerationModelId;
   if (enabled && channelIds.length === 0) {
     await ack({
       errors: {
         [FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID]: translator.t(
           "featureSettings.error.channelsRequired",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  if (enabled && selectedImageGenerationModelId === undefined) {
+    await ack({
+      errors: {
+        [FEATURE_SETTINGS_IMAGE_MODEL_BLOCK_ID]: translator.t(
+          "featureSettings.error.missingImageCredential",
         ),
       },
       response_action: "errors",
@@ -2784,10 +2850,10 @@ async function handleFeatureSettingsModalSubmission(
     );
     return;
   }
-  const imageModel = resolveImageGenerationModel(
-    options.featureSettingsHome.imageGenerationModelId,
-    logger,
-  );
+  const imageModel =
+    selectedImageGenerationModelId === undefined
+      ? undefined
+      : resolveImageGenerationModel(selectedImageGenerationModelId, logger);
   if (enabled && imageModel === undefined) {
     await updateFeatureSettingsModal(
       client,
@@ -2803,12 +2869,7 @@ async function handleFeatureSettingsModalSubmission(
   if (
     enabled &&
     imageModel !== undefined &&
-    !(await hasAnyWorkspaceProviderApiKey(
-      teamId,
-      imageGenerationCredentialProviderKinds,
-      options,
-      logger,
-    ))
+    !(await hasWorkspaceProviderApiKey(teamId, imageModel.provider, options, logger))
   ) {
     await updateFeatureSettingsModal(
       client,
@@ -2830,7 +2891,8 @@ async function handleFeatureSettingsModalSubmission(
         featureKey: "image_generation",
         payload: {
           feature_key: "image_generation",
-          image_generation_model_id: options.featureSettingsHome.imageGenerationModelId,
+          image_generation_model_id:
+            selectedImageGenerationModelId ?? options.featureSettingsHome.imageGenerationModelId,
         },
         teamId,
         updatedAt: now,
@@ -2864,6 +2926,8 @@ function buildFeatureSettingsModal(input: {
   allowedChannelIds: readonly string[];
   enabled: boolean;
   enterpriseId?: string;
+  imageGenerationModelId: string;
+  imageGenerationModelOptions: readonly SlackOption[];
   teamId: string;
   translator: Translator;
 }): Record<string, unknown> {
@@ -2871,6 +2935,10 @@ function buildFeatureSettingsModal(input: {
     text: { text: input.translator.t("featureSettings.image.enabled"), type: "plain_text" },
     value: "enabled",
   };
+  const initialImageGenerationModelOption =
+    input.imageGenerationModelOptions.find(
+      (option) => option.value === input.imageGenerationModelId,
+    ) ?? input.imageGenerationModelOptions[0];
   return {
     blocks: [
       {
@@ -2895,6 +2963,31 @@ function buildFeatureSettingsModal(input: {
         optional: true,
         type: "input",
       },
+      ...(input.imageGenerationModelOptions.length === 0
+        ? []
+        : [
+            {
+              block_id: FEATURE_SETTINGS_IMAGE_MODEL_BLOCK_ID,
+              element: {
+                action_id: FEATURE_SETTINGS_IMAGE_MODEL_ACTION_ID,
+                ...(initialImageGenerationModelOption === undefined
+                  ? {}
+                  : { initial_option: initialImageGenerationModelOption }),
+                options: input.imageGenerationModelOptions,
+                placeholder: {
+                  text: input.translator.t("featureSettings.image.modelPlaceholder"),
+                  type: "plain_text",
+                },
+                type: "static_select",
+              },
+              label: {
+                text: input.translator.t("featureSettings.image.model"),
+                type: "plain_text",
+              },
+              optional: false,
+              type: "input",
+            },
+          ]),
       {
         block_id: FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
         element: {

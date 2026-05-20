@@ -2787,6 +2787,8 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(JSON.stringify(openedViews[0])).toContain("multi_conversations_select");
+    expect(JSON.stringify(openedViews[0])).toContain("static_select");
+    expect(JSON.stringify(openedViews[0])).toContain("openai:gpt-image-1.5");
     expect(JSON.stringify(openedViews[0])).toContain("C1");
 
     await handlers.handleFeatureSettingsModalSubmission({
@@ -2809,11 +2811,15 @@ describe("createAgentSlackHandlers", () => {
       view: validFeatureSettingsView({
         channelIds: ["C2", "C3"],
         enabled: true,
+        imageGenerationModelId: "openai:gpt-image-1.5",
         teamId: "T1",
       }),
     } as never);
 
     expect(repository.workspaceSetting?.enabled).toBe(true);
+    expect(repository.workspaceSetting?.payload.image_generation_model_id).toBe(
+      "openai:gpt-image-1.5",
+    );
     expect(repository.allowedChannelIds).toEqual(["C2", "C3"]);
     expect(JSON.stringify(updatedViews)).toContain("Feature settings were saved.");
   });
@@ -2927,11 +2933,15 @@ describe("createAgentSlackHandlers", () => {
       view: validFeatureSettingsView({
         channelIds: ["C2"],
         enabled: true,
+        imageGenerationModelId: "openai:gpt-image-1.5",
         teamId: "T1",
       }),
     } as never);
 
     expect(repository.workspaceSetting?.enabled).toBe(true);
+    expect(repository.workspaceSetting?.payload.image_generation_model_id).toBe(
+      "openai:gpt-image-1.5",
+    );
     expect(repository.allowedChannelIds).toEqual(["C2"]);
     expect(JSON.stringify(updatedViews)).toContain("Feature settings were saved.");
   });
@@ -6444,6 +6454,7 @@ function validFeatureSettingsView(input: {
   channelIds: string[];
   enabled: boolean;
   enterpriseId?: string;
+  imageGenerationModelId?: string;
   teamId: string;
 }): unknown {
   return {
@@ -6464,6 +6475,15 @@ function validFeatureSettingsView(input: {
             selected_options: input.enabled ? [{ value: "enabled" }] : [],
           },
         },
+        ...(input.imageGenerationModelId === undefined
+          ? {}
+          : {
+              feature_settings_image_generation_model: {
+                image_generation_model: {
+                  selected_option: { value: input.imageGenerationModelId },
+                },
+              },
+            }),
       },
     },
   };

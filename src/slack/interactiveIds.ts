@@ -33,6 +33,8 @@ export const FEATURE_SETTINGS_CONFIGURE_ACTION_ID = "feature_settings_configure"
 export const FEATURE_SETTINGS_MODAL_CALLBACK_ID = "feature_settings_modal";
 export const FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID = "feature_settings_image_generation_enabled";
 export const FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID = "image_generation_enabled";
+export const FEATURE_SETTINGS_IMAGE_MODEL_BLOCK_ID = "feature_settings_image_generation_model";
+export const FEATURE_SETTINGS_IMAGE_MODEL_ACTION_ID = "image_generation_model";
 export const FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID =
   "feature_settings_image_generation_channels";
 export const FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID = "image_generation_channels";

@@ -10,6 +10,7 @@ import type { WorkspaceFeatureSettingsRepository } from "../../repositories/work
 import type { AgentToolDefinition } from "../toolContracts.js";
 
 export const defaultImageGenerationFallbackModelIds = [
+  "openai:gpt-image-2",
   "openai:gpt-image-1.5",
   "google:gemini-2.5-flash-image",
 ] as const;
@@ -114,7 +115,13 @@ async function generateImageTool(
     );
   }
 
-  const resolution = await resolveImageGenerationModelCredential(options);
+  const selectedImageGenerationModelId =
+    stringPayloadField(workspaceSetting.payload, "image_generation_model_id") ??
+    options.imageGenerationModelId;
+  const resolution = await resolveImageGenerationModelCredential(
+    options,
+    selectedImageGenerationModelId,
+  );
   if (resolution === undefined) {
     return failure(
       "missing_provider_credential",
@@ -152,8 +159,9 @@ async function generateImageTool(
 
 async function resolveImageGenerationModelCredential(
   options: MediaGenerationToolOptions,
+  imageGenerationModelId: string,
 ): Promise<{ credential: { apiKey: string; baseURL?: string }; model: ModelInfo } | undefined> {
-  const configuredModel = options.modelRegistry.get(options.imageGenerationModelId);
+  const configuredModel = options.modelRegistry.get(imageGenerationModelId);
   options.modelRegistry.assertCapabilities(configuredModel, ["image_generation"]);
   const models = [
     configuredModel,
@@ -215,4 +223,9 @@ function failure(code: string, message: string): MediaToolOutput {
     message,
     ok: false,
   };
+}
+
+function stringPayloadField(payload: Record<string, JsonValue>, field: string): string | undefined {
+  const value = payload[field];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

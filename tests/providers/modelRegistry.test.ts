@@ -86,6 +86,12 @@ describe("ModelRegistry", () => {
       provider: "openai",
       providerModelId: "gpt-image-1.5",
     });
+    expect(registry.get("gpt-image-2")).toMatchObject({
+      capabilities: ["image_generation"],
+      id: "openai:gpt-image-2",
+      provider: "openai",
+      providerModelId: "gpt-image-2",
+    });
     expect(registry.get("google.speech-to-text")).toMatchObject({
       capabilities: ["transcription"],
       id: "google:speech-to-text-latest-long",
