@@ -188,7 +188,7 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
     "このワークスペースで利用可能なモデルとデフォルトモデルを選択します。",
   "appHome.modelRouting.bodyGrid":
     "インストール済みワークスペースごとに、利用可能なモデルとデフォルトモデルを選択します。インストール済みワークスペース: {{count}}。",
-  "appHome.modelRouting.title": "モデルルーティング",
+  "appHome.modelRouting.title": "ワークスペースモデル設定",
   "appHome.salesforce.connect": "接続",
   "appHome.salesforce.connected": "接続済み",
   "appHome.salesforce.connectedAs": "{{account}} として接続済み",
@@ -270,7 +270,7 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "featureSettings.result.saving": "機能設定を保存しています...",
   "featureSettings.title": "機能設定",
   "modelRouting.modal.intro":
-    "このワークスペース向けのモデルルーティング設定を準備中です。保存に使うワークスペース文脈は保持されています。",
+    "このワークスペースで利用できるモデルとデフォルトモデルを設定します。",
   "modelRouting.channelModal.intro": "このチャンネルで使うデフォルトモデルを選択します。",
   "modelRouting.channelModal.defaultModel": "チャンネルのデフォルトモデル",
   "modelRouting.threadModal.intro": "このスレッドで使うモデルを選択します。",
@@ -297,21 +297,21 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "modelRouting.error.threadModelRequired": "このスレッドで利用できるモデルを選択してください。",
   "modelRouting.error.noCredentialedModels":
     "このワークスペースでモデルを有効にする前に、APIキーまたは必要な認証情報を登録してください。",
-  "modelRouting.error.notConfigured": "モデルルーティング設定は構成されていません。",
+  "modelRouting.error.notConfigured": "ワークスペースモデル設定は構成されていません。",
   "modelRouting.error.saveFailed":
-    "モデルルーティング設定を保存できませんでした。時間をおいて再試行してください。",
+    "ワークスペースモデル設定を保存できませんでした。時間をおいて再試行してください。",
   "modelRouting.error.unauthorized":
-    "モデルルーティングを設定できるのはSlackワークスペースの管理者またはオーナーのみです。",
+    "ワークスペースモデル設定を変更できるのはSlackワークスペースの管理者またはオーナーのみです。",
   "modelRouting.fallback.notice":
     "以前選択されていた{{fromScope}}モデル {{fromModelId}} は無効になっています。このスレッドでは{{toScope}}モデル {{toModelId}} を使用します。",
-  "modelRouting.result.loading": "モデルルーティング設定を読み込んでいます...",
+  "modelRouting.result.loading": "ワークスペースモデル設定を読み込んでいます...",
   "modelRouting.result.channelSaved": "チャンネル設定を保存しました。",
   "modelRouting.result.threadSaved": "スレッド設定を保存しました。",
-  "modelRouting.result.saved": "モデルルーティング設定を保存しました。",
-  "modelRouting.result.saving": "モデルルーティング設定を保存しています...",
+  "modelRouting.result.saved": "ワークスペースモデル設定を保存しました。",
+  "modelRouting.result.saving": "ワークスペースモデル設定を保存しています...",
   "modelRouting.title.channel": "チャンネル設定",
   "modelRouting.title.thread": "スレッド設定",
-  "modelRouting.title": "モデルルーティング",
+  "modelRouting.title": "ワークスペースモデル設定",
   "rss.parent": "RSS更新: {{feedUrl}}",
   "salesforcePdf.attachTarget.both": "QuoteとOpportunity",
   "salesforcePdf.attachTarget.opportunity": "Opportunity",
