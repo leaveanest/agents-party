@@ -32,6 +32,7 @@ import {
   createSalesforcePdfAgentTools,
   type SalesforcePdfToolOptions,
 } from "./salesforcePdf/index.js";
+import { createSpeechGenerationAgentTools } from "./speechGeneration/index.js";
 import { createSlackMcpAgentTools, type SlackMcpTokenResolver } from "./slackMcp/index.js";
 import { createSoracomAgentTools } from "./soracom/index.js";
 import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
@@ -74,6 +75,7 @@ export type AgentRunnerOptions = {
   maxToolRounds?: number;
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
   systemPrompt?: string;
+  textToSpeechModelId?: string;
   toolRegistry?: AgentToolRegistry;
   toolRegistryFactory?: (
     invocation: SlackAgentInvocation,
@@ -225,6 +227,7 @@ export function createDefaultAgentRunner(
     featureSettingsRepository: options.featureSettingsRepository,
     imageGenerationModelId: settings.imageGenerationModelId,
     providerRouter,
+    textToSpeechModelId: settings.textToSpeechModelId,
     toolRegistryFactory: (invocation, model) => {
       if (!model.capabilities.includes("tool_calling")) {
         return new AgentToolRegistry();
@@ -240,6 +243,16 @@ export function createDefaultAgentRunner(
           imageGenerationFallbackModelIds: defaultImageGenerationFallbackModelIds,
           imageGenerationModelId: settings.imageGenerationModelId,
           modelRegistry: providerRouter.registry,
+        }),
+        ...createSpeechGenerationAgentTools({
+          context: {
+            channelId: invocation.channelId,
+            teamId: invocation.teamId,
+          },
+          credentialResolver: options.credentialResolver,
+          featureSettingsRepository: options.featureSettingsRepository,
+          modelRegistry: providerRouter.registry,
+          textToSpeechModelId: settings.textToSpeechModelId,
         }),
         ...(salesforcePdfTools === undefined
           ? []
@@ -453,7 +466,10 @@ function generatedMediaToolOutput(toolResults: AgentToolResult[]): JsonValue | u
       continue;
     }
     const media = result.output.media;
-    if (isJsonObject(media) && (media.kind === "image" || media.kind === "video")) {
+    if (
+      isJsonObject(media) &&
+      (media.kind === "audio" || media.kind === "image" || media.kind === "video")
+    ) {
       return result.output;
     }
   }

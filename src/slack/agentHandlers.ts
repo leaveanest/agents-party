@@ -78,6 +78,12 @@ import {
   FEATURE_SETTINGS_IMAGE_MODEL_ACTION_ID,
   FEATURE_SETTINGS_IMAGE_MODEL_BLOCK_ID,
   FEATURE_SETTINGS_MODAL_CALLBACK_ID,
+  FEATURE_SETTINGS_TTS_CHANNELS_ACTION_ID,
+  FEATURE_SETTINGS_TTS_CHANNELS_BLOCK_ID,
+  FEATURE_SETTINGS_TTS_ENABLED_ACTION_ID,
+  FEATURE_SETTINGS_TTS_ENABLED_BLOCK_ID,
+  FEATURE_SETTINGS_TTS_MODEL_ACTION_ID,
+  FEATURE_SETTINGS_TTS_MODEL_BLOCK_ID,
   MODEL_ROUTING_CHANNEL_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_CONFIGURE_ACTION_ID,
   MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
@@ -402,6 +408,7 @@ export type AgentSlackHandlerOptions = {
 export type WorkspaceFeatureSettingsHome = {
   imageGenerationModelId: string;
   repository: WorkspaceFeatureSettingsRepository;
+  textToSpeechModelId?: string;
 };
 
 type SlackAgentJobRetryContext = {
@@ -415,6 +422,7 @@ type SlackUserSettingsScope = {
 };
 
 const imageGenerationCredentialProviderKinds = ["google", "openai"] as const;
+const textToSpeechCredentialProviderKinds = ["openai"] as const;
 
 export function createAgentSlackHandlers(
   runner: AgentRunner,
@@ -636,25 +644,66 @@ async function buildFeatureSettingsAppHomeBlocks(input: {
   if (selectedTeamId === undefined) {
     return [];
   }
-  const workspaceSetting =
-    await input.options.featureSettingsHome.repository.findWorkspaceFeatureSetting({
+  const [imageWorkspaceSetting, textToSpeechWorkspaceSetting] = await Promise.all([
+    input.options.featureSettingsHome.repository.findWorkspaceFeatureSetting({
       featureKey: "image_generation",
       teamId: selectedTeamId,
-    });
+    }),
+    input.options.featureSettingsHome.repository.findWorkspaceFeatureSetting({
+      featureKey: "text_to_speech",
+      teamId: selectedTeamId,
+    }),
+  ]);
   const imageModel = resolveImageGenerationModel(
     input.options.featureSettingsHome.imageGenerationModelId,
     input.logger,
   );
-  if (imageModel === undefined) {
+  const selectedTextToSpeechModelId =
+    stringField(textToSpeechWorkspaceSetting?.payload, "text_to_speech_model_id") ??
+    input.options.featureSettingsHome.textToSpeechModelId;
+  const textToSpeechModel =
+    selectedTextToSpeechModelId === undefined
+      ? undefined
+      : resolveTextToSpeechModel(selectedTextToSpeechModelId, input.logger);
+  const availableTextToSpeechModelOptions =
+    textToSpeechModel === undefined
+      ? await textToSpeechModelOptions({
+          logger: input.logger,
+          options: input.options,
+          teamId: selectedTeamId,
+        })
+      : [];
+  if (
+    imageModel === undefined &&
+    textToSpeechModel === undefined &&
+    availableTextToSpeechModelOptions.length === 0
+  ) {
     return [];
   }
-  const hasImageCredential = await hasAnyWorkspaceProviderApiKey(
-    selectedTeamId,
-    imageGenerationCredentialProviderKinds,
-    input.options,
-    input.logger,
-  );
-  if (!hasImageCredential && workspaceSetting?.enabled !== true) {
+  const [hasImageCredential, hasTextToSpeechCredential] = await Promise.all([
+    imageModel === undefined
+      ? Promise.resolve(false)
+      : hasAnyWorkspaceProviderApiKey(
+          selectedTeamId,
+          imageGenerationCredentialProviderKinds,
+          input.options,
+          input.logger,
+        ),
+    textToSpeechModel === undefined
+      ? Promise.resolve(availableTextToSpeechModelOptions.length > 0)
+      : hasAnyWorkspaceProviderApiKey(
+          selectedTeamId,
+          textToSpeechCredentialProviderKinds,
+          input.options,
+          input.logger,
+        ),
+  ]);
+  if (
+    !hasImageCredential &&
+    imageWorkspaceSetting?.enabled !== true &&
+    !hasTextToSpeechCredential &&
+    textToSpeechWorkspaceSetting?.enabled !== true
+  ) {
     return [];
   }
   return [
@@ -2389,6 +2438,35 @@ function resolveImageGenerationModel(
   }
 }
 
+function resolveTextToSpeechModel(
+  textToSpeechModelId: string,
+  logger: unknown,
+): ModelInfo | undefined {
+  try {
+    const model = createDefaultModelRegistry().get(textToSpeechModelId);
+    if (model.provider !== "openai") {
+      logWarn(logger, "Text-to-speech model provider is not supported.", {
+        provider: model.provider,
+        textToSpeechModelId,
+      });
+      return undefined;
+    }
+    if (!model.capabilities.includes("text_to_speech")) {
+      logWarn(logger, "Text-to-speech model is missing text_to_speech capability.", {
+        textToSpeechModelId,
+      });
+      return undefined;
+    }
+    return model;
+  } catch (error) {
+    logWarn(logger, "Failed to resolve text-to-speech model.", {
+      error,
+      textToSpeechModelId,
+    });
+    return undefined;
+  }
+}
+
 async function hasWorkspaceProviderApiKey(
   teamId: string,
   providerKind: CredentialProviderKind,
@@ -2472,6 +2550,45 @@ async function imageGenerationModelOptions(input: {
         model.capabilities.includes("image_generation") &&
         allowedProviders.has(
           model.provider as (typeof imageGenerationCredentialProviderKinds)[number],
+        ),
+    )
+    .map((model) => ({
+      text: {
+        text: model.displayName ?? model.id,
+        type: "plain_text" as const,
+      },
+      value: model.id,
+    }))
+    .slice(0, 100);
+}
+
+async function textToSpeechModelOptions(input: {
+  logger: unknown;
+  options: AgentSlackHandlerOptions;
+  teamId: string;
+}): Promise<SlackOption[]> {
+  const registry = createDefaultModelRegistry();
+  const credentialedProviders = await Promise.all(
+    textToSpeechCredentialProviderKinds.map(async (providerKind) => ({
+      hasCredential: await hasWorkspaceProviderApiKey(
+        input.teamId,
+        providerKind,
+        input.options,
+        input.logger,
+      ),
+      providerKind,
+    })),
+  );
+  const allowedProviders = new Set(
+    credentialedProviders.filter((item) => item.hasCredential).map((item) => item.providerKind),
+  );
+  return registry
+    .list()
+    .filter(
+      (model) =>
+        model.capabilities.includes("text_to_speech") &&
+        allowedProviders.has(
+          model.provider as (typeof textToSpeechCredentialProviderKinds)[number],
         ),
     )
     .map((model) => ({
@@ -2675,7 +2792,12 @@ async function handleFeatureSettingsConfigureAction(
     });
     return;
   }
-  const [workspaceSetting, allowedChannels] = await Promise.all([
+  const [
+    imageWorkspaceSetting,
+    imageAllowedChannels,
+    textToSpeechWorkspaceSetting,
+    textToSpeechAllowedChannels,
+  ] = await Promise.all([
     options.featureSettingsHome.repository.findWorkspaceFeatureSetting({
       featureKey: "image_generation",
       teamId: selectedTeamId,
@@ -2684,12 +2806,36 @@ async function handleFeatureSettingsConfigureAction(
       featureKey: "image_generation",
       teamId: selectedTeamId,
     }),
+    options.featureSettingsHome.repository.findWorkspaceFeatureSetting({
+      featureKey: "text_to_speech",
+      teamId: selectedTeamId,
+    }),
+    options.featureSettingsHome.repository.listAllowedChannels({
+      featureKey: "text_to_speech",
+      teamId: selectedTeamId,
+    }),
   ]);
   const imageModel = resolveImageGenerationModel(
     options.featureSettingsHome.imageGenerationModelId,
     logger,
   );
-  if (imageModel === undefined) {
+  const textToSpeechModelOptionsForTeam = await textToSpeechModelOptions({
+    logger,
+    options,
+    teamId: selectedTeamId,
+  });
+  const selectedTextToSpeechModelId =
+    stringField(textToSpeechWorkspaceSetting?.payload, "text_to_speech_model_id") ??
+    options.featureSettingsHome.textToSpeechModelId;
+  const textToSpeechModel =
+    selectedTextToSpeechModelId === undefined
+      ? undefined
+      : resolveTextToSpeechModel(selectedTextToSpeechModelId, logger);
+  if (
+    imageModel === undefined &&
+    textToSpeechModel === undefined &&
+    textToSpeechModelOptionsForTeam.length === 0
+  ) {
     await client.views.open({
       trigger_id: triggerId,
       view: buildFeatureSettingsResultModal(
@@ -2699,13 +2845,30 @@ async function handleFeatureSettingsConfigureAction(
     });
     return;
   }
-  const hasImageCredential = await hasAnyWorkspaceProviderApiKey(
-    selectedTeamId,
-    imageGenerationCredentialProviderKinds,
-    options,
-    logger,
-  );
-  if (!hasImageCredential && workspaceSetting?.enabled !== true) {
+  const [hasImageCredential, hasTextToSpeechCredential] = await Promise.all([
+    imageModel === undefined
+      ? Promise.resolve(false)
+      : hasAnyWorkspaceProviderApiKey(
+          selectedTeamId,
+          imageGenerationCredentialProviderKinds,
+          options,
+          logger,
+        ),
+    textToSpeechModel === undefined
+      ? Promise.resolve(textToSpeechModelOptionsForTeam.length > 0)
+      : hasAnyWorkspaceProviderApiKey(
+          selectedTeamId,
+          textToSpeechCredentialProviderKinds,
+          options,
+          logger,
+        ),
+  ]);
+  if (
+    !hasImageCredential &&
+    imageWorkspaceSetting?.enabled !== true &&
+    !hasTextToSpeechCredential &&
+    textToSpeechWorkspaceSetting?.enabled !== true
+  ) {
     await client.views.open({
       trigger_id: triggerId,
       view: buildFeatureSettingsResultModal(
@@ -2718,11 +2881,11 @@ async function handleFeatureSettingsConfigureAction(
   await client.views.open({
     trigger_id: triggerId,
     view: buildFeatureSettingsModal({
-      allowedChannelIds: allowedChannels.map((channel) => channel.channelId),
-      enabled: workspaceSetting?.enabled === true,
+      imageAllowedChannelIds: imageAllowedChannels.map((channel) => channel.channelId),
+      imageEnabled: imageWorkspaceSetting?.enabled === true,
       enterpriseId,
       imageGenerationModelId:
-        stringField(workspaceSetting?.payload, "image_generation_model_id") ??
+        stringField(imageWorkspaceSetting?.payload, "image_generation_model_id") ??
         options.featureSettingsHome.imageGenerationModelId,
       imageGenerationModelOptions: await imageGenerationModelOptions({
         logger,
@@ -2730,6 +2893,12 @@ async function handleFeatureSettingsConfigureAction(
         teamId: selectedTeamId,
       }),
       teamId: selectedTeamId,
+      textToSpeechAllowedChannelIds: textToSpeechAllowedChannels.map(
+        (channel) => channel.channelId,
+      ),
+      textToSpeechEnabled: textToSpeechWorkspaceSetting?.enabled === true,
+      textToSpeechModelId: selectedTextToSpeechModelId,
+      textToSpeechModelOptions: textToSpeechModelOptionsForTeam,
       translator: userContext.translator,
     }) as never,
   });
@@ -2786,12 +2955,12 @@ async function handleFeatureSettingsModalSubmission(
     });
     return;
   }
-  const enabled = readSelectedOptionValues(
+  const imageEnabled = readSelectedOptionValues(
     view,
     FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID,
     FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID,
   ).includes("enabled");
-  const channelIds = readSelectedConversationValues(
+  const imageChannelIds = readSelectedConversationValues(
     view,
     FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
     FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID,
@@ -2802,7 +2971,23 @@ async function handleFeatureSettingsModalSubmission(
       FEATURE_SETTINGS_IMAGE_MODEL_BLOCK_ID,
       FEATURE_SETTINGS_IMAGE_MODEL_ACTION_ID,
     ) ?? options.featureSettingsHome?.imageGenerationModelId;
-  if (enabled && channelIds.length === 0) {
+  const textToSpeechEnabled = readSelectedOptionValues(
+    view,
+    FEATURE_SETTINGS_TTS_ENABLED_BLOCK_ID,
+    FEATURE_SETTINGS_TTS_ENABLED_ACTION_ID,
+  ).includes("enabled");
+  const textToSpeechChannelIds = readSelectedConversationValues(
+    view,
+    FEATURE_SETTINGS_TTS_CHANNELS_BLOCK_ID,
+    FEATURE_SETTINGS_TTS_CHANNELS_ACTION_ID,
+  );
+  const selectedTextToSpeechModelId =
+    readSelectedOptionValue(
+      view,
+      FEATURE_SETTINGS_TTS_MODEL_BLOCK_ID,
+      FEATURE_SETTINGS_TTS_MODEL_ACTION_ID,
+    ) ?? options.featureSettingsHome?.textToSpeechModelId;
+  if (imageEnabled && imageChannelIds.length === 0) {
     await ack({
       errors: {
         [FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID]: translator.t(
@@ -2813,11 +2998,33 @@ async function handleFeatureSettingsModalSubmission(
     });
     return;
   }
-  if (enabled && selectedImageGenerationModelId === undefined) {
+  if (textToSpeechEnabled && textToSpeechChannelIds.length === 0) {
+    await ack({
+      errors: {
+        [FEATURE_SETTINGS_TTS_CHANNELS_BLOCK_ID]: translator.t(
+          "featureSettings.error.channelsRequired",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  if (imageEnabled && selectedImageGenerationModelId === undefined) {
     await ack({
       errors: {
         [FEATURE_SETTINGS_IMAGE_MODEL_BLOCK_ID]: translator.t(
           "featureSettings.error.missingImageCredential",
+        ),
+      },
+      response_action: "errors",
+    });
+    return;
+  }
+  if (textToSpeechEnabled && selectedTextToSpeechModelId === undefined) {
+    await ack({
+      errors: {
+        [FEATURE_SETTINGS_TTS_ENABLED_BLOCK_ID]: translator.t(
+          "featureSettings.error.missingTextToSpeechCredential",
         ),
       },
       response_action: "errors",
@@ -2854,7 +3061,23 @@ async function handleFeatureSettingsModalSubmission(
     selectedImageGenerationModelId === undefined
       ? undefined
       : resolveImageGenerationModel(selectedImageGenerationModelId, logger);
-  if (enabled && imageModel === undefined) {
+  const textToSpeechModel =
+    selectedTextToSpeechModelId === undefined
+      ? undefined
+      : resolveTextToSpeechModel(selectedTextToSpeechModelId, logger);
+  if (imageEnabled && imageModel === undefined) {
+    await updateFeatureSettingsModal(
+      client,
+      view,
+      buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.notConfigured"),
+        userContext.translator,
+      ),
+      logger,
+    );
+    return;
+  }
+  if (textToSpeechEnabled && textToSpeechModel === undefined) {
     await updateFeatureSettingsModal(
       client,
       view,
@@ -2867,7 +3090,7 @@ async function handleFeatureSettingsModalSubmission(
     return;
   }
   if (
-    enabled &&
+    imageEnabled &&
     imageModel !== undefined &&
     !(await hasWorkspaceProviderApiKey(teamId, imageModel.provider, options, logger))
   ) {
@@ -2882,22 +3105,59 @@ async function handleFeatureSettingsModalSubmission(
     );
     return;
   }
+  if (
+    textToSpeechEnabled &&
+    textToSpeechModel !== undefined &&
+    !(await hasWorkspaceProviderApiKey(teamId, textToSpeechModel.provider, options, logger))
+  ) {
+    await updateFeatureSettingsModal(
+      client,
+      view,
+      buildFeatureSettingsResultModal(
+        userContext.translator.t("featureSettings.error.missingTextToSpeechCredential"),
+        userContext.translator,
+      ),
+      logger,
+    );
+    return;
+  }
   try {
     const now = new Date();
-    await options.featureSettingsHome.repository.saveWorkspaceFeatureConfiguration({
-      allowedChannelIds: channelIds,
-      workspaceSetting: {
-        enabled,
-        featureKey: "image_generation",
-        payload: {
-          feature_key: "image_generation",
-          image_generation_model_id:
-            selectedImageGenerationModelId ?? options.featureSettingsHome.imageGenerationModelId,
+    await options.featureSettingsHome.repository.saveWorkspaceFeatureConfigurations({
+      configurations: [
+        {
+          allowedChannelIds: imageChannelIds,
+          workspaceSetting: {
+            enabled: imageEnabled,
+            featureKey: "image_generation",
+            payload: {
+              feature_key: "image_generation",
+              image_generation_model_id:
+                selectedImageGenerationModelId ??
+                options.featureSettingsHome.imageGenerationModelId,
+            },
+            teamId,
+            updatedAt: now,
+            updatedByUserId: slackUserId,
+          },
         },
-        teamId,
-        updatedAt: now,
-        updatedByUserId: slackUserId,
-      },
+        {
+          allowedChannelIds: textToSpeechChannelIds,
+          workspaceSetting: {
+            enabled: textToSpeechEnabled,
+            featureKey: "text_to_speech",
+            payload: {
+              feature_key: "text_to_speech",
+              ...(selectedTextToSpeechModelId === undefined
+                ? {}
+                : { text_to_speech_model_id: selectedTextToSpeechModelId }),
+            },
+            teamId,
+            updatedAt: now,
+            updatedByUserId: slackUserId,
+          },
+        },
+      ],
     });
     await updateFeatureSettingsModal(
       client,
@@ -2923,22 +3183,33 @@ async function handleFeatureSettingsModalSubmission(
 }
 
 function buildFeatureSettingsModal(input: {
-  allowedChannelIds: readonly string[];
-  enabled: boolean;
   enterpriseId?: string;
+  imageAllowedChannelIds: readonly string[];
+  imageEnabled: boolean;
   imageGenerationModelId: string;
   imageGenerationModelOptions: readonly SlackOption[];
   teamId: string;
+  textToSpeechAllowedChannelIds: readonly string[];
+  textToSpeechEnabled: boolean;
+  textToSpeechModelId?: string;
+  textToSpeechModelOptions: readonly SlackOption[];
   translator: Translator;
 }): Record<string, unknown> {
-  const enabledOption = {
+  const imageEnabledOption = {
     text: { text: input.translator.t("featureSettings.image.enabled"), type: "plain_text" },
+    value: "enabled",
+  };
+  const textToSpeechEnabledOption = {
+    text: { text: input.translator.t("featureSettings.tts.enabled"), type: "plain_text" },
     value: "enabled",
   };
   const initialImageGenerationModelOption =
     input.imageGenerationModelOptions.find(
       (option) => option.value === input.imageGenerationModelId,
     ) ?? input.imageGenerationModelOptions[0];
+  const initialTextToSpeechModelOption =
+    input.textToSpeechModelOptions.find((option) => option.value === input.textToSpeechModelId) ??
+    input.textToSpeechModelOptions[0];
   return {
     blocks: [
       {
@@ -2952,8 +3223,8 @@ function buildFeatureSettingsModal(input: {
         block_id: FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID,
         element: {
           action_id: FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID,
-          ...(input.enabled ? { initial_options: [enabledOption] } : {}),
-          options: [enabledOption],
+          ...(input.imageEnabled ? { initial_options: [imageEnabledOption] } : {}),
+          options: [imageEnabledOption],
           type: "checkboxes",
         },
         label: {
@@ -2996,8 +3267,72 @@ function buildFeatureSettingsModal(input: {
             exclude_bot_users: true,
             include: ["public", "private"],
           },
-          ...(input.allowedChannelIds.length > 0
-            ? { initial_conversations: input.allowedChannelIds }
+          ...(input.imageAllowedChannelIds.length > 0
+            ? { initial_conversations: input.imageAllowedChannelIds }
+            : {}),
+          placeholder: {
+            text: input.translator.t("featureSettings.channels.placeholder"),
+            type: "plain_text",
+          },
+          type: "multi_conversations_select",
+        },
+        label: {
+          text: input.translator.t("featureSettings.channels.label"),
+          type: "plain_text",
+        },
+        optional: true,
+        type: "input",
+      },
+      {
+        block_id: FEATURE_SETTINGS_TTS_ENABLED_BLOCK_ID,
+        element: {
+          action_id: FEATURE_SETTINGS_TTS_ENABLED_ACTION_ID,
+          ...(input.textToSpeechEnabled ? { initial_options: [textToSpeechEnabledOption] } : {}),
+          options: [textToSpeechEnabledOption],
+          type: "checkboxes",
+        },
+        label: {
+          text: input.translator.t("featureSettings.tts.title"),
+          type: "plain_text",
+        },
+        optional: true,
+        type: "input",
+      },
+      ...(input.textToSpeechModelOptions.length === 0
+        ? []
+        : [
+            {
+              block_id: FEATURE_SETTINGS_TTS_MODEL_BLOCK_ID,
+              element: {
+                action_id: FEATURE_SETTINGS_TTS_MODEL_ACTION_ID,
+                ...(initialTextToSpeechModelOption === undefined
+                  ? {}
+                  : { initial_option: initialTextToSpeechModelOption }),
+                options: input.textToSpeechModelOptions,
+                placeholder: {
+                  text: input.translator.t("featureSettings.tts.modelPlaceholder"),
+                  type: "plain_text",
+                },
+                type: "static_select",
+              },
+              label: {
+                text: input.translator.t("featureSettings.tts.model"),
+                type: "plain_text",
+              },
+              optional: false,
+              type: "input",
+            },
+          ]),
+      {
+        block_id: FEATURE_SETTINGS_TTS_CHANNELS_BLOCK_ID,
+        element: {
+          action_id: FEATURE_SETTINGS_TTS_CHANNELS_ACTION_ID,
+          filter: {
+            exclude_bot_users: true,
+            include: ["public", "private"],
+          },
+          ...(input.textToSpeechAllowedChannelIds.length > 0
+            ? { initial_conversations: input.textToSpeechAllowedChannelIds }
             : {}),
           placeholder: {
             text: input.translator.t("featureSettings.channels.placeholder"),
@@ -5263,7 +5598,7 @@ function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia |
   if (!isRecord(media)) {
     return undefined;
   }
-  if (media.kind !== "image" && media.kind !== "video") {
+  if (media.kind !== "audio" && media.kind !== "image" && media.kind !== "video") {
     return undefined;
   }
   return {
@@ -5277,7 +5612,7 @@ function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia |
 
 type GeneratedSlackMedia = {
   dataBase64?: string;
-  kind: "image" | "video";
+  kind: "audio" | "image" | "video";
   mimeType?: string;
   operationName?: string;
   uri?: string;
@@ -5297,6 +5632,15 @@ function mediaExtension(media: GeneratedSlackMedia): string {
   }
   if (media.mimeType === "video/mp4") {
     return "mp4";
+  }
+  if (media.mimeType === "audio/wav" || media.mimeType === "audio/x-wav") {
+    return "wav";
+  }
+  if (media.mimeType === "audio/mpeg" || media.mimeType === "audio/mp3") {
+    return "mp3";
+  }
+  if (media.kind === "audio") {
+    return "mp3";
   }
   return media.kind === "image" ? "png" : "mp4";
 }

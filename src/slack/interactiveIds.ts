@@ -38,6 +38,12 @@ export const FEATURE_SETTINGS_IMAGE_MODEL_ACTION_ID = "image_generation_model";
 export const FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID =
   "feature_settings_image_generation_channels";
 export const FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID = "image_generation_channels";
+export const FEATURE_SETTINGS_TTS_ENABLED_BLOCK_ID = "feature_settings_text_to_speech_enabled";
+export const FEATURE_SETTINGS_TTS_ENABLED_ACTION_ID = "text_to_speech_enabled";
+export const FEATURE_SETTINGS_TTS_MODEL_BLOCK_ID = "feature_settings_text_to_speech_model";
+export const FEATURE_SETTINGS_TTS_MODEL_ACTION_ID = "text_to_speech_model";
+export const FEATURE_SETTINGS_TTS_CHANNELS_BLOCK_ID = "feature_settings_text_to_speech_channels";
+export const FEATURE_SETTINGS_TTS_CHANNELS_ACTION_ID = "text_to_speech_channels";
 
 export const SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID = "salesforce_pdf_workflow_configure";
 export const SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID = "salesforce_pdf_workflow_modal";

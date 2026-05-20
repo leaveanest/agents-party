@@ -51,4 +51,12 @@ Set `workspace_credentials.provider_kind=openai` and `credential_name=api_key` f
 
 Image generation also requires workspace feature settings. A Slack admin or owner enables `image_generation` from App Home and selects an allowed channel list. The `generate_image` tool runs only when the configured provider API key exists, the workspace feature is enabled, and the current Slack channel is allowlisted.
 
+OpenAI text-to-speech can be selected with:
+
+```bash
+TEXT_TO_SPEECH_MODEL=openai:gpt-4o-mini-tts
+```
+
+Text-to-speech also requires workspace feature settings. A Slack admin or owner enables `text_to_speech` from App Home and selects an allowed channel list. The `text_to_speech` tool runs only when the OpenAI workspace API key exists, the workspace feature is enabled, and the current Slack channel is allowlisted. Generated audio is uploaded back into the Slack thread.
+
 Workspace-aware provider credentials are enabled when `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are set, and production-like runtimes require both values. The runner carries Slack `teamId` into `LlmRequest.context.workspaceId`, and provider adapters use that typed context for encrypted `workspace_credentials` lookup instead of inferring credentials from metadata.

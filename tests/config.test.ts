@@ -34,6 +34,7 @@ describe("loadSettings", () => {
       googleOAuthStartPath: "/oauth/google/start",
       googleTokenEncryptionKey: undefined,
       googleMapsApiKey: undefined,
+      textToSpeechModelId: undefined,
       transcriptionAlternativeLanguageCodes: ["en-US"],
       transcriptionLanguageCode: "ja-JP",
       transcriptionModelId: "google:speech-to-text-latest-long",
@@ -94,6 +95,12 @@ describe("loadSettings", () => {
 
   it("allows the TypeScript AgentRunner model to be configured explicitly", () => {
     expect(loadSettings({ AGENT_MODEL: "openai:gpt-4o" }).agentModelId).toBe("openai:gpt-4o");
+  });
+
+  it("allows the text-to-speech model to be configured explicitly", () => {
+    expect(loadSettings({ TEXT_TO_SPEECH_MODEL: "openai:tts-1" }).textToSpeechModelId).toBe(
+      "openai:tts-1",
+    );
   });
 
   it("requires AGENT_MODEL for Heroku-like runtime configuration", () => {

@@ -28,6 +28,7 @@ const settings: AppSettings = {
   objectStorageRegion: undefined,
   objectStorageSecretAccessKey: undefined,
   googleMapsApiKey: undefined,
+  textToSpeechModelId: undefined,
   transcriptionAlternativeLanguageCodes: ["en-US"],
   transcriptionLanguageCode: "ja-JP",
   transcriptionModelId: "google:speech-to-text-latest-long",

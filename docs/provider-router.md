@@ -6,7 +6,7 @@
 
 - `LlmProvider` enumerates the target providers: OpenAI, Azure OpenAI, Anthropic, Google, Bedrock, Groq, NVIDIA, PLaMo, xAI, Dify, and LiteLLM.
 - `ModelInfo` is the registry record for a model. It stores provider, provider-native model id, optional legacy aliases, and explicit capabilities.
-- `LlmCapability` represents behavior the application must check before invocation: text, streaming, image input, file input, audio input, tool calling, structured output, web search, image generation, video generation, thinking, and embeddings.
+- `LlmCapability` represents behavior the application must check before invocation: text, streaming, image input, file input, audio input, tool calling, structured output, web search, image generation, text-to-speech, video generation, thinking, and embeddings.
 - `LlmRequest`, `LlmResult`, `LlmStreamEvent`, and `LlmAdapter` are repository-owned contracts. They intentionally do not expose Slack SDK or AI SDK message history types.
 
 The domain history remains `ConversationHistory`. AI SDK `ModelMessage[]` conversion happens only at provider invocation boundaries.
@@ -38,7 +38,7 @@ Short model ids can be registered as aliases, for example `gpt-4o` or `gemini-2.
 - JSON response format requires `structured_output`
 - streaming calls require `streaming`
 
-Callers can also pass `requiredCapabilities` for provider-specific features such as web search, image generation, thinking, or embeddings. Missing capabilities are rejected before provider adapters run.
+Callers can also pass `requiredCapabilities` for provider-specific features such as web search, image generation, text-to-speech, thinking, or embeddings. Missing capabilities are rejected before provider adapters run.
 
 ## Adding A Provider Or Model
 
@@ -71,7 +71,7 @@ AWS Bedrock and Dify are intentionally left for native adapter lanes because the
 
 The first concrete native path is Gemini web search through AI SDK's Google native search tool. It is used when a request requires `web_search`, so web research does not fall back to the common text-only lane.
 
-Unsupported native paths still return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added. Media generation tools can use separate media gateways under `src/providers/`; OpenAI image generation is implemented there with AI SDK `generateImage()` instead of the common text-generation adapter.
+Unsupported native paths still return `NativeProviderUnsupportedError` until concrete provider SDK implementations are added. Media generation tools can use separate media gateways under `src/providers/`; OpenAI image generation is implemented there with AI SDK `generateImage()` and OpenAI text-to-speech is implemented with AI SDK `experimental_generateSpeech()` instead of the common text-generation adapter.
 
 Native stubs currently cover:
 

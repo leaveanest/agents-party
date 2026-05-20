@@ -104,6 +104,12 @@ describe("ModelRegistry", () => {
       provider: "openai",
       providerModelId: "gpt-4o-mini-transcribe",
     });
+    expect(registry.get("gpt-4o-mini-tts")).toMatchObject({
+      capabilities: ["text_to_speech"],
+      id: "openai:gpt-4o-mini-tts",
+      provider: "openai",
+      providerModelId: "gpt-4o-mini-tts",
+    });
     expect(registry.get("azure.whisper-1")).toMatchObject({
       capabilities: ["transcription"],
       id: "azure_openai:whisper-1",

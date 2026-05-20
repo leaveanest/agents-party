@@ -496,6 +496,22 @@ export const defaultModelRegistryEntries: readonly ModelInfo[] = [
     providerModelId: "gpt-4o-mini-transcribe",
   },
   {
+    aliases: ["gpt-4o-mini-tts"],
+    capabilities: ["text_to_speech"],
+    displayName: "OpenAI GPT-4o Mini TTS",
+    id: "openai:gpt-4o-mini-tts",
+    provider: "openai",
+    providerModelId: "gpt-4o-mini-tts",
+  },
+  {
+    aliases: ["tts-1"],
+    capabilities: ["text_to_speech"],
+    displayName: "OpenAI TTS 1",
+    id: "openai:tts-1",
+    provider: "openai",
+    providerModelId: "tts-1",
+  },
+  {
     aliases: ["azure.whisper-1"],
     capabilities: ["transcription"],
     displayName: "Azure OpenAI Whisper deployment",

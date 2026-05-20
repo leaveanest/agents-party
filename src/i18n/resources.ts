@@ -64,10 +64,12 @@ export const englishTranslations = {
   "featureSettings.channels.label": "Allowed channels",
   "featureSettings.channels.placeholder": "Choose channels",
   "featureSettings.error.channelsRequired":
-    "Choose at least one channel before enabling image generation.",
+    "Choose at least one allowed channel before enabling this feature.",
   "featureSettings.error.contextMismatch": "Slack workspace context does not match.",
   "featureSettings.error.missingImageCredential":
     "Register the required image generation provider API key before enabling this feature.",
+  "featureSettings.error.missingTextToSpeechCredential":
+    "Register the required text-to-speech provider API key before enabling this feature.",
   "featureSettings.error.notConfigured": "Feature settings are not configured.",
   "featureSettings.error.saveFailed": "Could not save feature settings. Try again later.",
   "featureSettings.error.unauthorized":
@@ -76,6 +78,10 @@ export const englishTranslations = {
   "featureSettings.image.model": "Image generation model",
   "featureSettings.image.modelPlaceholder": "Choose a model",
   "featureSettings.image.title": "Image generation",
+  "featureSettings.tts.enabled": "Enable text-to-speech",
+  "featureSettings.tts.model": "Text-to-speech model",
+  "featureSettings.tts.modelPlaceholder": "Choose a model",
+  "featureSettings.tts.title": "Text-to-speech",
   "featureSettings.modal.intro":
     "Control workspace features and the channels where they are allowed.",
   "featureSettings.result.saved": "Feature settings were saved.",
@@ -240,10 +246,12 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "featureSettings.channels.label": "許可チャンネル",
   "featureSettings.channels.placeholder": "チャンネルを選択",
   "featureSettings.error.channelsRequired":
-    "画像生成を有効にする前に、少なくとも1つのチャンネルを選択してください。",
+    "この機能を有効にする前に、少なくとも1つのチャンネルを選択してください。",
   "featureSettings.error.contextMismatch": "Slackワークスペースのコンテキストが一致しません。",
   "featureSettings.error.missingImageCredential":
     "この機能を有効にする前に、必要な画像生成プロバイダーのAPIキーを登録してください。",
+  "featureSettings.error.missingTextToSpeechCredential":
+    "この機能を有効にする前に、必要な音声読み上げプロバイダーのAPIキーを登録してください。",
   "featureSettings.error.notConfigured": "機能設定は設定されていません。",
   "featureSettings.error.saveFailed":
     "機能設定を保存できませんでした。時間をおいて再試行してください。",
@@ -253,6 +261,10 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "featureSettings.image.model": "画像生成モデル",
   "featureSettings.image.modelPlaceholder": "モデルを選択",
   "featureSettings.image.title": "画像生成",
+  "featureSettings.tts.enabled": "音声読み上げを有効にする",
+  "featureSettings.tts.model": "音声読み上げモデル",
+  "featureSettings.tts.modelPlaceholder": "モデルを選択",
+  "featureSettings.tts.title": "音声読み上げ",
   "featureSettings.modal.intro": "ワークスペース機能と、利用を許可するチャンネルを管理します。",
   "featureSettings.result.saved": "機能設定を保存しました。",
   "featureSettings.result.saving": "機能設定を保存しています...",

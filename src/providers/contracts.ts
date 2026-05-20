@@ -36,6 +36,7 @@ export const LlmCapabilityId = {
   Streaming: "streaming",
   StructuredOutput: "structured_output",
   Text: "text",
+  TextToSpeech: "text_to_speech",
   Thinking: "thinking",
   ToolCalling: "tool_calling",
   Transcription: "transcription",
