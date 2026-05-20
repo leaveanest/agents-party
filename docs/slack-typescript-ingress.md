@@ -47,6 +47,8 @@ for non-enterprise installations.
 
 Audio attachment understanding requires the bot `files:read` scope in addition to channel history scopes. Audio bytes are fetched only for the current agent invocation and are kept in memory.
 
+Image attachment understanding uses the same Slack file access boundary. Supported image files (`PNG`, `JPEG`, and `WebP`) are downloaded from Slack private file URLs with the bot token, resized when needed to fit the provider byte target, passed to `AgentRunner` as transient reference image bytes, and kept out of Redis job payloads and persistent storage. Queued jobs re-read the Slack thread and re-download image bytes in the worker. Unsupported image formats and images above the download hard cap are rejected with an ephemeral Slack message to the submitting user.
+
 Slack MCP tools resolve the invoking user's Slack installation token at invocation time and fail
 closed when that user has not installed with user scopes. Do not put MCP OAuth tokens in Redis jobs
 or process-wide environment variables for multi-workspace production traffic; reinstall the app with

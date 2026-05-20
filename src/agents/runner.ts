@@ -361,9 +361,11 @@ function buildAgentHistory(input: {
               id: image.identifier,
               mediaType: image.mediaType,
               source:
-                image.url === undefined
-                  ? { reason: "not_downloaded", type: "unavailable" }
-                  : { type: "url", url: image.url },
+                image.data !== undefined
+                  ? { data: image.data, type: "bytes" }
+                  : image.url === undefined
+                    ? { reason: "not_downloaded", type: "unavailable" }
+                    : { type: "url", url: image.url },
               type: "image",
             }),
           ),

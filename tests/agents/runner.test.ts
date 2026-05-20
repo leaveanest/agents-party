@@ -234,6 +234,46 @@ describe("AgentRunner", () => {
     });
   });
 
+  it("adds reference image bytes to provider history", async () => {
+    const router = new FakeProviderRouter({
+      content: "saw it",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      referenceImages: [
+        {
+          data: new Uint8Array([1, 2, 3]),
+          identifier: "F1",
+          mediaType: "image/png",
+          messageTs: "1.0",
+        },
+      ],
+      teamId: "T1",
+      text: "what is in this image?",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.history.messages.at(-1)).toMatchObject({
+      content: [
+        { text: "what is in this image?", type: "text" },
+        {
+          filename: "F1",
+          id: "F1",
+          mediaType: "image/png",
+          source: { data: new Uint8Array([1, 2, 3]), type: "bytes" },
+          type: "image",
+        },
+      ],
+      role: "user",
+    });
+  });
+
   it("ignores blank invocation model ids", async () => {
     const router = new FakeProviderRouter({
       content: "default model",

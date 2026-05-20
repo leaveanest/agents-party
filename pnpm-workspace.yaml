@@ -3,6 +3,7 @@ allowBuilds:
   esbuild: true
   msgpackr-extract: false
   protobufjs: true
+  sharp: true
 
 overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.1.20

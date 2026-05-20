@@ -39,3 +39,9 @@ This model is intentionally independent from Slack SDK objects, AI SDK types, an
 Slack audio attachments are normalized before provider invocation, not persisted as message history. The Slack handler may download supported audio files (`audio/mpeg`, `audio/mp3`, `audio/wav`, `audio/x-wav`, `audio/flac`) using the bot token, transcribe them through the configured transcription gateway, and pass transcript text into the current `SlackAgentInvocation.transientAttachments`.
 
 Transcript text and audio bytes must not be written to PostgreSQL, Slack messages, Redis job payloads, or application logs. Queued Slack jobs store only Slack identifiers and re-read the Slack thread at worker processing time.
+
+## Ephemeral Slack Images
+
+Slack image attachments are resolved before provider invocation, not persisted as message history. The Slack handler downloads supported image files (`image/png`, `image/jpeg`, `image/webp`) using the bot token and passes the bytes into the current `SlackAgentInvocation.referenceImages`. Images larger than the provider byte target are resized and re-encoded before invocation; images above the Slack image download hard cap are rejected with a Slack ephemeral message.
+
+Image bytes must not be written to PostgreSQL, Slack messages, Redis job payloads, or application logs. Queued Slack jobs store only Slack identifiers and re-read the Slack thread at worker processing time.
