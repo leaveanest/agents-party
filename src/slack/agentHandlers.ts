@@ -61,6 +61,12 @@ import {
   resolveSlackAudioAttachments,
 } from "./audioTranscription.js";
 import {
+  SlackImageProcessingError,
+  hasSlackImageFiles,
+  resolveSlackImageAttachments,
+  validateSlackImageAttachments,
+} from "./imageInput.js";
+import {
   readSlackEnterpriseId,
   readSlackEnterpriseInstall,
   readTeamId,
@@ -183,6 +189,7 @@ const DEFAULT_AGENT_OPTION = {
 const REASONING_EFFORT_FIELD = "reasoning_effort";
 const AGENTS_PARTY_CONTROL_EVENT_TYPE = "agents_party_control";
 const SLACK_SECTION_TEXT_LIMIT = 3000;
+const SLACK_THREAD_ATTACHMENT_PAGE_LIMIT = 200;
 const THREAD_HISTORY_CONVERSATION_SUBTYPES = new Set([
   "bot_message",
   "file_share",
@@ -390,6 +397,7 @@ export type AgentSlackHandlerOptions = {
   audioFetchFn?: typeof fetch;
   audioTranscriptionGateway?: TranscriptionGateway;
   defaultLocale?: Locale;
+  imageFetchFn?: typeof fetch;
   installedWorkspaceDirectory?: SlackInstalledWorkspaceDirectory;
   featureSettingsHome?: WorkspaceFeatureSettingsHome;
   routingRepository?: SlackAgentRoutingRepository;
@@ -3506,6 +3514,7 @@ async function handleMention(
   );
   const threadTs = readString(event, "thread_ts") ?? event.ts;
   const mentionText = stripBotMention(readString(event, "text") ?? "", context.botUserId);
+  const hasMentionAttachmentInput = hasSlackAttachmentInput(event);
   if (options.agentJobQueue !== undefined) {
     if (
       options.routingRepository !== undefined &&
@@ -3513,7 +3522,7 @@ async function handleMention(
     ) {
       return;
     }
-    if (mentionText.length === 0) {
+    if (mentionText.length === 0 && !hasMentionAttachmentInput) {
       await postMentionMenuMessage({
         channelId: event.channel,
         client,
@@ -3543,6 +3552,7 @@ async function handleMention(
         enterpriseId: readSlackEnterpriseId(body),
         eventId: readSlackEventId(body),
         eventType: "app_mention",
+        hasAttachmentInput: hasMentionAttachmentInput,
         isEnterpriseInstall: readSlackEnterpriseInstall(body),
         messageTs: event.ts,
         retryNum: readOptionalContextValue(context.retryNum),
@@ -3569,7 +3579,7 @@ async function handleMention(
     ) {
       return;
     }
-    if (mentionText.length === 0) {
+    if (mentionText.length === 0 && !hasMentionAttachmentInput) {
       await postMentionMenuMessage({
         channelId: event.channel,
         client,
@@ -3588,6 +3598,13 @@ async function handleMention(
       });
       return;
     }
+    const threadMessages = await readThreadMessages(client, event.channel, threadTs);
+    const referenceImages = await resolveReferenceImagesForInvocation({
+      client,
+      event,
+      messages: threadMessages,
+      options,
+    });
     const route = await resolveSlackAgentRoute(options.routingRepository, {
       channelId: event.channel,
       teamId,
@@ -3615,13 +3632,13 @@ async function handleMention(
       translator,
       userId: event.user,
     });
-    const threadMessages = await readThreadMessages(client, event.channel, threadTs);
     const result = await runner.run({
       channelId: event.channel,
       enterpriseId: readSlackEnterpriseId(body),
       isEnterpriseInstall: readSlackEnterpriseInstall(body),
       messageTs: event.ts,
       modelId: route?.modelId,
+      referenceImages,
       reasoningEffort: route?.reasoningEffort,
       teamId,
       text: mentionText,
@@ -3679,6 +3696,18 @@ async function handleMention(
       teamId,
       threadTs,
     });
+    if (
+      await postImageInputErrorMessage({
+        channelId: event.channel,
+        client,
+        error,
+        logger,
+        threadTs,
+        userId: event.user,
+      })
+    ) {
+      return;
+    }
     text = runnerUserFacingErrorMessage(error, translator);
   }
 
@@ -3711,10 +3740,21 @@ async function handleMessage(
     return;
   }
   const threadTs = readString(event, "thread_ts");
-  if (!isSupportedFollowUpMessage(event, threadTs) || options.routingRepository === undefined) {
+  if (!isSupportedFollowUpMessage(event, threadTs)) {
     return;
   }
   if (threadTs === undefined) {
+    return;
+  }
+  if (options.routingRepository === undefined) {
+    await postImageInputValidationErrorForEvent({
+      channelId: event.channel,
+      client,
+      event,
+      options,
+      threadTs,
+      userId: event.user,
+    });
     return;
   }
 
@@ -3735,7 +3775,8 @@ async function handleMessage(
     logger,
   );
   const messageText = readString(event, "text") ?? "";
-  if (isMentionOnlyText(messageText, context?.botUserId)) {
+  const hasMessageAttachmentInput = hasSlackAttachmentInput(event);
+  if (isMentionOnlyText(messageText, context?.botUserId) && !hasMessageAttachmentInput) {
     await postMentionMenuMessage({
       channelId: event.channel,
       client,
@@ -3766,6 +3807,7 @@ async function handleMessage(
         enterpriseId: readSlackEnterpriseId(body),
         eventId: readSlackEventId(body),
         eventType: "message_follow_up",
+        hasAttachmentInput: hasMessageAttachmentInput,
         isEnterpriseInstall: readSlackEnterpriseInstall(body),
         messageTs: event.ts,
         retryNum: readOptionalContextValue(context.retryNum),
@@ -3786,6 +3828,13 @@ async function handleMessage(
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
+    const threadMessages = await readThreadMessages(client, event.channel, threadTs);
+    const referenceImages = await resolveReferenceImagesForInvocation({
+      client,
+      event,
+      messages: threadMessages,
+      options,
+    });
     const route = await resolveSlackAgentRoute(options.routingRepository, {
       channelId: event.channel,
       teamId,
@@ -3806,13 +3855,13 @@ async function handleMessage(
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
     const reasoningEffort =
       route === undefined ? stringField(thread, REASONING_EFFORT_FIELD) : route.reasoningEffort;
-    const threadMessages = await readThreadMessages(client, event.channel, threadTs);
     const result = await runner.run({
       channelId: event.channel,
       enterpriseId: readSlackEnterpriseId(body),
       isEnterpriseInstall: readSlackEnterpriseInstall(body),
       messageTs: event.ts,
       modelId,
+      referenceImages,
       reasoningEffort,
       teamId,
       text: messageText,
@@ -3871,6 +3920,18 @@ async function handleMessage(
       teamId,
       threadTs,
     });
+    if (
+      await postImageInputErrorMessage({
+        channelId: event.channel,
+        client,
+        error,
+        logger,
+        threadTs,
+        userId: event.user,
+      })
+    ) {
+      return;
+    }
     text = runnerUserFacingErrorMessage(error, translator);
   }
 
@@ -3891,6 +3952,7 @@ export async function processSlackAgentJob(
     audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
     defaultLocale?: Locale;
+    imageFetchFn?: typeof fetch;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
@@ -3916,6 +3978,7 @@ async function processAppMentionJob(
     audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
     defaultLocale?: Locale;
+    imageFetchFn?: typeof fetch;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
@@ -3942,7 +4005,15 @@ async function processAppMentionJob(
     translator,
     threadTs: job.threadTs,
   });
-  if (job.text.trim().length === 0) {
+  const hasLegacyAttachmentInput =
+    job.text.trim().length === 0 && !queuedJobMayHaveAttachmentInput(job)
+      ? await queuedJobHasLegacyAttachmentInput(input.client, job)
+      : false;
+  if (
+    job.text.trim().length === 0 &&
+    !queuedJobMayHaveAttachmentInput(job) &&
+    !hasLegacyAttachmentInput
+  ) {
     await postMentionMenuMessage({
       channelId: job.channelId,
       client: input.client,
@@ -3965,6 +4036,14 @@ async function processAppMentionJob(
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
+    const threadMessages = await readThreadMessagesForQueuedJob(input.client, job, {
+      forceAttachmentInput: hasLegacyAttachmentInput,
+    });
+    const referenceImages = await resolveReferenceImagesForInvocation({
+      client: input.client,
+      messages: threadMessages,
+      options: input,
+    });
     const route = await resolveSlackAgentRoute(input.routingRepository, {
       channelId: job.channelId,
       teamId: job.teamId,
@@ -3991,13 +4070,13 @@ async function processAppMentionJob(
       translator,
       userId: job.userId,
     });
-    const threadMessages = await readThreadMessages(input.client, job.channelId, job.threadTs);
     const result = await input.runner.run({
       channelId: job.channelId,
       enterpriseId: job.enterpriseId,
       isEnterpriseInstall: job.isEnterpriseInstall,
       messageTs: job.messageTs,
       modelId: route?.modelId,
+      referenceImages,
       reasoningEffort: route?.reasoningEffort,
       teamId: job.teamId,
       text: job.text,
@@ -4054,6 +4133,18 @@ async function processAppMentionJob(
       teamId: job.teamId,
       threadTs: job.threadTs,
     });
+    if (
+      await postImageInputErrorMessage({
+        channelId: job.channelId,
+        client: input.client,
+        error,
+        logger: input.logger,
+        threadTs: job.threadTs,
+        userId: job.userId,
+      })
+    ) {
+      return;
+    }
     if (shouldRetryJobFailure(input.retryContext)) {
       throw error;
     }
@@ -4077,6 +4168,7 @@ async function processFollowUpMessageJob(
     audioTranscriptionGateway?: TranscriptionGateway;
     client: SlackAgentClient;
     defaultLocale?: Locale;
+    imageFetchFn?: typeof fetch;
     logger: unknown;
     retryContext?: SlackAgentJobRetryContext;
     routingRepository?: SlackAgentRoutingRepository;
@@ -4085,6 +4177,7 @@ async function processFollowUpMessageJob(
   },
 ): Promise<void> {
   if (input.routingRepository === undefined) {
+    await postImageInputValidationErrorForQueuedJob({ input, job });
     return;
   }
   const [thread, autoReplyEnabled, channelEnabled] = await Promise.all([
@@ -4102,7 +4195,7 @@ async function processFollowUpMessageJob(
     input,
     input.logger,
   );
-  if (isMentionOnlyText(job.text, job.botUserId)) {
+  if (isMentionOnlyText(job.text, job.botUserId) && !queuedJobMayHaveAttachmentInput(job)) {
     await postMentionMenuMessage({
       channelId: job.channelId,
       client: input.client,
@@ -4124,6 +4217,12 @@ async function processFollowUpMessageJob(
   let runnerResult: AgentRunnerResult | undefined;
   let text: string;
   try {
+    const threadMessages = await readThreadMessagesForQueuedJob(input.client, job);
+    const referenceImages = await resolveReferenceImagesForInvocation({
+      client: input.client,
+      messages: threadMessages,
+      options: input,
+    });
     const route = await resolveSlackAgentRoute(input.routingRepository, {
       channelId: job.channelId,
       teamId: job.teamId,
@@ -4151,13 +4250,13 @@ async function processFollowUpMessageJob(
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
     const reasoningEffort =
       route === undefined ? stringField(thread, REASONING_EFFORT_FIELD) : route.reasoningEffort;
-    const threadMessages = await readThreadMessages(input.client, job.channelId, job.threadTs);
     const result = await input.runner.run({
       channelId: job.channelId,
       enterpriseId: job.enterpriseId,
       isEnterpriseInstall: job.isEnterpriseInstall,
       messageTs: job.messageTs,
       modelId,
+      referenceImages,
       reasoningEffort,
       teamId: job.teamId,
       text: job.text,
@@ -4219,6 +4318,18 @@ async function processFollowUpMessageJob(
       teamId: job.teamId,
       threadTs: job.threadTs,
     });
+    if (
+      await postImageInputErrorMessage({
+        channelId: job.channelId,
+        client: input.client,
+        error,
+        logger: input.logger,
+        threadTs: job.threadTs,
+        userId: job.userId,
+      })
+    ) {
+      return;
+    }
     if (shouldRetryJobFailure(input.retryContext)) {
       throw error;
     }
@@ -4765,7 +4876,7 @@ function isSupportedFollowUpMessage(event: StringIndexed, threadTs: string | und
   if (threadTs === undefined || threadTs === event.ts) {
     return false;
   }
-  return (readString(event, "text") ?? "").trim() !== "" || hasSlackAudioFiles(event);
+  return (readString(event, "text") ?? "").trim() !== "" || hasSlackAttachmentInput(event);
 }
 
 async function readThreadMessages(
@@ -4784,6 +4895,99 @@ async function readThreadMessages(
     return messages.filter((message): message is StringIndexed => isRecord(message));
   } catch {
     return [];
+  }
+}
+
+async function readThreadMessagesForQueuedJob(
+  client: SlackAgentClient,
+  job: SlackAgentJob,
+  options: { forceAttachmentInput?: boolean } = {},
+): Promise<StringIndexed[]> {
+  const mustFindAttachmentInput =
+    job.hasAttachmentInput === true || options.forceAttachmentInput === true;
+  const mustUseStrictRead = mustFindAttachmentInput || queuedJobMayHaveLegacyAttachmentInput(job);
+  const messages = mustUseStrictRead
+    ? await readThreadMessagesStrict(client, job.channelId, job.threadTs)
+    : await readThreadMessages(client, job.channelId, job.threadTs);
+  if (
+    mustFindAttachmentInput &&
+    !messages.some(
+      (message) => readString(message, "ts") === job.messageTs && hasSlackAttachmentInput(message),
+    )
+  ) {
+    throw new SlackThreadReadError("Could not read the Slack attachment input.");
+  }
+  return messages;
+}
+
+function queuedJobMayHaveAttachmentInput(job: SlackAgentJob): boolean {
+  return (
+    job.hasAttachmentInput === true ||
+    (job.eventType === "message_follow_up" &&
+      job.hasAttachmentInput === undefined &&
+      job.text === "")
+  );
+}
+
+function queuedJobMayHaveLegacyAttachmentInput(job: SlackAgentJob): boolean {
+  return (
+    job.hasAttachmentInput === undefined &&
+    (job.eventType === "app_mention" || job.eventType === "message_follow_up")
+  );
+}
+
+async function queuedJobHasLegacyAttachmentInput(
+  client: SlackAgentClient,
+  job: SlackAgentJob,
+): Promise<boolean> {
+  if (!queuedJobMayHaveLegacyAttachmentInput(job) || job.text.trim().length !== 0) {
+    return false;
+  }
+  const messages = await readThreadMessagesStrict(client, job.channelId, job.threadTs);
+  return messages.some(
+    (message) => readString(message, "ts") === job.messageTs && hasSlackAttachmentInput(message),
+  );
+}
+
+async function readThreadMessagesStrict(
+  client: SlackAgentClient,
+  channelId: string,
+  threadTs: string,
+): Promise<StringIndexed[]> {
+  const messages: StringIndexed[] = [];
+  let cursor: string | undefined;
+  const seenCursors = new Set<string>();
+  try {
+    do {
+      const response = await client.conversations.replies({
+        channel: channelId,
+        cursor,
+        include_all_metadata: true,
+        limit: SLACK_THREAD_ATTACHMENT_PAGE_LIMIT,
+        ts: threadTs,
+      });
+      const pageMessages = Array.isArray(response.messages) ? response.messages : [];
+      messages.push(
+        ...pageMessages.filter((message): message is StringIndexed => isRecord(message)),
+      );
+      if (cursor !== undefined) {
+        seenCursors.add(cursor);
+      }
+      const metadata = response.response_metadata;
+      cursor = isRecord(metadata)
+        ? readString(metadata as StringIndexed, "next_cursor")
+        : undefined;
+    } while (cursor !== undefined && !seenCursors.has(cursor));
+    return messages;
+  } catch (error) {
+    throw new SlackThreadReadError("Could not read the Slack thread.", error);
+  }
+}
+
+class SlackThreadReadError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause === undefined ? undefined : { cause });
+    this.name = "SlackThreadReadError";
   }
 }
 
@@ -4973,6 +5177,22 @@ async function resolveTransientAudioAttachmentsForInvocation(input: {
   });
 }
 
+async function resolveReferenceImagesForInvocation(input: {
+  client: SlackAgentClient;
+  event?: StringIndexed;
+  messages: readonly StringIndexed[];
+  options: {
+    imageFetchFn?: typeof fetch;
+  };
+}) {
+  const messages = mergeSlackMessages(input.messages, input.event);
+  return resolveSlackImageAttachments({
+    clientToken: input.client.token,
+    fetchFn: input.options.imageFetchFn,
+    messages,
+  });
+}
+
 function mergeSlackMessages(
   messages: readonly StringIndexed[],
   event: StringIndexed | undefined,
@@ -4981,17 +5201,108 @@ function mergeSlackMessages(
   const fallbackTs = event === undefined ? undefined : readString(event, "ts");
   const hasFallback =
     fallbackTs !== undefined && merged.some((message) => readString(message, "ts") === fallbackTs);
-  if (event !== undefined && (!hasFallback || hasSlackAudioFiles(event))) {
+  if (event !== undefined && (!hasFallback || hasSlackAttachmentInput(event))) {
     merged.push(event);
   }
   return merged;
+}
+
+function hasSlackAttachmentInput(message: StringIndexed): boolean {
+  return hasSlackAudioFiles(message) || hasSlackImageFiles(message);
 }
 
 function runnerUserFacingErrorMessage(error: unknown, translator: Translator): string {
   if (error instanceof SlackAudioProcessingError) {
     return error.message;
   }
+  if (error instanceof SlackImageProcessingError) {
+    return error.message;
+  }
   return translator.t("slack.error.genericRequest");
+}
+
+async function postImageInputErrorMessage(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  error: unknown;
+  logger?: unknown;
+  threadTs: string;
+  userId: string;
+}): Promise<boolean> {
+  if (
+    !(input.error instanceof SlackImageProcessingError) ||
+    input.error.code === "download_failed"
+  ) {
+    return false;
+  }
+  const postEphemeral = input.client.chat.postEphemeral;
+  if (postEphemeral === undefined) {
+    return true;
+  }
+  try {
+    await postEphemeral({
+      channel: input.channelId,
+      text: input.error.message,
+      thread_ts: input.threadTs,
+      user: input.userId,
+    });
+  } catch (error) {
+    logWarn(input.logger, "Failed to post Slack image input validation message.", { error });
+  }
+  return true;
+}
+
+async function postImageInputValidationErrorForEvent(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  event: StringIndexed;
+  options: {
+    imageFetchFn?: typeof fetch;
+  };
+  threadTs: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    validateSlackImageAttachments([input.event]);
+  } catch (error) {
+    await postImageInputErrorMessage({
+      channelId: input.channelId,
+      client: input.client,
+      error,
+      threadTs: input.threadTs,
+      userId: input.userId,
+    });
+  }
+}
+
+async function postImageInputValidationErrorForQueuedJob(input: {
+  input: {
+    client: SlackAgentClient;
+    imageFetchFn?: typeof fetch;
+    logger?: unknown;
+    retryContext?: SlackAgentJobRetryContext;
+  };
+  job: SlackAgentJob;
+}): Promise<void> {
+  if (!queuedJobMayHaveAttachmentInput(input.job)) {
+    return;
+  }
+  try {
+    const messages = await readThreadMessagesForQueuedJob(input.input.client, input.job);
+    validateSlackImageAttachments(messages);
+  } catch (error) {
+    const posted = await postImageInputErrorMessage({
+      channelId: input.job.channelId,
+      client: input.input.client,
+      error,
+      logger: input.input.logger,
+      threadTs: input.job.threadTs,
+      userId: input.job.userId,
+    });
+    if (!posted && shouldRetryJobFailure(input.input.retryContext)) {
+      throw error;
+    }
+  }
 }
 
 export async function postAgentResult(input: {

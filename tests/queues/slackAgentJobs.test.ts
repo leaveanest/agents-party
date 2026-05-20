@@ -50,4 +50,21 @@ describe("slackAgentJobs", () => {
     expect(job).not.toHaveProperty("transcript");
     expect(job).not.toHaveProperty("transientAttachments");
   });
+
+  it("does not retain image bytes in queued job data", () => {
+    const job = slackAgentJobSchema.parse({
+      channelId: "C1",
+      eventType: "app_mention",
+      image: new Uint8Array([1, 2, 3]),
+      messageTs: "1712345678.000100",
+      referenceImages: [{ data: new Uint8Array([1, 2, 3]), identifier: "F1" }],
+      teamId: "T1",
+      text: "",
+      threadTs: "1712345678.000100",
+      userId: "U1",
+    });
+
+    expect(job).not.toHaveProperty("image");
+    expect(job).not.toHaveProperty("referenceImages");
+  });
 });

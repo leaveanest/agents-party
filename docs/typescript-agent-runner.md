@@ -38,6 +38,8 @@ The routed Slack surfaces are `app_mention`, active thread follow-up `message` e
 
 External capabilities should be exposed as typed tools. The route chooses the agent, model, and allowed tool set; the AI chooses whether to call web, maps, media, Salesforce, SORACOM, or other tools from the conversation context.
 
+Slack image attachments on app mentions and active thread follow-ups are passed to `AgentRunner` as transient `referenceImages`. Oversized-but-allowed Slack image downloads are resized before they reach the runner. The runner converts them to repository domain image parts and the provider boundary requires a selected model with `image_input` capability.
+
 SORACOM tools are documented in [`soracom-integration.md`](soracom-integration.md). They are
 read-only in the MVP and use workspace-scoped encrypted AuthKey credentials.
 

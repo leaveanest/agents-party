@@ -14,6 +14,7 @@ export const slackAgentJobSchema = z.object({
   enterpriseId: z.string().optional(),
   eventId: z.string().optional(),
   eventType: z.enum(["app_mention", "message_follow_up", "reaction_added"]),
+  hasAttachmentInput: z.boolean().optional(),
   isEnterpriseInstall: z.boolean().optional(),
   messageTs: z.string().min(1),
   retryNum: z.string().optional(),

@@ -14,6 +14,13 @@ import {
   processSlackAgentJob,
 } from "../../src/slack/agentHandlers.js";
 
+const SMALL_PNG_BYTES = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    "base64",
+  ),
+);
+
 describe("createAgentSlackHandlers", () => {
   it("publishes Model routing entry point on App Home with Grid context", async () => {
     const debugLogs: unknown[] = [];
@@ -4977,6 +4984,740 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("adds image bytes to image-only app mention invocations", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "image reply",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never, {
+      imageFetchFn: async () => new Response(SMALL_PNG_BYTES),
+    });
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: {
+          replies: async () => ({ messages: [] }),
+        },
+        token: "xoxb-token",
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        files: [
+          {
+            id: "F-image",
+            mimetype: "image/png",
+            name: "chart.png",
+            size: 3,
+            url_private_download: "https://files.slack.com/files-pri/T-F-image/download/chart.png",
+          },
+        ],
+        text: "<@B1>",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        referenceImages: [
+          {
+            data: SMALL_PNG_BYTES,
+            identifier: "F-image",
+            mediaType: "image/png",
+            messageTs: "1712345678.000100",
+          },
+        ],
+        text: "",
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        text: "image reply",
+      }),
+    ]);
+  });
+
+  it("posts an ephemeral message when an app mention image format is unsupported", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "image reply",
+          toolResults: [],
+        };
+      },
+    };
+    const ephemerals: unknown[] = [];
+    const posts: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postEphemeral: async (payload: unknown) => {
+            ephemerals.push(payload);
+            return {};
+          },
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: {
+          replies: async () => ({ messages: [] }),
+        },
+        token: "xoxb-token",
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        files: [
+          {
+            filetype: "gif",
+            id: "F-gif",
+            size: 3,
+            url_private_download: "https://files.slack.com/files-pri/T-F-gif/download/chart.gif",
+          },
+        ],
+        text: "<@B1>",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(invocations).toEqual([]);
+    expect(posts).toEqual([]);
+    expect(ephemerals).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't read the image attachment because its file type is not supported. Please upload a PNG, JPEG, or WebP image.",
+        thread_ts: "1712345678.000100",
+        user: "U1",
+      }),
+    ]);
+  });
+
+  it("validates app mention image input before no-agent routing exits", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      threadAutoReplyEnabled: true,
+    });
+    const ephemerals: unknown[] = [];
+    const posts: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never, {
+      routingRepository: repository,
+    });
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postEphemeral: async (payload: unknown) => {
+            ephemerals.push(payload);
+            return {};
+          },
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: {
+          replies: async () => ({ messages: [] }),
+        },
+        token: "xoxb-token",
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        files: [
+          {
+            filetype: "gif",
+            id: "F-gif",
+            size: 3,
+            url_private_download: "https://files.slack.com/files-pri/T-F-gif/download/chart.gif",
+          },
+        ],
+        text: "<@B1>",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(posts).toEqual([]);
+    expect(ephemerals).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't read the image attachment because its file type is not supported. Please upload a PNG, JPEG, or WebP image.",
+        thread_ts: "1712345678.000100",
+        user: "U1",
+      }),
+    ]);
+  });
+
+  it("posts an ephemeral image validation message for follow-ups without routing configured", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const ephemerals: unknown[] = [];
+    const posts: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleMessage({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postEphemeral: async (payload: unknown) => {
+            ephemerals.push(payload);
+            return {};
+          },
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        token: "xoxb-token",
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        files: [
+          {
+            filetype: "gif",
+            id: "F-gif",
+            size: 3,
+            url_private_download: "https://files.slack.com/files-pri/T-F-gif/download/chart.gif",
+          },
+        ],
+        text: "",
+        thread_ts: "1712345678.000100",
+        ts: "1712345678.000200",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(posts).toEqual([]);
+    expect(ephemerals).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't read the image attachment because its file type is not supported. Please upload a PNG, JPEG, or WebP image.",
+        thread_ts: "1712345678.000100",
+        user: "U1",
+      }),
+    ]);
+  });
+
+  it("rebuilds queued follow-up image inputs from Slack thread metadata", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        hasAttachmentInput: true,
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            replies: async () => ({
+              messages: [
+                { text: "root text", ts: "1712345678.000100", user: "U1" },
+                {
+                  files: [
+                    {
+                      id: "F-image",
+                      mimetype: "image/png",
+                      name: "chart.png",
+                      size: 3,
+                      url_private_download:
+                        "https://files.slack.com/files-pri/T-F-image/download/chart.png",
+                    },
+                  ],
+                  text: "",
+                  ts: "1712345678.000200",
+                  user: "U1",
+                },
+              ],
+            }),
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        imageFetchFn: async () => new Response(SMALL_PNG_BYTES),
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        channelId: "C1",
+        referenceImages: [
+          {
+            data: SMALL_PNG_BYTES,
+            identifier: "F-image",
+            mediaType: "image/png",
+            messageTs: "1712345678.000200",
+          },
+        ],
+        text: "",
+      }),
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        text: "thread reply",
+      }),
+    ]);
+  });
+
+  it("rebuilds queued image inputs from later Slack thread pages", async () => {
+    const invocations: unknown[] = [];
+    const replyCalls: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        hasAttachmentInput: true,
+        messageTs: "1712345678.000250",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async () => ({}),
+          },
+          conversations: {
+            replies: async (payload: unknown) => {
+              replyCalls.push(payload);
+              const cursor = (payload as { cursor?: string }).cursor;
+              if (cursor === undefined) {
+                return {
+                  messages: [
+                    { text: "root text", ts: "1712345678.000100", user: "U1" },
+                    ...Array.from({ length: 199 }, (_, index) => ({
+                      text: `older ${index}`,
+                      ts: `1712345678.0001${String(index).padStart(2, "0")}`,
+                      user: "U1",
+                    })),
+                  ],
+                  response_metadata: { next_cursor: "page-2" },
+                };
+              }
+              return {
+                messages: [
+                  {
+                    files: [
+                      {
+                        id: "F-image",
+                        mimetype: "image/png",
+                        size: 3,
+                        url_private_download:
+                          "https://files.slack.com/files-pri/T-F-image/download/chart.png",
+                      },
+                    ],
+                    text: "",
+                    ts: "1712345678.000250",
+                    user: "U1",
+                  },
+                ],
+              };
+            },
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        imageFetchFn: async () => new Response(SMALL_PNG_BYTES),
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(replyCalls).toHaveLength(2);
+    expect(replyCalls[0]).toEqual(expect.objectContaining({ limit: 200 }));
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        referenceImages: [
+          expect.objectContaining({
+            data: SMALL_PNG_BYTES,
+            identifier: "F-image",
+            mediaType: "image/png",
+            messageTs: "1712345678.000250",
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("rebuilds legacy queued app mention image jobs without the attachment marker", async () => {
+    const invocations: unknown[] = [];
+    const replyCalls: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000100",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: { threads: { setStatus: async () => ({ ok: true }) } },
+          chat: {
+            postMessage: async () => ({}),
+          },
+          conversations: {
+            replies: async () => {
+              replyCalls.push({});
+              return {
+                messages: [
+                  {
+                    files: [
+                      {
+                        id: "F-image",
+                        mimetype: "image/png",
+                        size: 3,
+                        url_private_download:
+                          "https://files.slack.com/files-pri/T-F-image/download/chart.png",
+                      },
+                    ],
+                    text: "",
+                    ts: "1712345678.000100",
+                    user: "U1",
+                  },
+                ],
+              };
+            },
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        imageFetchFn: async () => new Response(SMALL_PNG_BYTES),
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(replyCalls).toHaveLength(2);
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        referenceImages: [
+          expect.objectContaining({
+            data: SMALL_PNG_BYTES,
+            identifier: "F-image",
+            mediaType: "image/png",
+            messageTs: "1712345678.000100",
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("rebuilds legacy queued app mention image jobs with text from later Slack thread pages", async () => {
+    const invocations: unknown[] = [];
+    const replyCalls: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000250",
+        teamId: "T1",
+        text: "describe this chart",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          assistant: { threads: { setStatus: async () => ({ ok: true }) } },
+          chat: {
+            postMessage: async () => ({}),
+          },
+          conversations: {
+            replies: async (payload: unknown) => {
+              replyCalls.push(payload);
+              const cursor = (payload as { cursor?: string }).cursor;
+              if (cursor === undefined) {
+                return {
+                  messages: [
+                    { text: "root text", ts: "1712345678.000100", user: "U1" },
+                    ...Array.from({ length: 199 }, (_, index) => ({
+                      text: `older ${index}`,
+                      ts: `1712345678.0001${String(index).padStart(2, "0")}`,
+                      user: "U1",
+                    })),
+                  ],
+                  response_metadata: { next_cursor: "page-2" },
+                };
+              }
+              return {
+                messages: [
+                  {
+                    files: [
+                      {
+                        id: "F-image",
+                        mimetype: "image/png",
+                        size: 3,
+                        url_private_download:
+                          "https://files.slack.com/files-pri/T-F-image/download/chart.png",
+                      },
+                    ],
+                    text: "describe this chart",
+                    ts: "1712345678.000250",
+                    user: "U1",
+                  },
+                ],
+              };
+            },
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        imageFetchFn: async () => new Response(SMALL_PNG_BYTES),
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(replyCalls).toHaveLength(2);
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        referenceImages: [
+          expect.objectContaining({
+            data: SMALL_PNG_BYTES,
+            identifier: "F-image",
+            mediaType: "image/png",
+            messageTs: "1712345678.000250",
+          }),
+        ],
+        text: "describe this chart",
+      }),
+    ]);
+  });
+
+  it("rebuilds legacy queued image jobs without the attachment marker", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "thread reply",
+          toolResults: [],
+        };
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async () => ({}),
+          },
+          conversations: {
+            replies: async () => ({
+              messages: [
+                { text: "root text", ts: "1712345678.000100", user: "U1" },
+                {
+                  files: [
+                    {
+                      id: "F-image",
+                      mimetype: "image/png",
+                      size: 3,
+                      url_private_download:
+                        "https://files.slack.com/files-pri/T-F-image/download/chart.png",
+                    },
+                  ],
+                  text: "",
+                  ts: "1712345678.000200",
+                  user: "U1",
+                },
+              ],
+            }),
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        imageFetchFn: async () => new Response(SMALL_PNG_BYTES),
+        logger: { error() {}, info() {}, warn() {} },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        referenceImages: [
+          expect.objectContaining({
+            data: SMALL_PNG_BYTES,
+            identifier: "F-image",
+          }),
+        ],
+      }),
+    ]);
+  });
+
   it("processes queued follow-up jobs through the AgentRunner and posts the result", async () => {
     const invocations: unknown[] = [];
     const runner = {
@@ -5441,6 +6182,527 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         channel: "C1",
         text: "I couldn't complete that request. Please try again in a moment.",
+      }),
+    ]);
+  });
+
+  it("retries queued follow-ups when Slack thread context cannot be read", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const posts: unknown[] = [];
+
+    await expect(
+      processSlackAgentJob(
+        {
+          channelId: "C1",
+          eventType: "message_follow_up",
+          hasAttachmentInput: true,
+          messageTs: "1712345678.000200",
+          teamId: "T1",
+          text: "",
+          threadTs: "1712345678.000100",
+          userId: "U1",
+        },
+        {
+          client: {
+            chat: {
+              postMessage: async (payload: unknown) => {
+                posts.push(payload);
+                return {};
+              },
+            },
+            conversations: {
+              replies: async () => {
+                throw new Error("slack unavailable");
+              },
+            },
+            filesUploadV2: async () => ({}),
+          } as never,
+          logger: { error() {}, info() {}, warn() {} },
+          retryContext: { attempts: 3, attemptsMade: 0 },
+          routingRepository: repository,
+          runner: runner as never,
+        },
+      ),
+    ).rejects.toThrow("Could not read the Slack thread.");
+    expect(posts).toEqual([]);
+  });
+
+  it("retries legacy queued app mention image recovery when Slack thread context cannot be read", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const posts: unknown[] = [];
+
+    await expect(
+      processSlackAgentJob(
+        {
+          channelId: "C1",
+          eventType: "app_mention",
+          messageTs: "1712345678.000100",
+          teamId: "T1",
+          text: "",
+          threadTs: "1712345678.000100",
+          userId: "U1",
+        },
+        {
+          client: {
+            assistant: { threads: { setStatus: async () => ({ ok: true }) } },
+            chat: {
+              postMessage: async (payload: unknown) => {
+                posts.push(payload);
+                return {};
+              },
+            },
+            conversations: {
+              replies: async () => {
+                throw new Error("slack unavailable");
+              },
+            },
+            filesUploadV2: async () => ({}),
+          } as never,
+          logger: { error() {}, info() {}, warn() {} },
+          retryContext: { attempts: 3, attemptsMade: 0 },
+          runner: runner as never,
+        },
+      ),
+    ).rejects.toThrow("Could not read the Slack thread.");
+    expect(posts).toEqual([]);
+  });
+
+  it("retries queued image downloads when Slack file fetch fails", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const ephemerals: unknown[] = [];
+    const posts: unknown[] = [];
+
+    await expect(
+      processSlackAgentJob(
+        {
+          channelId: "C1",
+          eventType: "message_follow_up",
+          hasAttachmentInput: true,
+          messageTs: "1712345678.000200",
+          teamId: "T1",
+          text: "",
+          threadTs: "1712345678.000100",
+          userId: "U1",
+        },
+        {
+          client: {
+            chat: {
+              postEphemeral: async (payload: unknown) => {
+                ephemerals.push(payload);
+                return {};
+              },
+              postMessage: async (payload: unknown) => {
+                posts.push(payload);
+                return {};
+              },
+            },
+            conversations: {
+              replies: async () => ({
+                messages: [
+                  { text: "root text", ts: "1712345678.000100", user: "U1" },
+                  {
+                    files: [
+                      {
+                        id: "F-image",
+                        mimetype: "image/png",
+                        size: 3,
+                        url_private_download:
+                          "https://files.slack.com/files-pri/T-F-image/download/chart.png",
+                      },
+                    ],
+                    text: "",
+                    ts: "1712345678.000200",
+                    user: "U1",
+                  },
+                ],
+              }),
+            },
+            filesUploadV2: async () => ({}),
+            token: "xoxb-token",
+          } as never,
+          imageFetchFn: async () => new Response(undefined, { status: 503 }),
+          logger: { error() {}, info() {}, warn() {} },
+          retryContext: { attempts: 3, attemptsMade: 0 },
+          routingRepository: repository,
+          runner: runner as never,
+        },
+      ),
+    ).rejects.toThrow("I couldn't read the image attachment from Slack.");
+
+    expect(ephemerals).toEqual([]);
+    expect(posts).toEqual([]);
+  });
+
+  it("posts an ephemeral message for unsupported queued image input formats", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const ephemerals: unknown[] = [];
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        hasAttachmentInput: true,
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postEphemeral: async (payload: unknown) => {
+              ephemerals.push(payload);
+              return {};
+            },
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            replies: async () => ({
+              messages: [
+                { text: "root text", ts: "1712345678.000100", user: "U1" },
+                {
+                  files: [
+                    {
+                      filetype: "gif",
+                      id: "F-gif",
+                      size: 3,
+                      url_private_download:
+                        "https://files.slack.com/files-pri/T-F-gif/download/chart.gif",
+                    },
+                  ],
+                  text: "",
+                  ts: "1712345678.000200",
+                  user: "U1",
+                },
+              ],
+            }),
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        retryContext: { attempts: 3, attemptsMade: 0 },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(posts).toEqual([]);
+    expect(ephemerals).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't read the image attachment because its file type is not supported. Please upload a PNG, JPEG, or WebP image.",
+        thread_ts: "1712345678.000100",
+        user: "U1",
+      }),
+    ]);
+  });
+
+  it("does not retry permanent queued image validation errors when ephemeral posting fails", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        scope: "thread",
+      },
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const posts: unknown[] = [];
+    const warnings: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        hasAttachmentInput: true,
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postEphemeral: async () => {
+              throw new Error("ephemeral unavailable");
+            },
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            replies: async () => ({
+              messages: [
+                { text: "root text", ts: "1712345678.000100", user: "U1" },
+                {
+                  files: [
+                    {
+                      filetype: "gif",
+                      id: "F-gif",
+                      size: 3,
+                      url_private_download:
+                        "https://files.slack.com/files-pri/T-F-gif/download/chart.gif",
+                    },
+                  ],
+                  text: "",
+                  ts: "1712345678.000200",
+                  user: "U1",
+                },
+              ],
+            }),
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        logger: {
+          error() {},
+          info() {},
+          warn(message: unknown, metadata: unknown) {
+            warnings.push({ message, metadata });
+          },
+        },
+        retryContext: { attempts: 3, attemptsMade: 0 },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(posts).toEqual([]);
+    expect(warnings).toEqual([
+      expect.objectContaining({
+        message: "Failed to post Slack image input validation message.",
+      }),
+    ]);
+  });
+
+  it("validates queued follow-up image input before no-agent routing exits", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      thread: {
+        agent_id: "assistant",
+        root_message_ts: "1712345678.000100",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const ephemerals: unknown[] = [];
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        hasAttachmentInput: true,
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postEphemeral: async (payload: unknown) => {
+              ephemerals.push(payload);
+              return {};
+            },
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            replies: async () => ({
+              messages: [
+                { text: "root text", ts: "1712345678.000100", user: "U1" },
+                {
+                  files: [
+                    {
+                      filetype: "gif",
+                      id: "F-gif",
+                      size: 3,
+                      url_private_download:
+                        "https://files.slack.com/files-pri/T-F-gif/download/chart.gif",
+                    },
+                  ],
+                  text: "",
+                  ts: "1712345678.000200",
+                  user: "U1",
+                },
+              ],
+            }),
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        retryContext: { attempts: 3, attemptsMade: 0 },
+        routingRepository: repository,
+        runner: runner as never,
+      },
+    );
+
+    expect(posts).toEqual([]);
+    expect(ephemerals).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't read the image attachment because its file type is not supported. Please upload a PNG, JPEG, or WebP image.",
+        thread_ts: "1712345678.000100",
+        user: "U1",
+      }),
+    ]);
+  });
+
+  it("posts an ephemeral image validation message for queued follow-ups without routing configured", async () => {
+    const runner = {
+      async run() {
+        throw new Error("Unexpected runner call.");
+      },
+    };
+    const ephemerals: unknown[] = [];
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "message_follow_up",
+        hasAttachmentInput: true,
+        messageTs: "1712345678.000200",
+        teamId: "T1",
+        text: "",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postEphemeral: async (payload: unknown) => {
+              ephemerals.push(payload);
+              return {};
+            },
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: {
+            replies: async () => ({
+              messages: [
+                { text: "root text", ts: "1712345678.000100", user: "U1" },
+                {
+                  files: [
+                    {
+                      filetype: "gif",
+                      id: "F-gif",
+                      size: 3,
+                      url_private_download:
+                        "https://files.slack.com/files-pri/T-F-gif/download/chart.gif",
+                    },
+                  ],
+                  text: "",
+                  ts: "1712345678.000200",
+                  user: "U1",
+                },
+              ],
+            }),
+          },
+          filesUploadV2: async () => ({}),
+          token: "xoxb-token",
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        retryContext: { attempts: 3, attemptsMade: 0 },
+        runner: runner as never,
+      },
+    );
+
+    expect(posts).toEqual([]);
+    expect(ephemerals).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't read the image attachment because its file type is not supported. Please upload a PNG, JPEG, or WebP image.",
+        thread_ts: "1712345678.000100",
+        user: "U1",
       }),
     ]);
   });
