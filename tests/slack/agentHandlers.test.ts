@@ -3032,6 +3032,62 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(updatedViews)).toContain("Feature settings were saved.");
   });
 
+  it("rejects text-to-speech enablement on a visible block when no model can be selected", async () => {
+    const acks: unknown[] = [];
+    const repository = new MemoryFeatureSettingsRepository();
+    const handlers = createAgentSlackHandlers({} as never, {
+      featureSettingsHome: {
+        imageGenerationModelId: "openai:gpt-image-1.5",
+        repository,
+      },
+      workspaceCredentialSettings: {
+        async resolveProviderCredential(input) {
+          return input.provider === "openai" ? { apiKey: "sk-test" } : undefined;
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleFeatureSettingsModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => {
+            throw new Error("users.info should not be called before model validation");
+          },
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: validFeatureSettingsView({
+        channelIds: [],
+        enabled: false,
+        teamId: "T1",
+        textToSpeechChannelIds: ["CVOICE"],
+        textToSpeechEnabled: true,
+      }),
+    } as never);
+
+    expect(acks).toEqual([
+      expect.objectContaining({
+        errors: expect.objectContaining({
+          feature_settings_text_to_speech_enabled: expect.stringContaining(
+            "text-to-speech provider API key",
+          ),
+        }),
+        response_action: "errors",
+      }),
+    ]);
+    await expect(
+      repository.findWorkspaceFeatureSetting({ featureKey: "text_to_speech", teamId: "T1" }),
+    ).resolves.toBeUndefined();
+  });
+
   it("saves Enterprise Grid feature settings for the selected workspace", async () => {
     const updatedViews: unknown[] = [];
     const repository = new MemoryFeatureSettingsRepository();

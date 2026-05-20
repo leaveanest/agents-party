@@ -3023,7 +3023,7 @@ async function handleFeatureSettingsModalSubmission(
   if (textToSpeechEnabled && selectedTextToSpeechModelId === undefined) {
     await ack({
       errors: {
-        [FEATURE_SETTINGS_TTS_MODEL_BLOCK_ID]: translator.t(
+        [FEATURE_SETTINGS_TTS_ENABLED_BLOCK_ID]: translator.t(
           "featureSettings.error.missingTextToSpeechCredential",
         ),
       },
