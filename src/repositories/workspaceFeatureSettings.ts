@@ -1,6 +1,6 @@
 import type { JsonValue } from "../domain/messageHistory.js";
 
-export type WorkspaceFeatureKey = "image_generation";
+export type WorkspaceFeatureKey = "image_generation" | "text_to_speech";
 
 export type WorkspaceFeatureSettingDocument = {
   enabled: boolean;
@@ -44,6 +44,12 @@ export type WorkspaceFeatureSettingsRepository = {
   saveWorkspaceFeatureConfiguration(input: {
     allowedChannelIds: readonly string[];
     workspaceSetting: WorkspaceFeatureSettingDocument;
+  }): Promise<void>;
+  saveWorkspaceFeatureConfigurations(input: {
+    configurations: readonly {
+      allowedChannelIds: readonly string[];
+      workspaceSetting: WorkspaceFeatureSettingDocument;
+    }[];
   }): Promise<void>;
   saveWorkspaceFeatureSetting(document: WorkspaceFeatureSettingDocument): Promise<void>;
 };

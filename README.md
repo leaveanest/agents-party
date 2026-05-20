@@ -37,7 +37,7 @@ The Python application runtime has been removed. Repository-local Codex developm
 
 ## Data Handling / External Providers
 
-`agents-party` processes Slack events, messages, and thread context so configured agents and providers can execute requested work. Slack message text, thread context, and supported attachments may be sent to the configured model provider at invocation time; media and specialist features may additionally send files, images, PDFs, or audio to configured external providers for transcription, image generation, video generation, search, or related tool execution. See [`docs/slack-typescript-ingress.md`](docs/slack-typescript-ingress.md), [`docs/message-history-model.md`](docs/message-history-model.md), and [`docs/provider-router.md`](docs/provider-router.md) for the Slack ingress, message conversion, and provider boundary.
+`agents-party` processes Slack events, messages, and thread context so configured agents and providers can execute requested work. Slack message text, thread context, and supported attachments may be sent to the configured model provider at invocation time; media and specialist features may additionally send files, images, PDFs, or audio to configured external providers for transcription, image generation, text-to-speech, video generation, search, or related tool execution. See [`docs/slack-typescript-ingress.md`](docs/slack-typescript-ingress.md), [`docs/message-history-model.md`](docs/message-history-model.md), and [`docs/provider-router.md`](docs/provider-router.md) for the Slack ingress, message conversion, and provider boundary.
 
 Provider-side retention, training, logging, and data handling terms depend on the selected provider, account, region, feature, and operator configuration. OSS operators should review each provider's current terms before enabling it for a workspace.
 
@@ -59,6 +59,8 @@ Selected agents can use these specialist runtimes internally:
   - language translation from Slack context
 - `image_generation`
   - image generation using Gemini image models
+- `text_to_speech`
+  - speech audio generation using OpenAI speech models
 - `video_generation`
   - text-to-video planning and rendering using Gemini plus Veo
 
@@ -306,6 +308,7 @@ the worker and in-process agent paths can resolve that user's `installation.user
 
 ```bash
 IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
+TEXT_TO_SPEECH_MODEL=openai:gpt-4o-mini-tts
 VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 LLM_API_KEY_ENCRYPTION_KEY=...
 ```
@@ -400,12 +403,15 @@ For shared or production-like runtimes, store the Google Maps key in `workspace_
 
 ```bash
 IMAGE_GENERATION_MODEL=google:gemini-2.5-flash-image
+TEXT_TO_SPEECH_MODEL=openai:gpt-4o-mini-tts
 VIDEO_GENERATION_MODEL=google:veo-3.1-fast-generate-001
 ```
 
 The TypeScript runner exposes image generation as a callable agent tool. The normal Slack agent model decides whether to call `generate_image`; the tool then checks workspace feature settings, channel allowlists, model capabilities, and workspace credentials before calling a provider-aware media gateway. In workspace-credential mode it uses the encrypted provider credential row for the Slack team, for example `provider_kind='google'` / `credential_name='api_key'` for Google image models and `provider_kind='openai'` / `credential_name='api_key'` for OpenAI image models.
 
 Image generation is deny-by-default. A workspace admin or owner must configure the required provider API key, open Feature settings from App Home, enable image generation for the workspace, and choose allowed channels. The tool only runs when the required provider API key exists, workspace `image_generation` is enabled, and the Slack channel is explicitly allowlisted. Thread-level feature settings are not used.
+
+The runner also exposes text-to-speech as a callable agent tool. The normal Slack agent model decides whether to call `text_to_speech`; the tool checks workspace feature settings, channel allowlists, `text_to_speech` model capability, and the workspace OpenAI API key before calling the AI SDK speech gateway. Text-to-speech is deny-by-default and runs only when workspace `text_to_speech` is enabled and the current Slack channel is explicitly allowlisted. Slack uploads generated audio back into the thread.
 
 ## Deployment
 

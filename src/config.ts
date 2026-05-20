@@ -33,6 +33,7 @@ export type AppSettings = {
   transcriptionAlternativeLanguageCodes: string[];
   transcriptionLanguageCode: string;
   transcriptionModelId: string;
+  textToSpeechModelId: string | undefined;
   videoGenerationModelId: string;
   slackClientId: string | undefined;
   slackClientSecret: string | undefined;
@@ -221,6 +222,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     transcriptionLanguageCode:
       readText(env.TRANSCRIPTION_LANGUAGE_CODE) ?? DEFAULT_TRANSCRIPTION_LANGUAGE_CODE,
     transcriptionModelId: readText(env.TRANSCRIPTION_MODEL) ?? DEFAULT_TRANSCRIPTION_MODEL_ID,
+    textToSpeechModelId: readText(env.TEXT_TO_SPEECH_MODEL),
     videoGenerationModelId:
       readText(env.VIDEO_GENERATION_MODEL) ?? DEFAULT_VIDEO_GENERATION_MODEL_ID,
     slackClientId,

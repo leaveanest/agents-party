@@ -36,17 +36,28 @@ export class PostgresWorkspaceFeatureSettingsRepository implements WorkspaceFeat
     allowedChannelIds: readonly string[];
     workspaceSetting: WorkspaceFeatureSettingDocument;
   }): Promise<void> {
+    await this.saveWorkspaceFeatureConfigurations({ configurations: [input] });
+  }
+
+  async saveWorkspaceFeatureConfigurations(input: {
+    configurations: readonly {
+      allowedChannelIds: readonly string[];
+      workspaceSetting: WorkspaceFeatureSettingDocument;
+    }[];
+  }): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query("begin");
-      await saveWorkspaceFeatureSettingQuery(client, input.workspaceSetting);
-      await replaceAllowedChannelsQuery(client, {
-        channelIds: input.allowedChannelIds,
-        featureKey: input.workspaceSetting.featureKey,
-        teamId: input.workspaceSetting.teamId,
-        updatedAt: input.workspaceSetting.updatedAt,
-        updatedByUserId: input.workspaceSetting.updatedByUserId,
-      });
+      for (const configuration of input.configurations) {
+        await saveWorkspaceFeatureSettingQuery(client, configuration.workspaceSetting);
+        await replaceAllowedChannelsQuery(client, {
+          channelIds: configuration.allowedChannelIds,
+          featureKey: configuration.workspaceSetting.featureKey,
+          teamId: configuration.workspaceSetting.teamId,
+          updatedAt: configuration.workspaceSetting.updatedAt,
+          updatedByUserId: configuration.workspaceSetting.updatedByUserId,
+        });
+      }
       await client.query("commit");
     } catch (error) {
       await client.query("rollback");

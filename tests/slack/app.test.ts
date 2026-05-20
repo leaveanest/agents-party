@@ -32,6 +32,7 @@ const baseSettings: AppSettings = {
   googleOAuthStartPath: "/oauth/google/start",
   googleTokenEncryptionKey: undefined,
   googleMapsApiKey: undefined,
+  textToSpeechModelId: undefined,
   transcriptionAlternativeLanguageCodes: ["en-US"],
   transcriptionLanguageCode: "ja-JP",
   transcriptionModelId: "google:speech-to-text-latest-long",

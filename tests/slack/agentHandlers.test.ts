@@ -2670,16 +2670,17 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(staleEnabledViews[0])).toContain("feature_settings_configure");
   });
 
-  it("does not publish feature settings entry point for a non-image model", async () => {
+  it("does not publish feature settings entry point for unsupported feature models", async () => {
     const publishedViews: unknown[] = [];
     const handlers = createAgentSlackHandlers({} as never, {
       featureSettingsHome: {
         imageGenerationModelId: "openai:gpt-4o",
         repository: new MemoryFeatureSettingsRepository(),
+        textToSpeechModelId: "openai:gpt-4o",
       },
       workspaceCredentialSettings: {
         async resolveProviderCredential() {
-          return { apiKey: "sk-test" };
+          return undefined;
         },
         async saveProviderApiKey() {},
       },
@@ -2943,6 +2944,91 @@ describe("createAgentSlackHandlers", () => {
       "openai:gpt-image-1.5",
     );
     expect(repository.allowedChannelIds).toEqual(["C2"]);
+    expect(JSON.stringify(updatedViews)).toContain("Feature settings were saved.");
+  });
+
+  it("saves text-to-speech settings when an OpenAI API key exists", async () => {
+    const openedViews: unknown[] = [];
+    const updatedViews: unknown[] = [];
+    const repository = new MemoryFeatureSettingsRepository();
+    const handlers = createAgentSlackHandlers({} as never, {
+      featureSettingsHome: {
+        imageGenerationModelId: "openai:gpt-image-1.5",
+        repository,
+      },
+      workspaceCredentialSettings: {
+        async resolveProviderCredential(input) {
+          return input.provider === "openai" ? { apiKey: "sk-test" } : undefined;
+        },
+        async saveProviderApiKey() {},
+      },
+    });
+
+    await handlers.handleFeatureSettingsConfigureAction({
+      ack: async () => {},
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T1", source: "app_home" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(openedViews[0])).toContain("Text-to-speech");
+    expect(JSON.stringify(openedViews[0])).toContain("openai:gpt-4o-mini-tts");
+
+    await handlers.handleFeatureSettingsModalSubmission({
+      ack: async (payload?: unknown) => {
+        updatedViews.push(["ack", payload]);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: validFeatureSettingsView({
+        channelIds: [],
+        enabled: false,
+        teamId: "T1",
+        textToSpeechChannelIds: ["CVOICE"],
+        textToSpeechEnabled: true,
+        textToSpeechModelId: "openai:gpt-4o-mini-tts",
+      }),
+    } as never);
+
+    const textToSpeechSetting = await repository.findWorkspaceFeatureSetting({
+      featureKey: "text_to_speech",
+      teamId: "T1",
+    });
+    expect(textToSpeechSetting).toMatchObject({
+      enabled: true,
+      payload: {
+        text_to_speech_model_id: "openai:gpt-4o-mini-tts",
+      },
+    });
+    await expect(
+      repository.listAllowedChannels({ featureKey: "text_to_speech", teamId: "T1" }),
+    ).resolves.toEqual([expect.objectContaining({ channelId: "CVOICE" })]);
     expect(JSON.stringify(updatedViews)).toContain("Feature settings were saved.");
   });
 
@@ -4559,6 +4645,54 @@ describe("createAgentSlackHandlers", () => {
         filename: "generated-image.webp",
       }),
     ]);
+  });
+
+  it("uploads generated audio media from text-to-speech tool results", async () => {
+    const uploads: unknown[] = [];
+
+    await postAgentResult({
+      channel: "C1",
+      client: {
+        chat: {
+          postMessage: async () => ({ ok: true }),
+        },
+        conversations: {
+          replies: async () => ({ ok: true }),
+        },
+        filesUploadV2: async (payload: unknown) => {
+          uploads.push(payload);
+          return { files: [], ok: true };
+        },
+      } as never,
+      logger: { info() {} },
+      result: {
+        decision: { action: "respond", reason: "test" },
+        message: "Speech generated.",
+        structuredResult: {
+          action: "generated",
+          media: {
+            dataBase64: Buffer.from("audio-bytes").toString("base64"),
+            kind: "audio",
+            mimeType: "audio/mpeg",
+            modelId: "openai:gpt-4o-mini-tts",
+            provider: "openai",
+            status: "generated",
+          },
+          message: "Speech generated.",
+        },
+        toolResults: [],
+      },
+      text: "Speech generated.",
+      threadTs: "1712345678.000100",
+    });
+
+    expect(uploads).toEqual([
+      expect.objectContaining({
+        filename: "generated-audio.mp3",
+        initial_comment: "Speech generated.",
+      }),
+    ]);
+    expect((uploads[0] as { file: Buffer }).file.toString()).toBe("audio-bytes");
   });
 
   it("formats short agent Markdown output as Slack mrkdwn blocks", async () => {
@@ -6456,6 +6590,9 @@ function validFeatureSettingsView(input: {
   enterpriseId?: string;
   imageGenerationModelId?: string;
   teamId: string;
+  textToSpeechChannelIds?: string[];
+  textToSpeechEnabled?: boolean;
+  textToSpeechModelId?: string;
 }): unknown {
   return {
     hash: "HASH1",
@@ -6484,48 +6621,76 @@ function validFeatureSettingsView(input: {
                 },
               },
             }),
+        feature_settings_text_to_speech_channels: {
+          text_to_speech_channels: {
+            selected_conversations: input.textToSpeechChannelIds ?? [],
+          },
+        },
+        feature_settings_text_to_speech_enabled: {
+          text_to_speech_enabled: {
+            selected_options: input.textToSpeechEnabled === true ? [{ value: "enabled" }] : [],
+          },
+        },
+        ...(input.textToSpeechModelId === undefined
+          ? {}
+          : {
+              feature_settings_text_to_speech_model: {
+                text_to_speech_model: {
+                  selected_option: { value: input.textToSpeechModelId },
+                },
+              },
+            }),
       },
     },
   };
 }
 
 class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsRepository {
-  allowedChannelIds: string[];
+  private readonly allowedChannelsByFeature = new Map<WorkspaceFeatureKey, string[]>();
   failConfigurationSave = false;
-  workspaceSetting: WorkspaceFeatureSettingDocument | undefined;
+  private readonly workspaceSettings = new Map<
+    WorkspaceFeatureKey,
+    WorkspaceFeatureSettingDocument
+  >();
 
   constructor(input: { allowedChannelIds?: string[]; workspaceEnabled?: boolean } = {}) {
-    this.allowedChannelIds = input.allowedChannelIds ?? [];
+    this.allowedChannelsByFeature.set("image_generation", input.allowedChannelIds ?? []);
     if (input.workspaceEnabled !== undefined) {
-      this.workspaceSetting = {
+      this.workspaceSettings.set("image_generation", {
         enabled: input.workspaceEnabled,
         featureKey: "image_generation",
         payload: {},
         teamId: "T1",
         updatedAt: new Date("2026-05-19T00:00:00Z"),
-      };
+      });
     }
+  }
+
+  get allowedChannelIds(): string[] {
+    return this.allowedChannelsByFeature.get("image_generation") ?? [];
+  }
+
+  get workspaceSetting(): WorkspaceFeatureSettingDocument | undefined {
+    return this.workspaceSettings.get("image_generation");
   }
 
   async findWorkspaceFeatureSetting(input: {
     featureKey: WorkspaceFeatureKey;
     teamId: string;
   }): Promise<WorkspaceFeatureSettingDocument | undefined> {
-    return this.workspaceSetting?.teamId === input.teamId &&
-      this.workspaceSetting.featureKey === input.featureKey
-      ? this.workspaceSetting
-      : undefined;
+    const setting = this.workspaceSettings.get(input.featureKey);
+    return setting?.teamId === input.teamId ? setting : undefined;
   }
 
   async saveWorkspaceFeatureSetting(document: WorkspaceFeatureSettingDocument): Promise<void> {
-    this.workspaceSetting = document;
+    this.workspaceSettings.set(document.featureKey, document);
   }
 
   async listAllowedChannels(input: {
     featureKey: WorkspaceFeatureKey;
     teamId: string;
   }): Promise<ChannelFeatureSettingDocument[]> {
-    return this.allowedChannelIds.map((channelId) => ({
+    return (this.allowedChannelsByFeature.get(input.featureKey) ?? []).map((channelId) => ({
       channelId,
       featureKey: input.featureKey,
       payload: {},
@@ -6540,9 +6705,8 @@ class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsReposit
     teamId: string;
   }): Promise<boolean> {
     return (
-      input.featureKey === "image_generation" &&
       input.teamId === "T1" &&
-      this.allowedChannelIds.includes(input.channelId)
+      (this.allowedChannelsByFeature.get(input.featureKey) ?? []).includes(input.channelId)
     );
   }
 
@@ -6551,18 +6715,34 @@ class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsReposit
     featureKey: WorkspaceFeatureKey;
     teamId: string;
   }): Promise<void> {
-    this.allowedChannelIds = [...input.channelIds];
+    this.allowedChannelsByFeature.set(input.featureKey, [...input.channelIds]);
   }
 
   async saveWorkspaceFeatureConfiguration(input: {
     allowedChannelIds: readonly string[];
     workspaceSetting: WorkspaceFeatureSettingDocument;
   }): Promise<void> {
+    await this.saveWorkspaceFeatureConfigurations({ configurations: [input] });
+  }
+
+  async saveWorkspaceFeatureConfigurations(input: {
+    configurations: readonly {
+      allowedChannelIds: readonly string[];
+      workspaceSetting: WorkspaceFeatureSettingDocument;
+    }[];
+  }): Promise<void> {
     if (this.failConfigurationSave) {
       throw new Error("configuration save failed");
     }
-    this.workspaceSetting = input.workspaceSetting;
-    this.allowedChannelIds = [...input.allowedChannelIds];
+    for (const configuration of input.configurations) {
+      this.workspaceSettings.set(
+        configuration.workspaceSetting.featureKey,
+        configuration.workspaceSetting,
+      );
+      this.allowedChannelsByFeature.set(configuration.workspaceSetting.featureKey, [
+        ...configuration.allowedChannelIds,
+      ]);
+    }
   }
 }
 

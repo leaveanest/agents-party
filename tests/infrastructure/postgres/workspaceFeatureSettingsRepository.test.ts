@@ -80,6 +80,51 @@ describe("workspace feature settings repository", () => {
     expect(pool.queries[3]?.values?.slice(0, 3)).toEqual(["T1", "C1", "image_generation"]);
     expect(pool.queries[4]?.values?.slice(0, 3)).toEqual(["T1", "C2", "image_generation"]);
   });
+
+  it("saves multiple feature configurations inside one transaction", async () => {
+    const pool = new RecordingPool();
+    const repository = new PostgresWorkspaceFeatureSettingsRepository(pool as never);
+
+    await repository.saveWorkspaceFeatureConfigurations({
+      configurations: [
+        {
+          allowedChannelIds: ["C1"],
+          workspaceSetting: {
+            enabled: true,
+            featureKey: "image_generation",
+            payload: { source: "image" },
+            teamId: "T1",
+            updatedAt: new Date("2026-05-19T00:00:00Z"),
+            updatedByUserId: "U1",
+          },
+        },
+        {
+          allowedChannelIds: ["C2"],
+          workspaceSetting: {
+            enabled: true,
+            featureKey: "text_to_speech",
+            payload: { source: "speech" },
+            teamId: "T1",
+            updatedAt: new Date("2026-05-19T00:00:00Z"),
+            updatedByUserId: "U1",
+          },
+        },
+      ],
+    });
+
+    expect(pool.queries.map((query) => query.text)).toEqual([
+      "begin",
+      expect.stringContaining("insert into workspace_feature_settings"),
+      expect.stringContaining("delete from channel_feature_settings"),
+      expect.stringContaining("insert into channel_feature_settings"),
+      expect.stringContaining("insert into workspace_feature_settings"),
+      expect.stringContaining("delete from channel_feature_settings"),
+      expect.stringContaining("insert into channel_feature_settings"),
+      "commit",
+    ]);
+    expect(pool.queries[1]?.values?.slice(0, 3)).toEqual(["T1", "image_generation", true]);
+    expect(pool.queries[4]?.values?.slice(0, 3)).toEqual(["T1", "text_to_speech", true]);
+  });
 });
 
 class RecordingPool {

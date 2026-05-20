@@ -103,6 +103,7 @@ const slackGateway = settings.slackEnabled
             : {
                 imageGenerationModelId: settings.imageGenerationModelId,
                 repository: featureSettingsRepository,
+                textToSpeechModelId: settings.textToSpeechModelId,
               },
         routingRepository,
         salesforceConnectionHome:
