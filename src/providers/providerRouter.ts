@@ -153,7 +153,7 @@ function firstConfiguredModel(config: ModelSelectionConfig) {
 
 function requiredCapabilitiesForRequest(request: LlmRequest): readonly LlmCapability[] {
   const capabilities = new Set<LlmCapability>(["text", ...(request.requiredCapabilities ?? [])]);
-  if ((request.tools?.length ?? 0) > 0) {
+  if ((request.tools?.length ?? 0) > 0 || Object.keys(request.aiSdkTools ?? {}).length > 0) {
     capabilities.add("tool_calling");
   }
   if (request.responseFormat?.type === "json") {

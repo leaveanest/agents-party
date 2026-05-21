@@ -1,3 +1,5 @@
+import type { ToolSet } from "ai";
+
 import type { ConversationHistory, JsonValue } from "../domain/messageHistory.js";
 
 export const LlmProviderId = {
@@ -91,6 +93,7 @@ export type LlmInvocationContext = {
 };
 
 export type LlmRequest = {
+  aiSdkTools?: ToolSet;
   context?: LlmInvocationContext;
   history: ConversationHistory;
   maxOutputTokens?: number;

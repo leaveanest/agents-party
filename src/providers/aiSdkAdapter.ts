@@ -151,6 +151,8 @@ export class AiSdkLlmAdapter implements LlmAdapter {
       const providerTools = this.resolveProviderTools(request.model, credential);
       const providerToolNames = providerToolNamesForRequest(request, providerTools);
       const tools = toolsForRequest(request, providerTools);
+      const hasProviderExecutedTools =
+        providerTools !== undefined || Object.keys(request.aiSdkTools ?? {}).length > 0;
       const result = await generateText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
@@ -164,7 +166,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           providerOptions: request.providerOptions,
           reasoningEffort: request.reasoningEffort,
         }),
-        stopWhen: providerTools === undefined ? undefined : stepCountIs(10),
+        stopWhen: hasProviderExecutedTools ? stepCountIs(10) : undefined,
         system: request.system,
         temperature: request.temperature,
         tools,
@@ -214,6 +216,8 @@ export class AiSdkLlmAdapter implements LlmAdapter {
       const providerTools = this.resolveProviderTools(request.model, credential);
       const providerToolNames = providerToolNamesForRequest(request, providerTools);
       const tools = toolsForRequest(request, providerTools);
+      const hasProviderExecutedTools =
+        providerTools !== undefined || Object.keys(request.aiSdkTools ?? {}).length > 0;
       const result = streamText({
         maxOutputTokens: request.maxOutputTokens,
         messages: convertHistoryToAiSdkMessages(
@@ -226,7 +230,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           providerOptions: request.providerOptions,
           reasoningEffort: request.reasoningEffort,
         }),
-        stopWhen: providerTools === undefined ? undefined : stepCountIs(10),
+        stopWhen: hasProviderExecutedTools ? stepCountIs(10) : undefined,
         system: request.system,
         temperature: request.temperature,
         tools,
@@ -894,14 +898,22 @@ function toolsForRequest(
   providerTools: ToolSet | undefined,
 ): ToolSet | undefined {
   const requestTools = toAiSdkTools(request.tools);
-  if (providerTools === undefined) {
+  const directTools = request.aiSdkTools;
+  const mergedProviderTools =
+    providerTools === undefined && directTools === undefined
+      ? undefined
+      : {
+          ...providerTools,
+          ...directTools,
+        };
+  if (mergedProviderTools === undefined) {
     return requestTools;
   }
   if (requestTools === undefined) {
-    return providerTools;
+    return mergedProviderTools;
   }
   return {
-    ...providerTools,
+    ...mergedProviderTools,
     ...requestTools,
   };
 }
@@ -912,7 +924,9 @@ function providerToolNamesForRequest(
 ): ReadonlySet<string> {
   const requestToolNames = new Set((request.tools ?? []).map((definition) => definition.name));
   return new Set(
-    Object.keys(providerTools ?? {}).filter((toolName) => !requestToolNames.has(toolName)),
+    [...Object.keys(providerTools ?? {}), ...Object.keys(request.aiSdkTools ?? {})].filter(
+      (toolName) => !requestToolNames.has(toolName),
+    ),
   );
 }
 

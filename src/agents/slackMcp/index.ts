@@ -1,8 +1,9 @@
 export {
-  createSlackMcpAgentTools,
+  createSlackMcpToolSet,
+  type SlackMcpToolSetHandle,
   type SlackMcpTokenLookup,
   type SlackMcpTokenResolution,
   type SlackMcpTokenResolver,
   type SlackMcpToolContext,
-  type SlackMcpToolOptions,
+  type SlackMcpToolSetOptions,
 } from "./tools.js";
