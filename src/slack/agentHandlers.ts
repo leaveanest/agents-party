@@ -12,6 +12,7 @@ import {
   AgentRunnerExecutionError,
   type AgentRunner,
   type AgentRunnerResult,
+  type AgentRunnerStreamEvent,
   type AgentRunnerStructuredResult,
 } from "../agents/runner.js";
 import type { JsonValue } from "../domain/messageHistory.js";
@@ -196,6 +197,7 @@ const DEFAULT_AGENT_OPTION = {
 const REASONING_EFFORT_FIELD = "reasoning_effort";
 const AGENTS_PARTY_CONTROL_EVENT_TYPE = "agents_party_control";
 const SLACK_SECTION_TEXT_LIMIT = 3000;
+const SLACK_AGENT_STREAM_BUFFER_SIZE = 128;
 const SLACK_THREAD_ATTACHMENT_PAGE_LIMIT = 200;
 const THREAD_HISTORY_CONVERSATION_SUBTYPES = new Set([
   "bot_message",
@@ -227,17 +229,22 @@ const TRANSLATION_RESULT_RESPONSE_FORMAT: Extract<LlmResponseFormat, { type: "js
 export type SlackAgentClient = Pick<
   SlackClient,
   "chat" | "conversations" | "filesUploadV2" | "token" | "users"
-> & {
-  assistant?: {
-    threads?: {
-      setStatus(input: {
-        channel_id: string;
-        loading_messages?: string[];
-        status: string;
-        thread_ts: string;
-      }): Promise<unknown>;
+> &
+  Partial<Pick<SlackClient, "chatStream">> & {
+    assistant?: {
+      threads?: {
+        setStatus(input: {
+          channel_id: string;
+          loading_messages?: string[];
+          status: string;
+          thread_ts: string;
+        }): Promise<unknown>;
+      };
     };
   };
+type SlackAgentMessageStream = {
+  append(input: { markdown_text: string }): Promise<unknown>;
+  stop(input?: unknown): Promise<unknown>;
 };
 
 type WorkspaceCredentialProviderSelection = CredentialProviderKind | "google_service_account_json";
@@ -3907,6 +3914,7 @@ async function handleMention(
   }
 
   let runnerResult: AgentRunnerResult | undefined;
+  let postedResult = false;
   let text: string;
   try {
     if (
@@ -3968,7 +3976,7 @@ async function handleMention(
       translator,
       userId: event.user,
     });
-    const result = await runner.run({
+    const invocation = {
       channelId: event.channel,
       enterpriseId: readSlackEnterpriseId(body),
       isEnterpriseInstall: readSlackEnterpriseInstall(body),
@@ -3994,7 +4002,26 @@ async function handleMention(
       }),
       userId: event.user,
       viewerContextChannelIds: [event.channel],
-    });
+    };
+    const streamingResult =
+      sayStream === undefined
+        ? undefined
+        : await tryPostStreamingAgentRun({
+            channel: event.channel,
+            client,
+            invocation,
+            logger,
+            runner,
+            startStream: () => sayStream({ buffer_size: SLACK_AGENT_STREAM_BUFFER_SIZE }),
+            threadTs,
+            translator,
+          });
+    if (streamingResult?.type === "posted-error") {
+      return;
+    }
+    postedResult = streamingResult?.type === "success";
+    const result =
+      streamingResult?.type === "success" ? streamingResult.result : await runner.run(invocation);
     runnerResult = result;
     text = result.message;
     logAgentRunnerSuccess(logger, {
@@ -4047,6 +4074,9 @@ async function handleMention(
     text = runnerUserFacingErrorMessage(error, translator);
   }
 
+  if (postedResult) {
+    return;
+  }
   await postAgentResult({
     channel: event.channel,
     client,
@@ -4163,6 +4193,7 @@ async function handleMessage(
   }
 
   let runnerResult: AgentRunnerResult | undefined;
+  let postedResult = false;
   let text: string;
   try {
     const threadMessages = await readThreadMessages(client, event.channel, threadTs);
@@ -4192,7 +4223,7 @@ async function handleMessage(
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
     const reasoningEffort =
       route === undefined ? stringField(thread, REASONING_EFFORT_FIELD) : route.reasoningEffort;
-    const result = await runner.run({
+    const invocation = {
       channelId: event.channel,
       enterpriseId: readSlackEnterpriseId(body),
       isEnterpriseInstall: readSlackEnterpriseInstall(body),
@@ -4218,7 +4249,26 @@ async function handleMessage(
       }),
       userId: event.user,
       viewerContextChannelIds: [event.channel],
-    });
+    };
+    const streamingResult =
+      sayStream === undefined
+        ? undefined
+        : await tryPostStreamingAgentRun({
+            channel: event.channel,
+            client,
+            invocation,
+            logger,
+            runner,
+            startStream: () => sayStream({ buffer_size: SLACK_AGENT_STREAM_BUFFER_SIZE }),
+            threadTs,
+            translator,
+          });
+    if (streamingResult?.type === "posted-error") {
+      return;
+    }
+    postedResult = streamingResult?.type === "success";
+    const result =
+      streamingResult?.type === "success" ? streamingResult.result : await runner.run(invocation);
     runnerResult = result;
     text = result.message;
     logAgentRunnerSuccess(logger, {
@@ -4272,6 +4322,9 @@ async function handleMessage(
     text = runnerUserFacingErrorMessage(error, translator);
   }
 
+  if (postedResult) {
+    return;
+  }
   await postAgentResult({
     channel: event.channel,
     client,
@@ -4372,6 +4425,7 @@ async function processAppMentionJob(
   }
 
   let runnerResult: AgentRunnerResult | undefined;
+  let postedResult = false;
   let text: string;
   try {
     const threadMessages = await readThreadMessagesForQueuedJob(input.client, job, {
@@ -4408,7 +4462,7 @@ async function processAppMentionJob(
       translator,
       userId: job.userId,
     });
-    const result = await input.runner.run({
+    const invocation = {
       channelId: job.channelId,
       enterpriseId: job.enterpriseId,
       isEnterpriseInstall: job.isEnterpriseInstall,
@@ -4433,7 +4487,31 @@ async function processAppMentionJob(
       }),
       userId: job.userId,
       viewerContextChannelIds: [job.channelId],
+    };
+    const streamingResult = await tryPostStreamingAgentRun({
+      channel: job.channelId,
+      client: input.client,
+      invocation,
+      logger: input.logger,
+      runner: input.runner,
+      startStream: createSlackClientStreamStarter({
+        channelId: job.channelId,
+        client: input.client,
+        teamId: job.teamId,
+        threadTs: job.threadTs,
+        userId: job.userId,
+      }),
+      threadTs: job.threadTs,
+      translator,
     });
+    if (streamingResult.type === "posted-error") {
+      return;
+    }
+    postedResult = streamingResult.type === "success";
+    const result =
+      streamingResult.type === "success"
+        ? streamingResult.result
+        : await input.runner.run(invocation);
     runnerResult = result;
     text = result.message;
     logAgentRunnerSuccess(input.logger, {
@@ -4489,6 +4567,9 @@ async function processAppMentionJob(
     text = runnerUserFacingErrorMessage(error, translator);
   }
 
+  if (postedResult) {
+    return;
+  }
   await postAgentResult({
     channel: job.channelId,
     client: input.client,
@@ -4553,6 +4634,7 @@ async function processFollowUpMessageJob(
     return;
   }
   let runnerResult: AgentRunnerResult | undefined;
+  let postedResult = false;
   let text: string;
   try {
     const threadMessages = await readThreadMessagesForQueuedJob(input.client, job);
@@ -4588,7 +4670,7 @@ async function processFollowUpMessageJob(
     const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
     const reasoningEffort =
       route === undefined ? stringField(thread, REASONING_EFFORT_FIELD) : route.reasoningEffort;
-    const result = await input.runner.run({
+    const invocation = {
       channelId: job.channelId,
       enterpriseId: job.enterpriseId,
       isEnterpriseInstall: job.isEnterpriseInstall,
@@ -4613,7 +4695,31 @@ async function processFollowUpMessageJob(
       }),
       userId: job.userId,
       viewerContextChannelIds: [job.channelId],
+    };
+    const streamingResult = await tryPostStreamingAgentRun({
+      channel: job.channelId,
+      client: input.client,
+      invocation,
+      logger: input.logger,
+      runner: input.runner,
+      startStream: createSlackClientStreamStarter({
+        channelId: job.channelId,
+        client: input.client,
+        teamId: job.teamId,
+        threadTs: job.threadTs,
+        userId: job.userId,
+      }),
+      threadTs: job.threadTs,
+      translator,
     });
+    if (streamingResult.type === "posted-error") {
+      return;
+    }
+    postedResult = streamingResult.type === "success";
+    const result =
+      streamingResult.type === "success"
+        ? streamingResult.result
+        : await input.runner.run(invocation);
     runnerResult = result;
     text = result.message;
     logAgentRunnerSuccess(input.logger, {
@@ -4674,6 +4780,9 @@ async function processFollowUpMessageJob(
     text = runnerUserFacingErrorMessage(error, translator);
   }
 
+  if (postedResult) {
+    return;
+  }
   await postAgentResult({
     channel: job.channelId,
     client: input.client,
@@ -5701,6 +5810,162 @@ export async function postAgentResult(input: {
   }
 }
 
+type StreamingAgentRunOutcome =
+  | {
+      result: AgentRunnerResult;
+      type: "success";
+    }
+  | {
+      type: "posted-error";
+    }
+  | {
+      type: "unsupported";
+    };
+
+async function tryPostStreamingAgentRun(input: {
+  channel: string;
+  client: SlackAgentClient;
+  invocation: unknown;
+  logger: unknown;
+  runner: AgentRunner;
+  startStream(): SlackAgentMessageStream | undefined;
+  threadTs: string;
+  translator: Translator;
+}): Promise<StreamingAgentRunOutcome> {
+  const runStream = (input.runner as { runStream?: unknown }).runStream;
+  if (typeof runStream !== "function") {
+    return { type: "unsupported" };
+  }
+
+  let stream: SlackAgentMessageStream | undefined;
+  let streamedText = "";
+  const ensureStream = () => {
+    stream ??= input.startStream();
+    if (stream === undefined) {
+      throw new Error("Slack chat streaming is not available for this delivery path.");
+    }
+    return stream;
+  };
+  try {
+    let finalResult: AgentRunnerResult | undefined;
+    for await (const event of runStream.call(
+      input.runner,
+      input.invocation,
+    ) as AsyncIterable<AgentRunnerStreamEvent>) {
+      if (event.type === "text-delta") {
+        if (event.text.length === 0) {
+          continue;
+        }
+        await ensureStream().append({ markdown_text: event.text });
+        streamedText += event.text;
+        continue;
+      }
+      finalResult = event.result;
+    }
+    if (finalResult === undefined) {
+      throw new Error("Agent stream ended without a final result.");
+    }
+
+    await appendStreamingResultHandoff({
+      channel: input.channel,
+      client: input.client,
+      ensureStream,
+      result: finalResult,
+      streamedText,
+      threadTs: input.threadTs,
+    });
+    if (
+      streamedText.length === 0 &&
+      readGeneratedMedia(finalResult.structuredResult) === undefined
+    ) {
+      await ensureStream().append({ markdown_text: finalResult.message });
+    }
+    await stream?.stop();
+    logInfo(input.logger, "Delivered agent message to Slack with live stream.", {
+      channelId: input.channel,
+      delivery: "live_stream",
+      threadTs: input.threadTs,
+    });
+    return { result: finalResult, type: "success" };
+  } catch (error) {
+    logWarn(input.logger, "Failed while streaming Slack agent message.", {
+      channelId: input.channel,
+      error,
+      threadTs: input.threadTs,
+    });
+    if (stream === undefined) {
+      throw error;
+    }
+    if (streamedText.length > 0) {
+      try {
+        await stream.append({
+          markdown_text: `\n\n${runnerUserFacingErrorMessage(error, input.translator)}`,
+        });
+        await stream.stop();
+      } catch (stopError) {
+        logWarn(input.logger, "Failed to stop Slack agent live stream after an error.", {
+          channelId: input.channel,
+          error: stopError,
+          threadTs: input.threadTs,
+        });
+      }
+      return { type: "posted-error" };
+    }
+    try {
+      await stream?.stop();
+    } catch (stopError) {
+      logWarn(input.logger, "Failed to stop empty Slack agent live stream after an error.", {
+        channelId: input.channel,
+        error: stopError,
+        threadTs: input.threadTs,
+      });
+    }
+    throw error;
+  }
+}
+
+async function appendStreamingResultHandoff(input: {
+  channel: string;
+  client: SlackAgentClient;
+  ensureStream(): SlackAgentMessageStream;
+  result: AgentRunnerResult;
+  streamedText: string;
+  threadTs: string;
+}): Promise<void> {
+  const media = readGeneratedMedia(input.result.structuredResult);
+  if (media?.dataBase64 !== undefined) {
+    await input.client.filesUploadV2({
+      channel_id: input.channel,
+      file: Buffer.from(media.dataBase64, "base64"),
+      filename: mediaFilename(media),
+      initial_comment: input.streamedText.trim().length === 0 ? input.result.message : "",
+      thread_ts: input.threadTs,
+    });
+    return;
+  }
+  const suffix = media?.uri ?? media?.operationName;
+  if (suffix !== undefined) {
+    await input.ensureStream().append({ markdown_text: `\n${suffix}` });
+  }
+}
+
+function createSlackClientStreamStarter(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  teamId: string;
+  threadTs: string;
+  userId: string;
+}): () => SlackAgentMessageStream | undefined {
+  return () =>
+    input.client.chatStream?.({
+      buffer_size: SLACK_AGENT_STREAM_BUFFER_SIZE,
+      channel: input.channelId,
+      recipient_team_id: input.teamId,
+      recipient_user_id: input.userId,
+      thread_ts: input.threadTs,
+    });
+}
+
 async function postStreamingAgentMessage(input: {
   channel: string;
   logger: unknown;
@@ -5712,7 +5977,7 @@ async function postStreamingAgentMessage(input: {
     return false;
   }
   try {
-    const stream = input.sayStream({ buffer_size: 1024 });
+    const stream = input.sayStream({ buffer_size: SLACK_AGENT_STREAM_BUFFER_SIZE });
     await stream.append({ markdown_text: input.text });
     await stream.stop();
     logInfo(input.logger, "Delivered agent message to Slack with sayStream.", {

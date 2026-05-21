@@ -9,7 +9,12 @@ import {
 } from "../../src/agents/runner.js";
 import { AgentToolRegistry } from "../../src/agents/toolContracts.js";
 import type { JsonValue } from "../../src/domain/messageHistory.js";
-import type { LlmRequest, LlmResult, ModelInfo } from "../../src/providers/contracts.js";
+import type {
+  LlmRequest,
+  LlmResult,
+  LlmStreamEvent,
+  ModelInfo,
+} from "../../src/providers/contracts.js";
 import { ModelRegistry } from "../../src/providers/modelRegistry.js";
 
 const model: ModelInfo = {
@@ -78,6 +83,54 @@ describe("AgentRunner", () => {
     expect(router.requests[0]?.history.messages.map((message) => message.role)).not.toContain(
       "system",
     );
+  });
+
+  it("streams text deltas before returning the final runner result", async () => {
+    const router = new FakeProviderRouter({
+      content: "Hello streamed world",
+    });
+    router.streamEvents = [
+      { text: "Hello ", type: "text-delta" },
+      { text: "streamed world", type: "text-delta" },
+      {
+        result: {
+          content: "Hello streamed world",
+        },
+        type: "done",
+      },
+    ];
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const events = [];
+    for await (const event of runner.runStream({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "hello",
+      userId: "U1",
+    })) {
+      events.push(event);
+    }
+
+    expect(events).toEqual([
+      { text: "Hello ", type: "text-delta" },
+      { text: "streamed world", type: "text-delta" },
+      {
+        result: expect.objectContaining({
+          decision: { action: "respond", reason: "agent_invocation" },
+          message: "Hello streamed world",
+          model: { id: "google:gemini-2.5-flash", provider: "google" },
+        }),
+        type: "result",
+      },
+    ]);
+    expect(router.requests[0]?.history.messages.at(-1)).toMatchObject({
+      id: "1.0",
+      role: "user",
+    });
   });
 
   it("uses an explicit invocation model before the default model", async () => {
@@ -762,12 +815,20 @@ describe("AgentRunner", () => {
 class FakeProviderRouter {
   readonly registry = new ModelRegistry([model, explicitModel, textOnlyModel, thinkingModel]);
   readonly requests: LlmRequest[] = [];
+  streamEvents: LlmStreamEvent[] = [];
 
   constructor(private readonly result: LlmResult) {}
 
   async generate(request: LlmRequest): Promise<LlmResult> {
     this.requests.push(request);
     return this.result;
+  }
+
+  async *stream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
+    this.requests.push(request);
+    for (const event of this.streamEvents) {
+      yield event;
+    }
   }
 }
 
@@ -784,6 +845,15 @@ class SequencedProviderRouter {
       throw new Error("No fake result configured.");
     }
     return result;
+  }
+
+  async *stream(request: LlmRequest): AsyncIterable<LlmStreamEvent> {
+    this.requests.push(request);
+    const result = this.results.shift();
+    if (result === undefined) {
+      throw new Error("No fake result configured.");
+    }
+    yield { result, type: "done" };
   }
 }
 

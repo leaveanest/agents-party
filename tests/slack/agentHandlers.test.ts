@@ -3832,10 +3832,18 @@ describe("createAgentSlackHandlers", () => {
   it("streams app mention replies with Bolt sayStream when it is available", async () => {
     const runner = {
       async run() {
-        return {
-          decision: { action: "respond", reason: "test" },
-          message: "streamed **reply**",
-          toolResults: [],
+        throw new Error("run should not be called when live streaming is available.");
+      },
+      async *runStream() {
+        yield { text: "streamed ", type: "text-delta" };
+        yield { text: "**reply**", type: "text-delta" };
+        yield {
+          result: {
+            decision: { action: "respond", reason: "test" },
+            message: "streamed **reply**",
+            toolResults: [],
+          },
+          type: "result",
         };
       },
     };
@@ -3879,8 +3887,8 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(posts).toEqual([]);
-    expect(streamArgs).toEqual([{ buffer_size: 1024 }]);
-    expect(appends).toEqual([{ markdown_text: "streamed **reply**" }]);
+    expect(streamArgs).toEqual([{ buffer_size: 128 }]);
+    expect(appends).toEqual([{ markdown_text: "streamed " }, { markdown_text: "**reply**" }]);
     expect(stops).toEqual([undefined]);
   });
 
@@ -6268,6 +6276,82 @@ describe("createAgentSlackHandlers", () => {
         thread_ts: "1712345678.000100",
       }),
     ]);
+  });
+
+  it("streams queued app mention replies with WebClient chatStream", async () => {
+    const runner = {
+      async run() {
+        throw new Error("run should not be called when worker streaming is available.");
+      },
+      async *runStream() {
+        yield { text: "worker ", type: "text-delta" };
+        yield { text: "stream", type: "text-delta" };
+        yield {
+          result: {
+            decision: { action: "respond", reason: "test" },
+            message: "worker stream",
+            toolResults: [],
+          },
+          type: "result",
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const streamArgs: unknown[] = [];
+    const appends: unknown[] = [];
+    const stops: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000100",
+        teamId: "T1",
+        text: "hello",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          chatStream: (args: unknown) => {
+            streamArgs.push(args);
+            return {
+              append: async (payload: unknown) => {
+                appends.push(payload);
+                return null;
+              },
+              stop: async (payload?: unknown) => {
+                stops.push(payload);
+                return { ok: true };
+              },
+            };
+          },
+          conversations: { replies: async () => ({ messages: [] }) },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        runner: runner as never,
+      },
+    );
+
+    expect(posts).toEqual([]);
+    expect(streamArgs).toEqual([
+      {
+        buffer_size: 128,
+        channel: "C1",
+        recipient_team_id: "T1",
+        recipient_user_id: "U1",
+        thread_ts: "1712345678.000100",
+      },
+    ]);
+    expect(appends).toEqual([{ markdown_text: "worker " }, { markdown_text: "stream" }]);
+    expect(stops).toEqual([undefined]);
   });
 
   it("continues queued jobs when Slack assistant thread status fails", async () => {

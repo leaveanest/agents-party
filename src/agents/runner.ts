@@ -12,6 +12,7 @@ import type {
   LlmRequest,
   LlmResponseFormat,
   LlmResult,
+  LlmToolCall,
   ModelInfo,
 } from "../providers/contracts.js";
 import type { ProviderCredentialResolver } from "../providers/credentials.js";
@@ -54,6 +55,16 @@ export type AgentRunnerStructuredResult = {
   structuredOutput: JsonValue;
 };
 
+export type AgentRunnerStreamEvent =
+  | {
+      text: string;
+      type: "text-delta";
+    }
+  | {
+      result: AgentRunnerResult;
+      type: "result";
+    };
+
 export type AgentRunnerModelTrace = {
   id: string;
   provider?: ModelInfo["provider"];
@@ -77,7 +88,8 @@ export type AgentRunnerOptions = {
   imageGenerationModelId?: string;
   logger?: unknown;
   maxToolRounds?: number;
-  providerRouter: Pick<ProviderRouter, "generate" | "registry">;
+  providerRouter: Pick<ProviderRouter, "generate" | "registry"> &
+    Partial<Pick<ProviderRouter, "stream">>;
   systemPrompt?: string;
   textToSpeechModelId?: string;
   aiSdkToolSetFactory?: (
@@ -158,6 +170,30 @@ export class AgentRunner {
     }
   }
 
+  async *runStream(invocationInput: unknown): AsyncIterable<AgentRunnerStreamEvent> {
+    const invocation = slackAgentInvocationSchema.parse(invocationInput);
+    const decision = selectAgentAction();
+    const model = this.resolveModel(invocation.modelId);
+    try {
+      const agentStream = this.runAgentStream(invocation, model);
+      let next = await agentStream.next();
+      while (!next.done) {
+        yield next.value;
+        next = await agentStream.next();
+      }
+      const { result, toolResults } = next.value;
+      yield {
+        result: normalizeRunnerResult(decision, model, result, toolResults),
+        type: "result",
+      };
+    } catch (error) {
+      if (error instanceof AgentRunnerExecutionError) {
+        throw error;
+      }
+      throw new AgentRunnerExecutionError(modelTrace(model), error);
+    }
+  }
+
   private async runAgent(
     invocation: SlackAgentInvocation,
   ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
@@ -212,6 +248,94 @@ export class AgentRunner {
         throw error;
       }
       throw new AgentRunnerExecutionError(modelTrace(model), error);
+    } finally {
+      await closeAiSdkToolSetHandles(aiSdkToolSetHandles);
+    }
+  }
+
+  private async *runAgentStream(
+    invocation: SlackAgentInvocation,
+    model: ModelInfo,
+  ): AsyncGenerator<
+    Extract<AgentRunnerStreamEvent, { type: "text-delta" }>,
+    { result: LlmResult; toolResults: AgentToolResult[] },
+    void
+  > {
+    if (this.options.providerRouter.stream === undefined) {
+      throw new Error("The configured provider router does not support streaming.");
+    }
+
+    const aiSdkToolSetHandles = await this.resolveAiSdkToolSetHandles(invocation, model);
+    const aiSdkTools = mergeAiSdkToolSets(aiSdkToolSetHandles.map((handle) => handle.tools));
+    const toolRegistry =
+      this.options.toolRegistryFactory?.(invocation, model) ?? this.options.toolRegistry;
+    const toolResults: AgentToolResult[] = [];
+    try {
+      let history = buildAgentHistory({
+        invocation,
+        toolResults,
+      });
+      const requestBase: Omit<LlmRequest, "history"> = {
+        context: {
+          workspaceId: invocation.teamId,
+        },
+        metadata: {
+          slack_channel_id: invocation.channelId,
+          slack_team_id: invocation.teamId,
+          slack_user_id: invocation.userId,
+        },
+        model,
+        aiSdkTools,
+        reasoningEffort: normalizeReasoningEffort(invocation.reasoningEffort),
+        system: this.systemPrompt(),
+        tools: toolRegistry?.definitions(),
+      };
+      const maxToolRounds = this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
+      for (let round = 0; round <= maxToolRounds; round += 1) {
+        const roundToolCalls: LlmToolCall[] = [];
+        let result: LlmResult | undefined;
+        for await (const event of this.options.providerRouter.stream({
+          ...requestBase,
+          history,
+        })) {
+          switch (event.type) {
+            case "text-delta":
+              yield event;
+              break;
+            case "tool-call":
+              roundToolCalls.push(event.toolCall);
+              break;
+            case "done":
+              result = event.result;
+              break;
+            case "error":
+              throw event.error;
+            case "usage":
+              break;
+          }
+        }
+        if (result === undefined) {
+          throw new Error("Provider stream ended without a final result.");
+        }
+        const toolCalls = mergeStreamToolCalls(roundToolCalls, result.toolCalls);
+        const roundResult = { ...result, toolCalls };
+        if (toolCalls.length === 0) {
+          return { result: roundResult, toolResults };
+        }
+        if (toolRegistry === undefined) {
+          throw new Error("Agent returned tool calls, but no tool registry is configured.");
+        }
+        if (round === maxToolRounds) {
+          throw new Error("Agent exceeded the configured tool-call round limit.");
+        }
+        const roundToolResults = await toolRegistry.executeAll(toolCalls);
+        toolResults.push(...roundToolResults);
+        history = buildAgentHistory({
+          invocation,
+          toolResults,
+        });
+      }
+      throw new Error("Agent tool-call loop ended unexpectedly.");
     } finally {
       await closeAiSdkToolSetHandles(aiSdkToolSetHandles);
     }
@@ -619,6 +743,17 @@ function generatedMediaToolOutput(toolResults: AgentToolResult[]): JsonValue | u
     }
   }
   return undefined;
+}
+
+function mergeStreamToolCalls(
+  streamedToolCalls: readonly LlmToolCall[],
+  finalToolCalls: readonly LlmToolCall[] | undefined,
+): LlmToolCall[] {
+  const merged = new Map<string, LlmToolCall>();
+  for (const toolCall of [...streamedToolCalls, ...(finalToolCalls ?? [])]) {
+    merged.set(toolCall.toolCallId, toolCall);
+  }
+  return [...merged.values()];
 }
 
 function isJsonObject(value: JsonValue | undefined): value is Record<string, JsonValue> {
