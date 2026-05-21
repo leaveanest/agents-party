@@ -1,3 +1,5 @@
+import type { ToolSet } from "ai";
+
 import type { AppSettings } from "../config.js";
 import type {
   ConversationHistory,
@@ -33,7 +35,7 @@ import {
   type SalesforcePdfToolOptions,
 } from "./salesforcePdf/index.js";
 import { createSpeechGenerationAgentTools } from "./speechGeneration/index.js";
-import { createSlackMcpAgentTools, type SlackMcpTokenResolver } from "./slackMcp/index.js";
+import { createSlackMcpToolSet, type SlackMcpTokenResolver } from "./slackMcp/index.js";
 import { createSoracomAgentTools } from "./soracom/index.js";
 import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 
@@ -76,11 +78,24 @@ export type AgentRunnerOptions = {
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
   systemPrompt?: string;
   textToSpeechModelId?: string;
+  aiSdkToolSetFactory?: (
+    invocation: SlackAgentInvocation,
+    model: ModelInfo,
+  ) =>
+    | AgentRunnerAiSdkToolSetHandle
+    | readonly AgentRunnerAiSdkToolSetHandle[]
+    | undefined
+    | Promise<AgentRunnerAiSdkToolSetHandle | readonly AgentRunnerAiSdkToolSetHandle[] | undefined>;
   toolRegistry?: AgentToolRegistry;
   toolRegistryFactory?: (
     invocation: SlackAgentInvocation,
     model: ModelInfo,
   ) => AgentToolRegistry | undefined;
+};
+
+export type AgentRunnerAiSdkToolSetHandle = {
+  close(): Promise<void>;
+  tools: ToolSet;
 };
 
 const DEFAULT_SYSTEM_PROMPT =
@@ -144,6 +159,10 @@ export class AgentRunner {
     invocation: SlackAgentInvocation,
   ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
     const model = this.resolveModel(invocation.modelId);
+    const aiSdkToolSetHandles = normalizeAiSdkToolSetHandles(
+      await this.options.aiSdkToolSetFactory?.(invocation, model),
+    );
+    const aiSdkTools = mergeAiSdkToolSets(aiSdkToolSetHandles.map((handle) => handle.tools));
     const toolRegistry =
       this.options.toolRegistryFactory?.(invocation, model) ?? this.options.toolRegistry;
     const toolResults: AgentToolResult[] = [];
@@ -162,6 +181,7 @@ export class AgentRunner {
           slack_user_id: invocation.userId,
         },
         model,
+        aiSdkTools,
         reasoningEffort: normalizeReasoningEffort(invocation.reasoningEffort),
         system: this.systemPrompt(),
         tools: toolRegistry?.definitions(),
@@ -191,6 +211,8 @@ export class AgentRunner {
         throw error;
       }
       throw new AgentRunnerExecutionError(modelTrace(model), error);
+    } finally {
+      await closeAiSdkToolSetHandles(aiSdkToolSetHandles);
     }
   }
 
@@ -229,6 +251,25 @@ export function createDefaultAgentRunner(
     imageGenerationModelId: settings.imageGenerationModelId,
     providerRouter,
     textToSpeechModelId: settings.textToSpeechModelId,
+    aiSdkToolSetFactory: async (invocation, model) => {
+      if (
+        !model.capabilities.includes("tool_calling") ||
+        options.slackMcpTokenResolver === undefined
+      ) {
+        return [];
+      }
+      const slackMcpToolSet = await createSlackMcpToolSet({
+        context: {
+          enterpriseId: invocation.enterpriseId,
+          isEnterpriseInstall: invocation.isEnterpriseInstall,
+          teamId: invocation.teamId,
+          userId: invocation.userId,
+          viewerContextChannelIds: invocation.viewerContextChannelIds,
+        },
+        tokenResolver: options.slackMcpTokenResolver,
+      });
+      return slackMcpToolSet === undefined ? [] : [slackMcpToolSet];
+    },
     toolRegistryFactory: (invocation, model) => {
       if (!model.capabilities.includes("tool_calling")) {
         return new AgentToolRegistry();
@@ -272,22 +313,32 @@ export function createDefaultAgentRunner(
               },
               credentialResolver: options.credentialResolver,
             })),
-        ...(options.slackMcpTokenResolver === undefined
-          ? []
-          : createSlackMcpAgentTools({
-              context: {
-                enterpriseId: invocation.enterpriseId,
-                isEnterpriseInstall: invocation.isEnterpriseInstall,
-                teamId: invocation.teamId,
-                userId: invocation.userId,
-                viewerContextChannelIds: invocation.viewerContextChannelIds,
-              },
-              tokenResolver: options.slackMcpTokenResolver,
-            })),
       ];
       return new AgentToolRegistry(tools);
     },
   });
+}
+
+function normalizeAiSdkToolSetHandles(
+  handles: AgentRunnerAiSdkToolSetHandle | readonly AgentRunnerAiSdkToolSetHandle[] | undefined,
+): readonly AgentRunnerAiSdkToolSetHandle[] {
+  if (handles === undefined) {
+    return [];
+  }
+  return Array.isArray(handles) ? [...handles] : [handles as AgentRunnerAiSdkToolSetHandle];
+}
+
+function mergeAiSdkToolSets(toolSets: readonly ToolSet[]): ToolSet | undefined {
+  if (toolSets.length === 0) {
+    return undefined;
+  }
+  return Object.assign({}, ...toolSets) as ToolSet;
+}
+
+async function closeAiSdkToolSetHandles(
+  handles: readonly AgentRunnerAiSdkToolSetHandle[],
+): Promise<void> {
+  await Promise.all(handles.map((handle) => handle.close().catch(() => {})));
 }
 
 export function selectAgentAction(): AgentRouterDecision {

@@ -1,8 +1,8 @@
-import { z } from "zod";
+import { createMCPClient } from "@ai-sdk/mcp";
+import type { ToolSet } from "ai";
 
 import type { JsonValue } from "../../domain/messageHistory.js";
-import { SlackMcpClient, type SlackMcpCallToolOutput } from "../../integrations/slackMcp/client.js";
-import type { AgentToolDefinition } from "../toolContracts.js";
+import { DEFAULT_SLACK_MCP_SERVER_URL } from "../../integrations/slackMcp/client.js";
 
 export type SlackMcpTokenLookup = {
   enterpriseId?: string;
@@ -24,145 +24,98 @@ export type SlackMcpToolContext = SlackMcpTokenLookup & {
   viewerContextChannelIds: string[];
 };
 
-export type SlackMcpToolOptions = {
-  client?: Pick<SlackMcpClient, "callTool">;
+export type SlackMcpToolSetHandle = {
+  close(): Promise<void>;
+  tools: ToolSet;
+};
+
+export type SlackMcpToolSetClient = {
+  close(): Promise<void>;
+  tools(): Promise<ToolSet>;
+};
+
+export type SlackMcpToolSetOptions = {
+  clientFactory?: (input: { token: string }) => Promise<SlackMcpToolSetClient>;
   context: SlackMcpToolContext;
+  serverUrl?: string;
   tokenResolver: SlackMcpTokenResolver;
 };
 
-const searchMessagesInputSchema = z
-  .object({
-    cursor: z.string().trim().optional(),
-    query: z.string().trim().min(1),
-  })
-  .passthrough();
+const allowedSlackMcpToolNames = [
+  "slack_search_public",
+  "slack_read_channel",
+  "slack_read_thread",
+  "slack_read_user_profile",
+] as const;
 
-const readChannelInputSchema = z
-  .object({
-    channel_id: z.string().trim().min(1),
-    cursor: z.string().trim().optional(),
-    limit: z.number().int().min(1).max(100).optional(),
-    message_ts: z.string().trim().optional(),
-  })
-  .passthrough();
-
-const readThreadInputSchema = z
-  .object({
-    channel_id: z.string().trim().min(1),
-    cursor: z.string().trim().optional(),
-    thread_ts: z.string().trim().min(1),
-  })
-  .passthrough();
-
-const readUserProfileInputSchema = z
-  .object({
-    user_id: z.string().trim().min(1),
-  })
-  .passthrough();
-
-const slackMcpToolOutputSchema = z
-  .object({
-    code: z.string().optional(),
-    content: z.array(z.unknown()).optional(),
-    isError: z.boolean().optional(),
-    message: z.string(),
-    ok: z.boolean(),
-    reconnectRequired: z.boolean().optional(),
-    structuredContent: z.unknown().optional(),
-    toolName: z.string(),
-  })
-  .passthrough();
-
-type SlackMcpToolSpec = {
-  description: string;
-  name: string;
-  schema: z.ZodType<JsonValue>;
-};
-
-const slackMcpToolSpecs: SlackMcpToolSpec[] = [
-  {
-    description:
-      "Search public Slack messages visible to the authenticated user. Use Slack search syntax such as from:<@USERID>, in:#channel, before:, after:, or on:.",
-    name: "slack_search_public",
-    schema: searchMessagesInputSchema as z.ZodType<JsonValue>,
-  },
-  {
-    description:
-      "Read messages from the Slack channel where this agent invocation is running. Use channel_id and optionally message_ts to fetch nearby context.",
-    name: "slack_read_channel",
-    schema: readChannelInputSchema as z.ZodType<JsonValue>,
-  },
-  {
-    description:
-      "Read a Slack thread in the channel where this agent invocation is running. Use this when a current-channel message has a thread_ts or replies.",
-    name: "slack_read_thread",
-    schema: readThreadInputSchema as z.ZodType<JsonValue>,
-  },
-  {
-    description:
-      "Read a Slack user profile visible to the authenticated user. Use this to resolve user details when IDs are not enough.",
-    name: "slack_read_user_profile",
-    schema: readUserProfileInputSchema as z.ZodType<JsonValue>,
-  },
-];
-
-export function createSlackMcpAgentTools(options: SlackMcpToolOptions): AgentToolDefinition[] {
-  return slackMcpToolSpecs.map((spec) => ({
-    description: spec.description,
-    execute: async (input) =>
-      executeSlackMcpTool(options, spec.name, input as Record<string, unknown>),
-    name: spec.name,
-    outputSchema: slackMcpToolOutputSchema as z.ZodType<JsonValue>,
-    parameters: z.toJSONSchema(spec.schema) as JsonValue,
-    schema: spec.schema,
-  }));
-}
-
-async function executeSlackMcpTool(
-  options: SlackMcpToolOptions,
-  toolName: string,
-  input: Record<string, unknown>,
-): Promise<JsonValue> {
-  const accessFailure = validateSlackMcpToolAccess(options.context, toolName, input);
-  if (accessFailure !== undefined) {
-    return accessFailure;
-  }
-
+export async function createSlackMcpToolSet(
+  options: SlackMcpToolSetOptions,
+): Promise<SlackMcpToolSetHandle | undefined> {
   const resolution = await options.tokenResolver.resolve(options.context);
   if (resolution === undefined || resolution.token.trim().length === 0) {
-    return failure(
-      toolName,
-      "slack_mcp_user_token_missing",
-      "Slack user authorization is required before Slack MCP tools can access this workspace.",
-      true,
-    );
+    return undefined;
   }
 
+  const client = await (options.clientFactory ?? defaultSlackMcpClientFactory(options))({
+    token: resolution.token,
+  });
   try {
-    const result = await (options.client ?? new SlackMcpClient()).callTool({
-      arguments: normalizeSlackMcpToolInput(input),
-      name: toolName,
-      token: resolution.token,
-    });
-    return success(toolName, result);
+    const tools = filterAndWrapSlackMcpTools(await client.tools(), options.context);
+    return {
+      close: () => client.close(),
+      tools,
+    };
   } catch (error) {
-    return failure(
-      toolName,
-      "slack_mcp_call_failed",
-      `Slack MCP tool call failed: ${errorMessage(error)}`,
-      true,
-    );
+    await client.close().catch(() => {});
+    throw error;
   }
 }
 
-function normalizeSlackMcpToolInput(input: Record<string, unknown>): Record<string, unknown> {
-  const normalized = { ...input };
-  for (const key of ["cursor", "message_ts"]) {
-    if (typeof normalized[key] === "string" && normalized[key].trim().length === 0) {
-      delete normalized[key];
+function defaultSlackMcpClientFactory(options: SlackMcpToolSetOptions) {
+  return async (input: { token: string }): Promise<SlackMcpToolSetClient> => {
+    const client = await createMCPClient({
+      clientName: "agents-party-slack-mcp",
+      transport: {
+        headers: {
+          Authorization: `Bearer ${input.token}`,
+        },
+        redirect: "error",
+        type: "http",
+        url: options.serverUrl ?? DEFAULT_SLACK_MCP_SERVER_URL,
+      },
+      version: "0.1.0",
+    });
+    return {
+      close: () => client.close(),
+      tools: async () => client.tools() as Promise<ToolSet>,
+    };
+  };
+}
+
+function filterAndWrapSlackMcpTools(tools: ToolSet, context: SlackMcpToolContext): ToolSet {
+  const filtered: ToolSet = {};
+  for (const toolName of allowedSlackMcpToolNames) {
+    const mcpTool = tools[toolName];
+    const execute = mcpTool?.execute;
+    if (mcpTool === undefined || execute === undefined) {
+      continue;
     }
+    filtered[toolName] = {
+      ...mcpTool,
+      async execute(input, executionOptions) {
+        const accessFailure = validateSlackMcpToolAccess(
+          context,
+          toolName,
+          input as Record<string, unknown>,
+        );
+        if (accessFailure !== undefined) {
+          return accessFailure;
+        }
+        return execute(input, executionOptions);
+      },
+    };
   }
-  return normalized;
+  return filtered;
 }
 
 function validateSlackMcpToolAccess(
@@ -185,23 +138,6 @@ function validateSlackMcpToolAccess(
   );
 }
 
-function success(toolName: string, result: SlackMcpCallToolOutput): JsonValue {
-  const output: Record<string, JsonValue> = {
-    content: result.content,
-    message:
-      result.isError === true ? "Slack MCP tool returned an error." : "Slack MCP tool completed.",
-    ok: result.isError !== true,
-    toolName,
-  };
-  if (result.isError !== undefined) {
-    output.isError = result.isError;
-  }
-  if (result.structuredContent !== undefined) {
-    output.structuredContent = result.structuredContent;
-  }
-  return output;
-}
-
 function failure(
   toolName: string,
   code: string,
@@ -215,8 +151,4 @@ function failure(
     reconnectRequired,
     toolName,
   };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

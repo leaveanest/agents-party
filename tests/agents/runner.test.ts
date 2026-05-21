@@ -1,3 +1,4 @@
+import { jsonSchema, type ToolSet } from "ai";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -524,6 +525,42 @@ describe("AgentRunner", () => {
     });
 
     expect(router.requests[0]?.tools).toEqual([]);
+  });
+
+  it("passes AI SDK toolsets directly to the provider request and closes them", async () => {
+    const router = new FakeProviderRouter({
+      content: "used mcp",
+    });
+    const closed: string[] = [];
+    const mcpTools: ToolSet = {
+      slack_search_public: {
+        description: "Search Slack through MCP.",
+        execute: async () => ({ content: [{ text: "result", type: "text" }] }),
+        inputSchema: jsonSchema({ type: "object" }),
+        type: "dynamic",
+      } as ToolSet[string],
+    };
+    const runner = new AgentRunner({
+      aiSdkToolSetFactory: () => ({
+        async close() {
+          closed.push("closed");
+        },
+        tools: mcpTools,
+      }),
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "search",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.aiSdkTools?.slack_search_public).toBe(mcpTools.slack_search_public);
+    expect(closed).toEqual(["closed"]);
   });
 
   it("rejects invalid tool output", async () => {

@@ -1,5 +1,6 @@
 import type {
   AllMiddlewareArgs,
+  SayStreamFn,
   SlackActionMiddlewareArgs,
   SlackEventMiddlewareArgs,
   SlackViewMiddlewareArgs,
@@ -3822,7 +3823,7 @@ async function handleSalesforcePdfWorkflowModalSubmission(
 }
 
 async function handleMention(
-  { body, client, context, event, logger }: SlackEventArgs<"app_mention">,
+  { body, client, context, event, logger, sayStream }: SlackEventArgs<"app_mention">,
   runner: AgentRunner,
   options: AgentSlackHandlerOptions,
 ): Promise<void> {
@@ -4051,13 +4052,14 @@ async function handleMention(
     client,
     logger,
     result: runnerResult,
+    sayStream,
     text,
     threadTs,
   });
 }
 
 async function handleMessage(
-  { body, client, context, event, logger }: SlackEventArgs<"message">,
+  { body, client, context, event, logger, sayStream }: SlackEventArgs<"message">,
   runner: AgentRunner,
   options: AgentSlackHandlerOptions,
 ): Promise<void> {
@@ -4275,6 +4277,7 @@ async function handleMessage(
     client,
     logger,
     result: runnerResult,
+    sayStream,
     text,
     threadTs,
   });
@@ -5645,6 +5648,7 @@ export async function postAgentResult(input: {
   client: SlackAgentClient;
   logger: unknown;
   result: AgentRunnerResult | undefined;
+  sayStream?: SayStreamFn;
   text: string;
   threadTs: string;
 }): Promise<void> {
@@ -5667,6 +5671,20 @@ export async function postAgentResult(input: {
   }
 
   const suffix = media?.uri ?? media?.operationName;
+  if (
+    suffix === undefined &&
+    input.sayStream !== undefined &&
+    (await postStreamingAgentMessage({
+      channel: input.channel,
+      logger: input.logger,
+      sayStream: input.sayStream,
+      text: input.text,
+      threadTs: input.threadTs,
+    }))
+  ) {
+    return;
+  }
+
   await postFormattedAgentMessage({
     channel: input.channel,
     client: input.client,
@@ -5680,6 +5698,36 @@ export async function postAgentResult(input: {
       mediaKind: media?.kind,
       threadTs: input.threadTs,
     });
+  }
+}
+
+async function postStreamingAgentMessage(input: {
+  channel: string;
+  logger: unknown;
+  sayStream: SayStreamFn;
+  text: string;
+  threadTs: string;
+}): Promise<boolean> {
+  if (input.text.length === 0) {
+    return false;
+  }
+  try {
+    const stream = input.sayStream({ buffer_size: 1024 });
+    await stream.append({ markdown_text: input.text });
+    await stream.stop();
+    logInfo(input.logger, "Delivered agent message to Slack with sayStream.", {
+      channelId: input.channel,
+      delivery: "stream",
+      threadTs: input.threadTs,
+    });
+    return true;
+  } catch (error) {
+    logWarn(input.logger, "Failed to deliver Slack agent message with sayStream.", {
+      channelId: input.channel,
+      error,
+      threadTs: input.threadTs,
+    });
+    return false;
   }
 }
 

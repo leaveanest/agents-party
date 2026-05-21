@@ -1,106 +1,67 @@
+import { jsonSchema, type ToolSet } from "ai";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  createSlackMcpAgentTools,
+  createSlackMcpToolSet,
   type SlackMcpTokenResolver,
 } from "../../../src/agents/slackMcp/index.js";
-import { AgentToolRegistry } from "../../../src/agents/toolContracts.js";
 
-describe("createSlackMcpAgentTools", () => {
-  it("exposes a focused set of Slack MCP read/search tools", () => {
-    const tools = createSlackMcpAgentTools({
+describe("createSlackMcpToolSet", () => {
+  it("exposes a focused set of Slack MCP tools from the MCP server toolset", async () => {
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        extra_slack_tool: fakeTool(),
+        slack_read_channel: fakeTool(),
+        slack_read_thread: fakeTool(),
+        slack_read_user_profile: fakeTool(),
+        slack_search_public: fakeTool(),
+      }),
       context: context(),
       tokenResolver: tokenResolver("xoxp-token"),
     });
 
-    expect(tools.map((tool) => tool.name)).toEqual([
+    expect(Object.keys(handle?.tools ?? {})).toEqual([
       "slack_search_public",
       "slack_read_channel",
       "slack_read_thread",
       "slack_read_user_profile",
     ]);
-    expect(tools[0]?.parameters).toMatchObject({
-      properties: {
-        query: { type: "string" },
-      },
-      required: ["query"],
-      type: "object",
-    });
   });
 
-  it("uses the invocation-scoped installation user token when executing a tool", async () => {
-    const calls: unknown[] = [];
-    const [tool] = createSlackMcpAgentTools({
-      client: {
-        async callTool(input) {
-          calls.push(input);
-          return {
-            content: [{ text: "search result", type: "text" }],
-          };
-        },
+  it("uses the invocation-scoped installation user token when creating the MCP client", async () => {
+    const createdWithTokens: string[] = [];
+    const toolCalls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: async ({ token }) => {
+        createdWithTokens.push(token);
+        return fakeClient({
+          slack_search_public: fakeTool(async (input) => {
+            toolCalls.push(input);
+            return {
+              content: [{ text: "search result", type: "text" }],
+            };
+          }),
+        });
       },
       context: context(),
       tokenResolver: tokenResolver("xoxp-token"),
     });
 
-    await expect(tool?.execute({ query: "from:<@U1> on:2026-05-19" })).resolves.toMatchObject({
-      ok: true,
-      toolName: "slack_search_public",
-    });
-    expect(calls).toEqual([
-      {
-        arguments: { query: "from:<@U1> on:2026-05-19" },
-        name: "slack_search_public",
-        token: "xoxp-token",
-      },
-    ]);
-  });
-
-  it("treats a blank optional cursor as omitted", async () => {
-    const calls: unknown[] = [];
-    const registry = new AgentToolRegistry(
-      createSlackMcpAgentTools({
-        client: {
-          async callTool(input) {
-            calls.push(input);
-            return {
-              content: [{ text: "search result", type: "text" }],
-            };
-          },
-        },
-        context: context(),
-        tokenResolver: tokenResolver("xoxp-token"),
-      }),
-    );
-
     await expect(
-      registry.execute({
-        input: { cursor: "", query: "from:<@U1> on:2026-05-19" },
-        toolCallId: "call-1",
-        toolName: "slack_search_public",
+      executeTool(handle?.tools, "slack_search_public", {
+        query: "from:<@U1> on:2026-05-19",
       }),
-    ).resolves.toMatchObject({
-      output: {
-        ok: true,
-        toolName: "slack_search_public",
-      },
-      toolName: "slack_search_public",
+    ).resolves.toEqual({
+      content: [{ text: "search result", type: "text" }],
     });
-    expect(calls).toEqual([
-      {
-        arguments: { query: "from:<@U1> on:2026-05-19" },
-        name: "slack_search_public",
-        token: "xoxp-token",
-      },
-    ]);
+    expect(createdWithTokens).toEqual(["xoxp-token"]);
+    expect(toolCalls).toEqual([{ query: "from:<@U1> on:2026-05-19" }]);
   });
 
-  it("fails closed when the installing user has no stored token", async () => {
-    const [tool] = createSlackMcpAgentTools({
-      client: {
-        async callTool() {
-          throw new Error("should not call MCP without a user token");
-        },
+  it("does not expose Slack MCP tools when the installing user has no stored token", async () => {
+    const handle = await createSlackMcpToolSet({
+      clientFactory: async () => {
+        throw new Error("should not create an MCP client without a user token");
       },
       context: context(),
       tokenResolver: {
@@ -110,59 +71,51 @@ describe("createSlackMcpAgentTools", () => {
       },
     });
 
-    await expect(tool?.execute({ query: "hello" })).resolves.toMatchObject({
-      code: "slack_mcp_user_token_missing",
-      ok: false,
-      reconnectRequired: true,
-    });
+    expect(handle).toBeUndefined();
   });
 
-  it("rejects channel reads outside the invocation channel allowlist", async () => {
-    const tools = createSlackMcpAgentTools({
-      client: {
-        async callTool() {
-          throw new Error("should not call MCP for a disallowed channel");
-        },
-      },
+  it("rejects channel reads outside the invocation channel allowlist before MCP execution", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_read_channel: fakeTool(async (input) => {
+          calls.push(input);
+          return { content: [{ text: "channel", type: "text" }] };
+        }),
+      }),
       context: context(),
       tokenResolver: tokenResolver("xoxp-token"),
     });
-    const tool = tools.find((candidate) => candidate.name === "slack_read_channel");
 
-    await expect(tool?.execute({ channel_id: "C2" })).resolves.toMatchObject({
+    await expect(
+      executeTool(handle?.tools, "slack_read_channel", { channel_id: "C2" }),
+    ).resolves.toMatchObject({
       code: "slack_mcp_channel_not_allowed",
       ok: false,
       reconnectRequired: false,
     });
+    expect(calls).toEqual([]);
   });
 
   it("allows thread reads in the invocation channel", async () => {
     const calls: unknown[] = [];
-    const tools = createSlackMcpAgentTools({
-      client: {
-        async callTool(input) {
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_read_thread: fakeTool(async (input) => {
           calls.push(input);
-          return {
-            content: [{ text: "thread", type: "text" }],
-          };
-        },
-      },
+          return { content: [{ text: "thread", type: "text" }] };
+        }),
+      }),
       context: context(),
       tokenResolver: tokenResolver("xoxp-token"),
     });
-    const tool = tools.find((candidate) => candidate.name === "slack_read_thread");
 
-    await expect(tool?.execute({ channel_id: "C1", thread_ts: "1.2" })).resolves.toMatchObject({
-      ok: true,
-      toolName: "slack_read_thread",
+    await expect(
+      executeTool(handle?.tools, "slack_read_thread", { channel_id: "C1", thread_ts: "1.2" }),
+    ).resolves.toEqual({
+      content: [{ text: "thread", type: "text" }],
     });
-    expect(calls).toEqual([
-      {
-        arguments: { channel_id: "C1", thread_ts: "1.2" },
-        name: "slack_read_thread",
-        token: "xoxp-token",
-      },
-    ]);
+    expect(calls).toEqual([{ channel_id: "C1", thread_ts: "1.2" }]);
   });
 });
 
@@ -187,4 +140,36 @@ function tokenResolver(token: string): SlackMcpTokenResolver {
       return { token };
     },
   };
+}
+
+function fakeClientFactory(tools: ToolSet) {
+  return async () => fakeClient(tools);
+}
+
+function fakeClient(tools: ToolSet) {
+  return {
+    async close() {},
+    async tools() {
+      return tools;
+    },
+  };
+}
+
+function fakeTool(
+  execute: (input: unknown) => unknown | Promise<unknown> = async () => ({
+    content: [{ text: "ok", type: "text" }],
+  }),
+) {
+  return {
+    description: "Fake MCP tool.",
+    execute,
+    inputSchema: jsonSchema({ type: "object" }),
+    type: "dynamic" as const,
+  } as ToolSet[string];
+}
+
+async function executeTool(tools: ToolSet | undefined, name: string, input: unknown) {
+  const execute = tools?.[name]?.execute;
+  expect(execute).toBeDefined();
+  return execute?.(input as never, { messages: [], toolCallId: "call-1" });
 }

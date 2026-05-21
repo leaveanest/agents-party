@@ -3829,6 +3829,61 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("streams app mention replies with Bolt sayStream when it is available", async () => {
+    const runner = {
+      async run() {
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "streamed **reply**",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const streamArgs: unknown[] = [];
+    const appends: unknown[] = [];
+    const stops: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> hello",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+      sayStream(args?: unknown) {
+        streamArgs.push(args);
+        return {
+          append: async (payload: unknown) => {
+            appends.push(payload);
+            return null;
+          },
+          stop: async (payload?: unknown) => {
+            stops.push(payload);
+            return { ok: true };
+          },
+        };
+      },
+    } as never);
+
+    expect(posts).toEqual([]);
+    expect(streamArgs).toEqual([{ buffer_size: 1024 }]);
+    expect(appends).toEqual([{ markdown_text: "streamed **reply**" }]);
+    expect(stops).toEqual([undefined]);
+  });
+
   it("queues app mentions instead of running the AgentRunner when a job queue is configured", async () => {
     let runs = 0;
     const runner = {
@@ -4794,6 +4849,48 @@ describe("createAgentSlackHandlers", () => {
         thread_ts: "1712345678.000100",
         unfurl_links: false,
         unfurl_media: false,
+      }),
+    ]);
+  });
+
+  it("falls back to postMessage when sayStream delivery fails", async () => {
+    const posts: unknown[] = [];
+    const warnings: unknown[] = [];
+
+    await postAgentResult({
+      channel: "C1",
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return { ok: true };
+          },
+        },
+      } as never,
+      logger: {
+        warn(_message: string, metadata: unknown) {
+          warnings.push(metadata);
+        },
+      },
+      result: undefined,
+      sayStream: (() => {
+        return {
+          append: async () => {
+            throw new Error("stream failed");
+          },
+          stop: async () => ({ ok: true }),
+        };
+      }) as never,
+      text: "fallback reply",
+      threadTs: "1712345678.000100",
+    });
+
+    expect(warnings).toHaveLength(1);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "fallback reply",
+        thread_ts: "1712345678.000100",
       }),
     ]);
   });
