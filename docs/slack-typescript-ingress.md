@@ -24,8 +24,8 @@ Slack OAuth install routes additionally require:
 - `SLACK_STATE_SECRET`
 - `SLACK_SCOPES`
 
-`SLACK_USER_SCOPES` is comma-separated. Slack MCP tools use these invoking-user token scopes when
-MCP access is enabled.
+`SLACK_USER_SCOPES` is comma-separated. Slack Real-time Search and Slack MCP tools use these
+invoking-user token scopes when search or MCP access is enabled.
 
 Slack-visible fixed copy is localized with the following fallback order:
 
@@ -49,10 +49,11 @@ Audio attachment understanding requires the bot `files:read` scope in addition t
 
 Image attachment understanding uses the same Slack file access boundary. Supported image files (`PNG`, `JPEG`, and `WebP`) are downloaded from Slack private file URLs with the bot token, resized when needed to fit the provider byte target, passed to `AgentRunner` as transient reference image bytes, and kept out of Redis job payloads and persistent storage. Queued jobs re-read the Slack thread and re-download image bytes in the worker. Unsupported image formats and images above the download hard cap are rejected with an ephemeral Slack message to the submitting user.
 
-Slack MCP tools resolve the invoking user's Slack installation token at invocation time and fail
-closed when that user has not installed with user scopes. Do not put MCP OAuth tokens in Redis jobs
-or process-wide environment variables for multi-workspace production traffic; reinstall the app with
-the manifest user scopes so `installation.user.token` contains the needed read/search grants.
+Slack Real-time Search and Slack MCP tools resolve the invoking user's Slack installation token at
+invocation time and fail closed when that user has not installed with user scopes. Do not put Slack
+OAuth tokens in Redis jobs or process-wide environment variables for multi-workspace production
+traffic; reinstall the app with the manifest user scopes so `installation.user.token` contains the
+needed read/search grants.
 
 Transcription uses `TRANSCRIPTION_MODEL` (default `google:speech-to-text-latest-long`), `TRANSCRIPTION_LANGUAGE_CODE` (default `ja-JP`), and `TRANSCRIPTION_ALTERNATIVE_LANGUAGE_CODES` (default `en-US`). Provider credentials are resolved from `workspace_credentials`; Google Speech-to-Text uses `provider_kind=google` and `credential_name=service_account_json`, with the encrypted secret containing the service account JSON. AI SDK transcription providers use their provider kind (`openai`, `groq`, or `azure_openai`) with `credential_name=api_key`.
 

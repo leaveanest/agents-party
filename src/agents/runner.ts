@@ -37,6 +37,7 @@ import {
 } from "./salesforcePdf/index.js";
 import { createSpeechGenerationAgentTools } from "./speechGeneration/index.js";
 import { createSlackMcpToolSet, type SlackMcpTokenResolver } from "./slackMcp/index.js";
+import { createSlackRealTimeSearchAgentTools } from "./slackSearch/index.js";
 import { createSoracomAgentTools } from "./soracom/index.js";
 import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
 
@@ -113,7 +114,7 @@ export type AgentRunnerAiSdkToolSetHandle = {
 };
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.";
+  "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions. When Slack workspace search is needed and the slack_real_time_search tool is available, use it as the first choice; use slack_search_public only as a fallback. Use slack_read_channel or slack_read_thread when you only need the current channel or thread.";
 const DEFAULT_MAX_TOOL_ROUNDS = 3;
 const DEFAULT_AI_SDK_TOOLSET_PREPARATION_TIMEOUT_MS = 3000;
 
@@ -459,6 +460,18 @@ export function createDefaultAgentRunner(
         return new AgentToolRegistry();
       }
       const tools = [
+        ...(options.slackMcpTokenResolver === undefined
+          ? []
+          : createSlackRealTimeSearchAgentTools({
+              context: {
+                channelId: invocation.channelId,
+                enterpriseId: invocation.enterpriseId,
+                isEnterpriseInstall: invocation.isEnterpriseInstall,
+                teamId: invocation.teamId,
+                userId: invocation.userId,
+              },
+              tokenResolver: options.slackMcpTokenResolver,
+            })),
         ...createMediaGenerationAgentTools({
           context: {
             channelId: invocation.channelId,
