@@ -1,3 +1,4 @@
+import { ErrorCode } from "@slack/web-api";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createSlackRealTimeSearchGateway } from "../../src/slack/realTimeSearch.js";
@@ -138,6 +139,25 @@ describe("createSlackRealTimeSearchGateway", () => {
 
     await expect(gateway.searchContext({ query: "launch" })).resolves.toMatchObject({
       errorCode: "feature_not_enabled",
+      ok: false,
+    });
+  });
+
+  it("preserves Slack platform errors thrown by WebClient.apiCall", async () => {
+    const gateway = createSlackRealTimeSearchGateway("xoxp-test", {
+      async apiCall() {
+        throw Object.assign(new Error("An API error occurred: missing_scope"), {
+          code: ErrorCode.PlatformError,
+          data: {
+            error: "missing_scope",
+            ok: false,
+          },
+        });
+      },
+    });
+
+    await expect(gateway.searchContext({ query: "launch" })).resolves.toMatchObject({
+      errorCode: "missing_scope",
       ok: false,
     });
   });

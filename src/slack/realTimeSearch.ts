@@ -1,4 +1,4 @@
-import { WebClient, type WebAPICallResult } from "@slack/web-api";
+import { ErrorCode, WebClient, type WebAPICallResult } from "@slack/web-api";
 
 import type { JsonValue } from "../domain/messageHistory.js";
 
@@ -112,12 +112,34 @@ export function createSlackRealTimeSearchGateway(
 ): SlackRealTimeSearchGateway {
   return {
     async info() {
-      return normalizeInfoResponse(await client.apiCall("assistant.search.info"));
+      try {
+        return normalizeInfoResponse(await client.apiCall("assistant.search.info"));
+      } catch (error) {
+        const errorCode = slackWebApiErrorCode(error);
+        if (errorCode !== undefined) {
+          return {
+            errorCode,
+            ok: false,
+          };
+        }
+        throw error;
+      }
     },
     async searchContext(input) {
-      return normalizeSearchContextResponse(
-        await client.apiCall("assistant.search.context", searchContextApiOptions(input)),
-      );
+      try {
+        return normalizeSearchContextResponse(
+          await client.apiCall("assistant.search.context", searchContextApiOptions(input)),
+        );
+      } catch (error) {
+        const errorCode = slackWebApiErrorCode(error);
+        if (errorCode !== undefined) {
+          return emptySearchContextResult({
+            errorCode,
+            ok: false,
+          });
+        }
+        throw error;
+      }
     },
   };
 }
@@ -317,6 +339,17 @@ function readNumber(value: unknown): number | undefined {
 
 function readBoolean(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function slackWebApiErrorCode(error: unknown): string | undefined {
+  const record = asRecord(error);
+  if (record.code === ErrorCode.PlatformError) {
+    return readString(asRecord(record.data).error);
+  }
+  if (record.code === ErrorCode.RateLimitedError) {
+    return "rate_limited";
+  }
+  return undefined;
 }
 
 function toJsonValue(value: unknown): JsonValue | undefined {
