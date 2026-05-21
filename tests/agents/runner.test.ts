@@ -72,9 +72,10 @@ describe("AgentRunner", () => {
       role: "user",
     });
     expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
-    expect(router.requests[0]?.system).toBe(
-      "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.",
+    expect(router.requests[0]?.system).toContain(
+      "You are the general Agents party assistant. Reply directly and concisely for Slack.",
     );
+    expect(router.requests[0]?.system).toContain("slack_real_time_search");
     expect(router.requests[0]?.history.messages.map((message) => message.role)).not.toContain(
       "system",
     );

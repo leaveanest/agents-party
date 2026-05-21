@@ -266,7 +266,7 @@ SLACK_CLIENT_ID=...
 SLACK_CLIENT_SECRET=...
 SLACK_STATE_SECRET=...
 SLACK_SCOPES=app_mentions:read,channels:history,chat:write,files:read,files:write,groups:history,im:history,mpim:history,reactions:read,users:read
-SLACK_USER_SCOPES=channels:history,groups:history,im:history,mpim:history,search:read.public,users:read,users:read.email
+SLACK_USER_SCOPES=channels:history,groups:history,im:history,mpim:history,search:read.files,search:read.im,search:read.mpim,search:read.private,search:read.public,search:read.users,users:read,users:read.email
 SLACK_EVENTS_PATH=/slack/events
 SLACK_INSTALL_PATH=/slack/install
 SLACK_OAUTH_REDIRECT_PATH=/slack/oauth_redirect
@@ -280,9 +280,9 @@ omit it and use the bootstrap default `google:gemini-2.5-flash`. Production-like
 including Heroku dynos and `APP_ENV=heroku` or `NODE_ENV=production`, require `AGENT_MODEL`;
 startup fails closed if it is missing.
 
-Slack MCP tools use the invoking user's Slack OAuth token, not a static workspace token. Keep
+Slack Real-time Search and Slack MCP tools use the invoking user's Slack OAuth token, not a static workspace token. Keep
 `SLACK_USER_SCOPES` aligned with the manifest's user scopes before reinstalling the Slack app so
-the worker and in-process agent paths can resolve that user's `installation.user.token` for MCP calls.
+the worker and in-process agent paths can resolve that user's `installation.user.token` for Slack search and MCP calls.
 
 ### Specialists
 
