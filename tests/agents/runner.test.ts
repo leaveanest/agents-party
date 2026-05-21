@@ -2,7 +2,11 @@ import { jsonSchema, type ToolSet } from "ai";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { AgentRunner, selectAgentAction } from "../../src/agents/runner.js";
+import {
+  AgentRunner,
+  selectAgentAction,
+  type AgentRunnerAiSdkToolSetHandle,
+} from "../../src/agents/runner.js";
 import { AgentToolRegistry } from "../../src/agents/toolContracts.js";
 import type { JsonValue } from "../../src/domain/messageHistory.js";
 import type { LlmRequest, LlmResult, ModelInfo } from "../../src/providers/contracts.js";
@@ -561,6 +565,101 @@ describe("AgentRunner", () => {
 
     expect(router.requests[0]?.aiSdkTools?.slack_search_public).toBe(mcpTools.slack_search_public);
     expect(closed).toEqual(["closed"]);
+  });
+
+  it("continues without AI SDK toolsets when preparing them fails", async () => {
+    const router = new FakeProviderRouter({
+      content: "without mcp",
+    });
+    const warnings: unknown[] = [];
+    const runner = new AgentRunner({
+      aiSdkToolSetFactory: async () => {
+        throw new Error("MCP unavailable");
+      },
+      defaultModelId: model.id,
+      logger: {
+        warn(message: string, metadata: unknown) {
+          warnings.push({ message, metadata });
+        },
+      },
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "search",
+      userId: "U1",
+    });
+
+    expect(result.message).toBe("without mcp");
+    expect(router.requests[0]?.aiSdkTools).toBeUndefined();
+    expect(warnings).toEqual([
+      {
+        message: "Failed to prepare AI SDK toolsets for agent invocation.",
+        metadata: expect.objectContaining({
+          channelId: "C1",
+          modelId: model.id,
+          provider: model.provider,
+          teamId: "T1",
+        }),
+      },
+    ]);
+  });
+
+  it("continues without AI SDK toolsets when preparing them times out", async () => {
+    const router = new FakeProviderRouter({
+      content: "without slow mcp",
+    });
+    const warnings: unknown[] = [];
+    const closed: string[] = [];
+    let resolveToolSet: (handle: AgentRunnerAiSdkToolSetHandle) => void = () => {};
+    const slowToolSet = new Promise<AgentRunnerAiSdkToolSetHandle>((resolve) => {
+      resolveToolSet = resolve;
+    });
+    const runner = new AgentRunner({
+      aiSdkToolSetFactory: () => slowToolSet,
+      aiSdkToolSetPreparationTimeoutMs: 1,
+      defaultModelId: model.id,
+      logger: {
+        warn(message: string, metadata: unknown) {
+          warnings.push({ message, metadata });
+        },
+      },
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "search",
+      userId: "U1",
+    });
+    resolveToolSet({
+      async close() {
+        closed.push("closed");
+      },
+      tools: {},
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(result.message).toBe("without slow mcp");
+    expect(router.requests[0]?.aiSdkTools).toBeUndefined();
+    expect(closed).toEqual(["closed"]);
+    expect(warnings).toEqual([
+      {
+        message: "Failed to prepare AI SDK toolsets for agent invocation.",
+        metadata: expect.objectContaining({
+          channelId: "C1",
+          modelId: model.id,
+          provider: model.provider,
+          teamId: "T1",
+          timeoutMs: 1,
+        }),
+      },
+    ]);
   });
 
   it("rejects invalid tool output", async () => {

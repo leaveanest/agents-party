@@ -60,6 +60,7 @@ const slackMcpInstallationRepository =
 const runner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
   featureSettingsRepository,
+  logger: console,
   salesforcePdfTools,
   slackMcpTokenResolver:
     slackMcpInstallationRepository === undefined

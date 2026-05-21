@@ -71,9 +71,11 @@ export class AgentRunnerExecutionError extends Error {
 
 export type AgentRunnerOptions = {
   credentialResolver?: ProviderCredentialResolver;
+  aiSdkToolSetPreparationTimeoutMs?: number;
   defaultModelId: string;
   featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
   imageGenerationModelId?: string;
+  logger?: unknown;
   maxToolRounds?: number;
   providerRouter: Pick<ProviderRouter, "generate" | "registry">;
   systemPrompt?: string;
@@ -101,6 +103,7 @@ export type AgentRunnerAiSdkToolSetHandle = {
 const DEFAULT_SYSTEM_PROMPT =
   "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions.";
 const DEFAULT_MAX_TOOL_ROUNDS = 3;
+const DEFAULT_AI_SDK_TOOLSET_PREPARATION_TIMEOUT_MS = 3000;
 
 export class AgentRunner {
   constructor(private readonly options: AgentRunnerOptions) {}
@@ -159,9 +162,7 @@ export class AgentRunner {
     invocation: SlackAgentInvocation,
   ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
     const model = this.resolveModel(invocation.modelId);
-    const aiSdkToolSetHandles = normalizeAiSdkToolSetHandles(
-      await this.options.aiSdkToolSetFactory?.(invocation, model),
-    );
+    const aiSdkToolSetHandles = await this.resolveAiSdkToolSetHandles(invocation, model);
     const aiSdkTools = mergeAiSdkToolSets(aiSdkToolSetHandles.map((handle) => handle.tools));
     const toolRegistry =
       this.options.toolRegistryFactory?.(invocation, model) ?? this.options.toolRegistry;
@@ -220,6 +221,63 @@ export class AgentRunner {
     return this.options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
   }
 
+  private async resolveAiSdkToolSetHandles(
+    invocation: SlackAgentInvocation,
+    model: ModelInfo,
+  ): Promise<readonly AgentRunnerAiSdkToolSetHandle[]> {
+    const factory = this.options.aiSdkToolSetFactory;
+    if (factory === undefined) {
+      return [];
+    }
+    const timeoutMs = Math.max(
+      1,
+      this.options.aiSdkToolSetPreparationTimeoutMs ??
+        DEFAULT_AI_SDK_TOOLSET_PREPARATION_TIMEOUT_MS,
+    );
+    let timedOut = false;
+    const handlesPromise = Promise.resolve()
+      .then(() => factory(invocation, model))
+      .then(normalizeAiSdkToolSetHandles);
+    void handlesPromise.then(
+      async (handles) => {
+        if (timedOut) {
+          await closeAiSdkToolSetHandles(handles);
+        }
+      },
+      (error) => {
+        if (timedOut) {
+          logWarn(
+            this.options.logger,
+            "AI SDK toolset preparation failed after the agent invocation continued.",
+            {
+              channelId: invocation.channelId,
+              error,
+              modelId: model.id,
+              provider: model.provider,
+              teamId: invocation.teamId,
+              timeoutMs,
+            },
+          );
+        }
+      },
+    );
+    try {
+      return await withTimeout(handlesPromise, timeoutMs, () => {
+        timedOut = true;
+      });
+    } catch (error) {
+      logWarn(this.options.logger, "Failed to prepare AI SDK toolsets for agent invocation.", {
+        channelId: invocation.channelId,
+        error,
+        modelId: model.id,
+        provider: model.provider,
+        teamId: invocation.teamId,
+        timeoutMs,
+      });
+      return [];
+    }
+  }
+
   private resolveModel(modelId?: string): ModelInfo {
     const resolvedModelId = modelId ?? this.options.defaultModelId;
     try {
@@ -235,6 +293,7 @@ export function createDefaultAgentRunner(
   options: {
     credentialResolver?: ProviderCredentialResolver;
     featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
+    logger?: unknown;
     salesforcePdfTools?: Omit<SalesforcePdfToolOptions, "context">;
     slackMcpTokenResolver?: SlackMcpTokenResolver;
   } = {},
@@ -249,6 +308,7 @@ export function createDefaultAgentRunner(
     defaultModelId: settings.agentModelId,
     featureSettingsRepository: options.featureSettingsRepository,
     imageGenerationModelId: settings.imageGenerationModelId,
+    logger: options.logger,
     providerRouter,
     textToSpeechModelId: settings.textToSpeechModelId,
     aiSdkToolSetFactory: async (invocation, model) => {
@@ -339,6 +399,37 @@ async function closeAiSdkToolSetHandles(
   handles: readonly AgentRunnerAiSdkToolSetHandle[],
 ): Promise<void> {
   await Promise.all(handles.map((handle) => handle.close().catch(() => {})));
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      onTimeout();
+      reject(new Error(`AI SDK toolset preparation timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+function logWarn(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.warn === "function") {
+    logger.warn(message, metadata);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 export function selectAgentAction(): AgentRouterDecision {

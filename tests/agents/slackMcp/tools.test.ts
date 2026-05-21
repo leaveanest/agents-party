@@ -74,6 +74,28 @@ describe("createSlackMcpToolSet", () => {
     expect(handle).toBeUndefined();
   });
 
+  it("closes the MCP client when listing server tools times out", async () => {
+    const closes: string[] = [];
+
+    await expect(
+      createSlackMcpToolSet({
+        clientFactory: async () => ({
+          async close() {
+            closes.push("closed");
+          },
+          async tools() {
+            await new Promise(() => {});
+            return {};
+          },
+        }),
+        context: context(),
+        tokenResolver: tokenResolver("xoxp-token"),
+        toolsListTimeoutMs: 1,
+      }),
+    ).rejects.toThrow("Slack MCP tools list timed out after 1ms.");
+    expect(closes).toEqual(["closed"]);
+  });
+
   it("rejects channel reads outside the invocation channel allowlist before MCP execution", async () => {
     const calls: unknown[] = [];
     const handle = await createSlackMcpToolSet({
@@ -94,6 +116,39 @@ describe("createSlackMcpToolSet", () => {
       ok: false,
       reconnectRequired: false,
     });
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects channel reads without a non-empty channel id before MCP execution", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_read_channel: fakeTool(async (input) => {
+          calls.push(input);
+          return { content: [{ text: "channel", type: "text" }] };
+        }),
+        slack_read_thread: fakeTool(async (input) => {
+          calls.push(input);
+          return { content: [{ text: "thread", type: "text" }] };
+        }),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    for (const [toolName, input] of [
+      ["slack_read_channel", {}],
+      ["slack_read_channel", { channel_id: "" }],
+      ["slack_read_channel", { channel_id: "   " }],
+      ["slack_read_thread", {}],
+      ["slack_read_thread", { channel_id: "" }],
+    ] as const) {
+      await expect(executeTool(handle?.tools, toolName, input)).resolves.toMatchObject({
+        code: "slack_mcp_channel_not_allowed",
+        ok: false,
+        reconnectRequired: false,
+      });
+    }
     expect(calls).toEqual([]);
   });
 

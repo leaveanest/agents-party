@@ -80,6 +80,7 @@ const salesforcePdfTools =
 const agentRunner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
   featureSettingsRepository,
+  logger: console,
   salesforcePdfTools,
   slackMcpTokenResolver:
     slackInstallationRepository === undefined

@@ -39,7 +39,10 @@ export type SlackMcpToolSetOptions = {
   context: SlackMcpToolContext;
   serverUrl?: string;
   tokenResolver: SlackMcpTokenResolver;
+  toolsListTimeoutMs?: number;
 };
+
+const DEFAULT_SLACK_MCP_TOOLS_LIST_TIMEOUT_MS = 2500;
 
 const allowedSlackMcpToolNames = [
   "slack_search_public",
@@ -60,7 +63,14 @@ export async function createSlackMcpToolSet(
     token: resolution.token,
   });
   try {
-    const tools = filterAndWrapSlackMcpTools(await client.tools(), options.context);
+    const tools = filterAndWrapSlackMcpTools(
+      await withTimeout(
+        client.tools(),
+        Math.max(1, options.toolsListTimeoutMs ?? DEFAULT_SLACK_MCP_TOOLS_LIST_TIMEOUT_MS),
+        "Slack MCP tools list",
+      ),
+      options.context,
+    );
     return {
       close: () => client.close(),
       tools,
@@ -127,7 +137,7 @@ function validateSlackMcpToolAccess(
     return undefined;
   }
   const channelId = typeof input.channel_id === "string" ? input.channel_id.trim() : "";
-  if (channelId.length === 0 || context.viewerContextChannelIds.includes(channelId)) {
+  if (channelId.length > 0 && context.viewerContextChannelIds.includes(channelId)) {
     return undefined;
   }
   return failure(
@@ -151,4 +161,24 @@ function failure(
     reconnectRequired,
     toolName,
   };
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  operation: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`${operation} timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
