@@ -14,8 +14,8 @@ export type SlackRealTimeSearchContentType = (typeof slackRealTimeSearchContentT
 export type SlackRealTimeSearchChannelType = (typeof slackRealTimeSearchChannelTypes)[number];
 
 export type SlackRealTimeSearchContextInput = {
-  after?: string;
-  before?: string;
+  after?: number;
+  before?: number;
   channelTypes?: readonly SlackRealTimeSearchChannelType[];
   contentTypes?: readonly SlackRealTimeSearchContentType[];
   contextChannelId?: string;
@@ -57,10 +57,11 @@ export type SlackRealTimeSearchMessageResult = {
 };
 
 export type SlackRealTimeSearchContextMessageResult = {
-  authorName?: string;
+  blocks?: JsonValue;
   authorUserId?: string;
   content?: string;
   messageTs?: string;
+  position: "after" | "before";
 };
 
 export type SlackRealTimeSearchFileResult = {
@@ -224,7 +225,7 @@ function normalizeMessageResult(value: unknown): SlackRealTimeSearchMessageResul
       channelId,
       channelName: readString(record.channel_name),
       content: readString(record.content),
-      contextMessages: readArray(record.context_messages).flatMap(normalizeContextMessageResult),
+      contextMessages: normalizeContextMessages(record.context_messages),
       isAuthorBot: readBoolean(record.is_author_bot),
       messageTs,
       permalink: readString(record.permalink),
@@ -233,14 +234,33 @@ function normalizeMessageResult(value: unknown): SlackRealTimeSearchMessageResul
   ];
 }
 
-function normalizeContextMessageResult(value: unknown): SlackRealTimeSearchContextMessageResult[] {
+function normalizeContextMessages(value: unknown): SlackRealTimeSearchContextMessageResult[] {
+  const record = asRecord(value);
+  return [
+    ...readArray(record.before).flatMap((message) =>
+      normalizeContextMessageResult(message, "before"),
+    ),
+    ...readArray(record.after).flatMap((message) =>
+      normalizeContextMessageResult(message, "after"),
+    ),
+  ];
+}
+
+function normalizeContextMessageResult(
+  value: unknown,
+  position: SlackRealTimeSearchContextMessageResult["position"],
+): SlackRealTimeSearchContextMessageResult[] {
   const record = asRecord(value);
   return [
     cleanRecord({
-      authorName: readString(record.author_name),
-      authorUserId: readString(record.author_user_id),
-      content: readString(record.content),
-      messageTs: readString(record.message_ts),
+      authorUserId:
+        readString(record.author_user_id) ??
+        readString(record.user_id) ??
+        readString(record["user_id:"]),
+      blocks: toJsonValue(record.blocks),
+      content: readString(record.content) ?? readString(record.text),
+      messageTs: readString(record.message_ts) ?? readString(record.ts),
+      position,
     }),
   ];
 }

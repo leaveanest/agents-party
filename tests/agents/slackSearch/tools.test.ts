@@ -32,7 +32,12 @@ describe("createSlackRealTimeSearchAgentTools", () => {
           },
         });
       },
-      tokenResolver: tokenResolver("xoxp-token"),
+      tokenResolver: tokenResolver("xoxp-token", [
+        "search:read.im",
+        "search:read.mpim",
+        "search:read.private",
+        "search:read.public",
+      ]),
     })[0];
 
     await expect(tool.execute({ query: "launch" })).resolves.toEqual({
@@ -92,6 +97,8 @@ describe("createSlackRealTimeSearchAgentTools", () => {
 
     await expect(
       tool.execute({
+        after: 1752512713,
+        before: 1755191113,
         channelTypes: ["public_channel"],
         contentTypes: ["messages", "files", "users"],
         contextChannelId: "C2",
@@ -105,12 +112,44 @@ describe("createSlackRealTimeSearchAgentTools", () => {
     });
     expect(searches).toEqual([
       expect.objectContaining({
+        after: 1752512713,
+        before: 1755191113,
         channelTypes: ["public_channel"],
         contentTypes: ["messages", "files", "users"],
         contextChannelId: "C2",
         includeContextMessages: false,
         includeMessageBlocks: true,
         limit: 20,
+      }),
+    ]);
+  });
+
+  it("defaults to public channel search when only public search scope is available", async () => {
+    const searches: unknown[] = [];
+    const tool = createSlackRealTimeSearchAgentTools({
+      context: context(),
+      gatewayFactory: () =>
+        fakeGateway({
+          async searchContext(input) {
+            searches.push(input);
+            return {
+              channels: [],
+              files: [],
+              messages: [],
+              ok: true,
+              users: [],
+            };
+          },
+        }),
+      tokenResolver: tokenResolver("xoxp-token", ["search:read.public"]),
+    })[0];
+
+    await expect(tool.execute({ query: "launch" })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(searches).toEqual([
+      expect.objectContaining({
+        channelTypes: ["public_channel"],
       }),
     ]);
   });
@@ -199,7 +238,7 @@ function context() {
   };
 }
 
-function tokenResolver(token: string) {
+function tokenResolver(token: string, scopes?: string[]) {
   return {
     async resolve(input: unknown) {
       expect(input).toMatchObject({
@@ -207,7 +246,7 @@ function tokenResolver(token: string) {
         teamId: "T1",
         userId: "U1",
       });
-      return { token };
+      return { scopes, token };
     },
   };
 }

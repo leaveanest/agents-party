@@ -26,8 +26,8 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.custom<JsonValue>(isJsonValue);
 
 const slackRealTimeSearchInputSchema = z
   .object({
-    after: z.string().trim().min(1).optional(),
-    before: z.string().trim().min(1).optional(),
+    after: z.number().int().positive().optional(),
+    before: z.number().int().positive().optional(),
     channelTypes: z.array(channelTypeSchema).min(1).max(4).optional(),
     contentTypes: z.array(contentTypeSchema).min(1).max(4).optional(),
     contextChannelId: z.string().trim().min(1).optional(),
@@ -41,10 +41,11 @@ const slackRealTimeSearchInputSchema = z
 
 const contextMessageOutputSchema = z
   .object({
-    authorName: z.string().optional(),
     authorUserId: z.string().optional(),
+    blocks: jsonValueSchema.optional(),
     content: z.string().optional(),
     messageTs: z.string().optional(),
+    position: z.enum(["after", "before"]),
   })
   .strict();
 
@@ -160,7 +161,7 @@ async function searchSlack(
     result = await gateway.searchContext({
       after: input.after,
       before: input.before,
-      channelTypes: input.channelTypes ?? ["public_channel", "private_channel", "mpim", "im"],
+      channelTypes: input.channelTypes ?? defaultChannelTypesForScopes(resolution.scopes),
       contentTypes: input.contentTypes ?? ["messages"],
       contextChannelId: input.contextChannelId ?? options.context.channelId,
       cursor: input.cursor,
@@ -202,6 +203,18 @@ async function searchSlack(
 
 function defaultGatewayFactory(input: { token: string }): SlackRealTimeSearchGateway {
   return createSlackRealTimeSearchGateway(input.token);
+}
+
+function defaultChannelTypesForScopes(
+  scopes: readonly string[] | undefined,
+): Array<"public_channel" | "private_channel" | "mpim" | "im"> {
+  const normalizedScopes = new Set(scopes ?? []);
+  return [
+    "public_channel",
+    ...(normalizedScopes.has("search:read.private") ? (["private_channel"] as const) : []),
+    ...(normalizedScopes.has("search:read.mpim") ? (["mpim"] as const) : []),
+    ...(normalizedScopes.has("search:read.im") ? (["im"] as const) : []),
+  ];
 }
 
 function failure(code: string, message: string): SlackRealTimeSearchToolOutput {
