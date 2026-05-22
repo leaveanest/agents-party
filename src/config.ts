@@ -68,13 +68,18 @@ const DEFAULT_VIDEO_GENERATION_MODEL_ID = "google:veo-3.1-fast-generate-001";
 const APP_ENVS_REQUIRING_AGENT_MODEL = new Set(["heroku", "prod", "production", "staging"]);
 const DEFAULT_SLACK_SCOPES = [
   "app_mentions:read",
+  "assistant:write",
   "channels:history",
+  "channels:read",
   "chat:write",
   "files:read",
   "files:write",
   "groups:history",
+  "groups:read",
   "im:history",
+  "im:read",
   "mpim:history",
+  "mpim:read",
   "reactions:read",
   "users:read",
 ];

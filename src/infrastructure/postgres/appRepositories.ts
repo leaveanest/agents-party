@@ -284,6 +284,7 @@ export class PostgresAgentRoutingRepository {
     const createdAt = stringField(currentThread, "created_at", now.toISOString());
     const rootMessageTs = stringField(currentThread, "root_message_ts", input.rootMessageTs);
     const payload: JsonObject = {
+      ...currentThread,
       agent_id: input.agentId,
       channel_id: input.channelId,
       created_at: createdAt,
@@ -330,6 +331,7 @@ export class PostgresAgentRoutingRepository {
   async resolveAgent(input: {
     channelId: string;
     teamId: string;
+    threadChannelId?: string;
     threadTs?: string;
   }): Promise<ResolvedAgentRouteDocument | undefined> {
     if (!(await this.isChannelEnabled(input.teamId, input.channelId))) {
@@ -341,7 +343,11 @@ export class PostgresAgentRoutingRepository {
       this.findChannelSettings(input.teamId, input.channelId),
       input.threadTs === undefined
         ? Promise.resolve(undefined)
-        : this.findSlackThread(input.teamId, input.channelId, input.threadTs),
+        : this.findSlackThread(
+            input.teamId,
+            input.threadChannelId ?? input.channelId,
+            input.threadTs,
+          ),
     ]);
     const activeThread = stringField(thread, "status", "") === "active" ? thread : undefined;
     const resolved = resolveAgentId({
