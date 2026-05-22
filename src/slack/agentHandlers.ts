@@ -6,6 +6,7 @@ import type {
   SlackViewMiddlewareArgs,
   StringIndexed,
 } from "@slack/bolt";
+import { ErrorCode } from "@slack/web-api";
 import { z } from "zod";
 
 import {
@@ -292,6 +293,21 @@ export type SlackResolvedAgentRoute = {
   scope: string;
 };
 
+type SlackThreadSaveDocument = {
+  agentId?: string;
+  channelId: string;
+  createdAt: Date;
+  lastMessageTs?: string;
+  modelId?: string;
+  payload: JsonObject;
+  reasoningEffort?: string;
+  rootMessageTs: string;
+  status: string;
+  teamId: string;
+  threadTs: string;
+  updatedAt: Date;
+};
+
 export type SlackAgentRoutingRepository = {
   activateThreadAgent(input: {
     agentId: string;
@@ -315,6 +331,7 @@ export type SlackAgentRoutingRepository = {
   resolveAgent?(input: {
     channelId: string;
     teamId: string;
+    threadChannelId?: string;
     threadTs?: string;
   }): Promise<SlackResolvedAgentRoute | undefined>;
   saveWorkspaceSettings?(document: {
@@ -337,6 +354,7 @@ export type SlackAgentRoutingRepository = {
     threadAutoReply?: boolean;
     updatedAt: Date;
   }): Promise<void>;
+  saveSlackThread?(document: SlackThreadSaveDocument): Promise<void>;
   saveAgent?(document: {
     agentId: string;
     enabled: boolean;
@@ -486,6 +504,12 @@ export function createAgentSlackHandlers(
     },
     async handleAppMention(args) {
       await handleMention(args, runner, options);
+    },
+    async handleAssistantThreadContextChanged(args) {
+      await handleAssistantThreadEvent(args, options);
+    },
+    async handleAssistantThreadStarted(args) {
+      await handleAssistantThreadEvent(args, options);
     },
     async handleMessage(args) {
       await handleMessage(args, runner, options);
@@ -3829,6 +3853,227 @@ async function handleSalesforcePdfWorkflowModalSubmission(
   }
 }
 
+async function handleAssistantThreadEvent(
+  {
+    body,
+    client,
+    event,
+    logger,
+  }: SlackEventArgs<"assistant_thread_context_changed" | "assistant_thread_started">,
+  options: AgentSlackHandlerOptions,
+): Promise<void> {
+  const assistantThread = readAssistantThread(event);
+  if (assistantThread === undefined) {
+    logWarn(logger, "Ignoring Slack assistant thread event without assistant_thread details.", {
+      eventType: readString(event, "type"),
+    });
+    return;
+  }
+  const teamId = readTeamId(body, event);
+  if (teamId === undefined) {
+    logWarn(logger, "Ignoring Slack assistant thread event without a team id.", {
+      channelId: assistantThread.channelId,
+      threadTs: assistantThread.threadTs,
+    });
+    return;
+  }
+  if (options.routingRepository === undefined) {
+    logWarn(logger, "Ignoring Slack assistant thread event without routing repository.", {
+      channelId: assistantThread.channelId,
+      teamId,
+      threadTs: assistantThread.threadTs,
+    });
+    return;
+  }
+
+  const accessibleAssistantThread = await assistantThreadWithAccessibleContext({
+    assistantThread,
+    client,
+    clearMissingContext: readString(event, "type") === "assistant_thread_context_changed",
+    logger,
+  });
+  try {
+    await saveAssistantThreadState({
+      assistantThread: accessibleAssistantThread,
+      eventTs: readString(event, "event_ts"),
+      logger,
+      repository: options.routingRepository,
+      teamId,
+    });
+  } catch (error) {
+    logWarn(logger, "Failed to persist Slack assistant thread state.", {
+      channelId: accessibleAssistantThread.channelId,
+      error,
+      teamId,
+      threadTs: accessibleAssistantThread.threadTs,
+    });
+  }
+}
+
+async function assistantThreadWithAccessibleContext(input: {
+  assistantThread: SlackAssistantThread;
+  clearMissingContext: boolean;
+  client: Pick<SlackClient, "conversations">;
+  logger: unknown;
+}): Promise<SlackAssistantThread> {
+  const contextChannelId = input.assistantThread.contextChannelId;
+  if (contextChannelId === undefined) {
+    return input.clearMissingContext
+      ? {
+          ...input.assistantThread,
+          clearContext: true,
+        }
+      : input.assistantThread;
+  }
+  try {
+    await input.client.conversations.info({ channel: contextChannelId });
+    return input.assistantThread;
+  } catch (error) {
+    const errorCode = slackWebApiErrorCode(error);
+    if (errorCode === "channel_not_found" || errorCode === "not_in_channel") {
+      logWarn(input.logger, "Ignoring inaccessible Slack assistant thread context channel.", {
+        channelId: input.assistantThread.channelId,
+        contextChannelId,
+        error,
+        threadTs: input.assistantThread.threadTs,
+      });
+      return {
+        ...input.assistantThread,
+        clearContext: true,
+        contextChannelId: undefined,
+        contextEnterpriseId: undefined,
+        contextTeamId: undefined,
+      };
+    }
+    logWarn(input.logger, "Ignoring inaccessible Slack assistant thread context channel.", {
+      channelId: input.assistantThread.channelId,
+      contextChannelId,
+      error,
+      threadTs: input.assistantThread.threadTs,
+    });
+    return input.assistantThread;
+  }
+}
+
+type SlackAssistantThread = {
+  channelId: string;
+  clearContext?: boolean;
+  contextChannelId?: string;
+  contextEnterpriseId?: string;
+  contextTeamId?: string;
+  threadTs: string;
+  userId?: string;
+};
+
+async function saveAssistantThreadState(input: {
+  assistantThread: SlackAssistantThread;
+  eventTs?: string;
+  logger: unknown;
+  repository: SlackAgentRoutingRepository;
+  teamId: string;
+}): Promise<void> {
+  const { assistantThread, repository, teamId } = input;
+  const existing = await repository.findSlackThread(
+    teamId,
+    assistantThread.channelId,
+    assistantThread.threadTs,
+  );
+  const now = new Date();
+  const createdAt = new Date(stringField(existing, "created_at") ?? now.toISOString());
+  const agentId = stringField(existing, "agent_id") ?? "assistant";
+  const lastMessageTs = stringField(existing, "last_message_ts") ?? input.eventTs;
+  const payload: JsonObject = {
+    ...existing,
+    agent_id: agentId,
+    assistant_thread_channel_id: assistantThread.channelId,
+    ...(assistantThread.contextChannelId === undefined
+      ? {}
+      : { assistant_thread_context_channel_id: assistantThread.contextChannelId }),
+    ...(assistantThread.contextEnterpriseId === undefined
+      ? {}
+      : { assistant_thread_context_enterprise_id: assistantThread.contextEnterpriseId }),
+    ...(assistantThread.contextTeamId === undefined
+      ? {}
+      : { assistant_thread_context_team_id: assistantThread.contextTeamId }),
+    ...(assistantThread.userId === undefined
+      ? {}
+      : { assistant_thread_user_id: assistantThread.userId }),
+    channel_id: assistantThread.channelId,
+    created_at: createdAt.toISOString(),
+    ...(lastMessageTs === undefined ? {} : { last_message_ts: lastMessageTs }),
+    root_message_ts: stringField(existing, "root_message_ts") ?? assistantThread.threadTs,
+    source: "assistant_view",
+    status: "active",
+    team_id: teamId,
+    thread_ts: assistantThread.threadTs,
+    updated_at: now.toISOString(),
+  };
+  if (assistantThread.clearContext === true) {
+    delete payload.assistant_thread_context_channel_id;
+    delete payload.assistant_thread_context_enterprise_id;
+    delete payload.assistant_thread_context_team_id;
+  }
+
+  if (repository.saveSlackThread !== undefined) {
+    await repository.saveSlackThread({
+      agentId,
+      channelId: assistantThread.channelId,
+      createdAt,
+      lastMessageTs: stringField(payload, "last_message_ts"),
+      modelId: stringField(existing, "model_id"),
+      payload,
+      reasoningEffort: stringField(existing, REASONING_EFFORT_FIELD),
+      rootMessageTs: stringField(payload, "root_message_ts") ?? assistantThread.threadTs,
+      status: "active",
+      teamId,
+      threadTs: assistantThread.threadTs,
+      updatedAt: now,
+    });
+    return;
+  }
+
+  try {
+    await repository.activateThreadAgent({
+      agentId,
+      channelId: assistantThread.channelId,
+      lastMessageTs: input.eventTs ?? assistantThread.threadTs,
+      modelId: stringField(existing, "model_id"),
+      reasoningEffort: stringField(existing, REASONING_EFFORT_FIELD),
+      rootMessageTs: stringField(existing, "root_message_ts") ?? assistantThread.threadTs,
+      teamId,
+      threadTs: assistantThread.threadTs,
+    });
+  } catch (error) {
+    logWarn(input.logger, "Failed to persist Slack assistant thread state.", {
+      channelId: assistantThread.channelId,
+      error,
+      teamId,
+      threadTs: assistantThread.threadTs,
+    });
+  }
+}
+
+function readAssistantThread(event: StringIndexed): SlackAssistantThread | undefined {
+  const assistantThread = event.assistant_thread;
+  if (!isRecord(assistantThread)) {
+    return undefined;
+  }
+  const channelId = readString(assistantThread, "channel_id");
+  const threadTs = readString(assistantThread, "thread_ts");
+  if (channelId === undefined || threadTs === undefined) {
+    return undefined;
+  }
+  const context = isRecord(assistantThread.context) ? assistantThread.context : undefined;
+  return {
+    channelId,
+    contextChannelId: context === undefined ? undefined : readString(context, "channel_id"),
+    contextEnterpriseId: context === undefined ? undefined : readString(context, "enterprise_id"),
+    contextTeamId: context === undefined ? undefined : readString(context, "team_id"),
+    threadTs,
+    userId: readString(assistantThread, "user_id"),
+  };
+}
+
 async function handleMention(
   { body, client, context, event, logger, sayStream }: SlackEventArgs<"app_mention">,
   runner: AgentRunner,
@@ -4125,12 +4370,16 @@ async function handleMessage(
     return;
   }
 
-  const [thread, autoReplyEnabled, channelEnabled] = await Promise.all([
-    options.routingRepository.findSlackThread(teamId, event.channel, threadTs),
-    options.routingRepository.isThreadAutoReplyEnabled(teamId, event.channel),
-    options.routingRepository.isChannelEnabled(teamId, event.channel),
+  const thread = await options.routingRepository.findSlackThread(teamId, event.channel, threadTs);
+  if (!isActiveThread(thread)) {
+    return;
+  }
+  const routeChannelId = slackThreadRouteChannelId(thread, event.channel);
+  const [autoReplyEnabled, channelEnabled] = await Promise.all([
+    options.routingRepository.isThreadAutoReplyEnabled(teamId, routeChannelId),
+    options.routingRepository.isChannelEnabled(teamId, routeChannelId),
   ]);
-  if (!channelEnabled || !autoReplyEnabled || !isActiveThread(thread)) {
+  if (!channelEnabled || !autoReplyEnabled) {
     return;
   }
 
@@ -4156,6 +4405,7 @@ async function handleMessage(
       channelId: event.channel,
       logger,
       messageTs: event.ts,
+      routeChannelId,
       routingRepository: options.routingRepository,
       teamId,
       threadTs,
@@ -4204,8 +4454,9 @@ async function handleMessage(
       options,
     });
     const route = await resolveSlackAgentRoute(options.routingRepository, {
-      channelId: event.channel,
+      channelId: routeChannelId,
       teamId,
+      threadChannelId: event.channel,
       threadTs,
     });
     if (options.routingRepository.resolveAgent !== undefined && route === undefined) {
@@ -4248,7 +4499,7 @@ async function handleMessage(
         teamId,
       }),
       userId: event.user,
-      viewerContextChannelIds: [event.channel],
+      viewerContextChannelIds: slackThreadViewerContextChannelIds(thread, event.channel),
     };
     const streamingResult =
       sayStream === undefined
@@ -4599,12 +4850,20 @@ async function processFollowUpMessageJob(
     await postImageInputValidationErrorForQueuedJob({ input, job });
     return;
   }
-  const [thread, autoReplyEnabled, channelEnabled] = await Promise.all([
-    input.routingRepository.findSlackThread(job.teamId, job.channelId, job.threadTs),
-    input.routingRepository.isThreadAutoReplyEnabled(job.teamId, job.channelId),
-    input.routingRepository.isChannelEnabled(job.teamId, job.channelId),
+  const thread = await input.routingRepository.findSlackThread(
+    job.teamId,
+    job.channelId,
+    job.threadTs,
+  );
+  if (!isActiveThread(thread)) {
+    return;
+  }
+  const routeChannelId = slackThreadRouteChannelId(thread, job.channelId);
+  const [autoReplyEnabled, channelEnabled] = await Promise.all([
+    input.routingRepository.isThreadAutoReplyEnabled(job.teamId, routeChannelId),
+    input.routingRepository.isChannelEnabled(job.teamId, routeChannelId),
   ]);
-  if (!channelEnabled || !autoReplyEnabled || !isActiveThread(thread)) {
+  if (!channelEnabled || !autoReplyEnabled) {
     return;
   }
 
@@ -4627,6 +4886,7 @@ async function processFollowUpMessageJob(
       channelId: job.channelId,
       logger: input.logger,
       messageTs: job.messageTs,
+      routeChannelId,
       routingRepository: input.routingRepository,
       teamId: job.teamId,
       threadTs: job.threadTs,
@@ -4644,8 +4904,9 @@ async function processFollowUpMessageJob(
       options: input,
     });
     const route = await resolveSlackAgentRoute(input.routingRepository, {
-      channelId: job.channelId,
+      channelId: routeChannelId,
       teamId: job.teamId,
+      threadChannelId: job.channelId,
       threadTs: job.threadTs,
     });
     if (input.routingRepository.resolveAgent !== undefined && route === undefined) {
@@ -4694,7 +4955,7 @@ async function processFollowUpMessageJob(
         teamId: job.teamId,
       }),
       userId: job.userId,
-      viewerContextChannelIds: [job.channelId],
+      viewerContextChannelIds: slackThreadViewerContextChannelIds(thread, job.channelId),
     };
     const streamingResult = await tryPostStreamingAgentRun({
       channel: job.channelId,
@@ -4918,12 +5179,13 @@ async function activateMentionMenuThread(input: {
   channelId: string;
   logger: unknown;
   messageTs: string;
+  routeChannelId?: string;
   routingRepository?: SlackAgentRoutingRepository;
   teamId: string;
   threadTs: string;
 }): Promise<void> {
   const route = await resolveSlackAgentRoute(input.routingRepository, {
-    channelId: input.channelId,
+    channelId: input.routeChannelId ?? input.channelId,
     teamId: input.teamId,
     threadTs: input.threadTs,
   });
@@ -7448,11 +7710,32 @@ function isActiveThread(thread: JsonObject | undefined): boolean {
   );
 }
 
+function slackThreadRouteChannelId(
+  thread: JsonObject | undefined,
+  fallbackChannelId: string,
+): string {
+  return stringField(thread, "assistant_thread_context_channel_id") ?? fallbackChannelId;
+}
+
+function slackThreadViewerContextChannelIds(
+  thread: JsonObject | undefined,
+  fallbackChannelId: string,
+): string[] {
+  return [
+    ...new Set(
+      [stringField(thread, "assistant_thread_context_channel_id"), fallbackChannelId].filter(
+        (channelId): channelId is string => channelId !== undefined,
+      ),
+    ),
+  ];
+}
+
 async function resolveSlackAgentRoute(
   repository: SlackAgentRoutingRepository | undefined,
   input: {
     channelId: string;
     teamId: string;
+    threadChannelId?: string;
     threadTs?: string;
   },
 ): Promise<SlackResolvedAgentRoute | undefined> {
@@ -7472,6 +7755,20 @@ function threadScopedReasoningEffort(
 function stringField(value: JsonObject | undefined, field: string): string | undefined {
   const fieldValue = value?.[field];
   return typeof fieldValue === "string" && fieldValue.length > 0 ? fieldValue : undefined;
+}
+
+function slackWebApiErrorCode(error: unknown): string | undefined {
+  if (!isRecord(error)) {
+    return undefined;
+  }
+  if (error.code === ErrorCode.PlatformError && isRecord(error.data)) {
+    const code = error.data.error;
+    return typeof code === "string" && code.length > 0 ? code : undefined;
+  }
+  if (error.code === ErrorCode.RateLimitedError) {
+    return "rate_limited";
+  }
+  return undefined;
 }
 
 function booleanField(value: JsonObject | undefined, field: string): boolean | undefined {

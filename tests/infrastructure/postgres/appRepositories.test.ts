@@ -219,6 +219,74 @@ describe("Postgres app repositories", () => {
     });
   });
 
+  it("preserves assistant thread context when activating an existing thread", async () => {
+    const pool = new RecordingPool([
+      {
+        payload: {
+          assistant_thread_context_channel_id: "C-source",
+          created_at: "2026-05-11T00:00:00.000Z",
+          root_message_ts: "1.0",
+          source: "assistant_view",
+          status: "active",
+        },
+      },
+    ]);
+
+    await new PostgresAgentRoutingRepository(pool as never).activateThreadAgent({
+      agentId: "assistant",
+      channelId: "D1",
+      lastMessageTs: "1.1",
+      rootMessageTs: "1.0",
+      teamId: "T1",
+      threadTs: "1.0",
+    });
+
+    expect(JSON.parse(String(pool.queries.at(-1)?.values?.at(-1)))).toMatchObject({
+      agent_id: "assistant",
+      assistant_thread_context_channel_id: "C-source",
+      channel_id: "D1",
+      root_message_ts: "1.0",
+      source: "assistant_view",
+      status: "active",
+      team_id: "T1",
+      thread_ts: "1.0",
+    });
+  });
+
+  it("resolves assistant view thread routes from the assistant thread channel key", async () => {
+    await expect(
+      new PostgresAgentRoutingRepository(
+        new RecordingPool([
+          { payload: { enabled_channel_ids: ["C-source"] } },
+          { payload: { default_agent_id: "workspace", default_model_id: "workspace-model" } },
+          { payload: { default_agent_id: "channel", default_model_id: "channel-model" } },
+          {
+            payload: {
+              agent_id: "thread",
+              model_id: "thread-model",
+              model_scope: "thread",
+              status: "active",
+            },
+          },
+          { payload: { agent_id: "thread", enabled: true } },
+        ]) as never,
+      ).resolveAgent({
+        channelId: "C-source",
+        teamId: "T1",
+        threadChannelId: "D1",
+        threadTs: "1.0",
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        agentId: "thread",
+        channelId: "C-source",
+        modelId: "thread-model",
+        modelScope: "thread",
+        scope: "thread",
+      }),
+    );
+  });
+
   it("does not resolve disabled agents when routing payload omits column data", async () => {
     await expect(
       new PostgresAgentRoutingRepository(

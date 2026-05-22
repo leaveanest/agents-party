@@ -4276,6 +4276,343 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(posts[0])).toContain("model_routing_channel_configure");
   });
 
+  it("persists Slack Assistant view thread context when a thread starts", async () => {
+    const runner = {
+      async run() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleAssistantThreadStarted({
+      body: { team_id: "T1" },
+      client: {
+        conversations: { info: async () => ({ channel: { id: "C-source" } }) },
+      },
+      event: {
+        assistant_thread: {
+          channel_id: "D1",
+          context: {
+            channel_id: "C-source",
+            enterprise_id: "E1",
+            team_id: "T1",
+          },
+          thread_ts: "1729999327.187299",
+          user_id: "U1",
+        },
+        event_ts: "1715873754.429808",
+        type: "assistant_thread_started",
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(repository.savedThreads).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        channelId: "D1",
+        lastMessageTs: "1715873754.429808",
+        rootMessageTs: "1729999327.187299",
+        status: "active",
+        teamId: "T1",
+        threadTs: "1729999327.187299",
+      }),
+    ]);
+    expect((repository.savedThreads[0] as { payload: JsonObject }).payload).toMatchObject({
+      assistant_thread_channel_id: "D1",
+      assistant_thread_context_channel_id: "C-source",
+      assistant_thread_context_enterprise_id: "E1",
+      assistant_thread_context_team_id: "T1",
+      assistant_thread_user_id: "U1",
+      source: "assistant_view",
+      status: "active",
+    });
+  });
+
+  it("continues Slack Assistant view events when thread persistence fails", async () => {
+    const runner = {
+      async run() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const warnings: unknown[] = [];
+    const repository = {
+      async activateThreadAgent() {
+        throw new Error("activateThreadAgent should not be called");
+      },
+      async findSlackThread() {
+        return undefined;
+      },
+      async isChannelEnabled() {
+        return true;
+      },
+      async isThreadAutoReplyEnabled() {
+        return true;
+      },
+      async saveSlackThread() {
+        throw new Error("database unavailable");
+      },
+    };
+    const handlers = createAgentSlackHandlers(runner as never, {
+      routingRepository: repository,
+    });
+
+    await expect(
+      handlers.handleAssistantThreadStarted({
+        body: { team_id: "T1" },
+        client: {
+          conversations: { info: async () => ({ channel: { id: "C-source" } }) },
+        },
+        event: {
+          assistant_thread: {
+            channel_id: "D1",
+            context: {
+              channel_id: "C-source",
+              team_id: "T1",
+            },
+            thread_ts: "1729999327.187299",
+            user_id: "U1",
+          },
+          event_ts: "1715873754.429808",
+          type: "assistant_thread_started",
+        },
+        logger: {
+          warn: (...args: unknown[]) => warnings.push(args),
+        },
+      } as never),
+    ).resolves.toBeUndefined();
+    expect(warnings).toEqual([
+      expect.arrayContaining(["Failed to persist Slack assistant thread state."]),
+    ]);
+  });
+
+  it("does not persist inaccessible Slack Assistant view context channels", async () => {
+    const runner = {
+      async run() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      thread: {
+        agent_id: "assistant",
+        assistant_thread_context_channel_id: "C-stale",
+        assistant_thread_context_enterprise_id: "E-stale",
+        assistant_thread_context_team_id: "T-stale",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleAssistantThreadContextChanged({
+      body: { team_id: "T1" },
+      client: {
+        conversations: {
+          info: async () => {
+            throw Object.assign(new Error("not_in_channel"), {
+              code: "slack_webapi_platform_error",
+              data: { error: "not_in_channel" },
+            });
+          },
+        },
+      },
+      event: {
+        assistant_thread: {
+          channel_id: "D1",
+          context: {
+            channel_id: "C-inaccessible",
+            team_id: "T1",
+          },
+          thread_ts: "1729999327.187299",
+          user_id: "U1",
+        },
+        event_ts: "1715873754.429808",
+        type: "assistant_thread_context_changed",
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect((repository.savedThreads[0] as { payload: JsonObject }).payload).not.toHaveProperty(
+      "assistant_thread_context_channel_id",
+    );
+    expect((repository.savedThreads[0] as { payload: JsonObject }).payload).not.toHaveProperty(
+      "assistant_thread_context_enterprise_id",
+    );
+    expect((repository.savedThreads[0] as { payload: JsonObject }).payload).not.toHaveProperty(
+      "assistant_thread_context_team_id",
+    );
+  });
+
+  it("clears stale Slack Assistant view context when context changes to no channel", async () => {
+    const runner = {
+      async run() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      thread: {
+        agent_id: "assistant",
+        assistant_thread_context_channel_id: "C-stale",
+        assistant_thread_context_enterprise_id: "E-stale",
+        assistant_thread_context_team_id: "T-stale",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleAssistantThreadContextChanged({
+      body: { team_id: "T1" },
+      client: {
+        conversations: { info: async () => ({}) },
+      },
+      event: {
+        assistant_thread: {
+          channel_id: "D1",
+          thread_ts: "1729999327.187299",
+          user_id: "U1",
+        },
+        event_ts: "1715873754.429808",
+        type: "assistant_thread_context_changed",
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const payload = (repository.savedThreads[0] as { payload: JsonObject }).payload;
+    expect(payload).not.toHaveProperty("assistant_thread_context_channel_id");
+    expect(payload).not.toHaveProperty("assistant_thread_context_enterprise_id");
+    expect(payload).not.toHaveProperty("assistant_thread_context_team_id");
+  });
+
+  it("keeps Slack Assistant view context when access checks fail transiently", async () => {
+    const runner = {
+      async run() {
+        throw new Error("runner should not be called");
+      },
+    };
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleAssistantThreadStarted({
+      body: { team_id: "T1" },
+      client: {
+        conversations: {
+          info: async () => {
+            throw Object.assign(new Error("rate_limited"), {
+              code: "slack_webapi_rate_limited_error",
+            });
+          },
+        },
+      },
+      event: {
+        assistant_thread: {
+          channel_id: "D1",
+          context: {
+            channel_id: "C-source",
+            team_id: "T1",
+          },
+          thread_ts: "1729999327.187299",
+          user_id: "U1",
+        },
+        event_ts: "1715873754.429808",
+        type: "assistant_thread_started",
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect((repository.savedThreads[0] as { payload: JsonObject }).payload).toMatchObject({
+      assistant_thread_context_channel_id: "C-source",
+      assistant_thread_context_team_id: "T1",
+    });
+  });
+
+  it("routes Slack Assistant view follow-ups through the source channel context", async () => {
+    const invocations: unknown[] = [];
+    const runner = {
+      async run(invocation: unknown) {
+        invocations.push(invocation);
+        return {
+          decision: { action: "respond", reason: "assistant_view_follow_up" },
+          message: "assistant reply",
+          toolResults: [],
+        };
+      },
+    };
+    const posts: unknown[] = [];
+    const repository = new MemoryRoutingRepository({
+      channelEnabled: true,
+      route: {
+        agent: { name: "assistant-agent" },
+        agentId: "assistant",
+        modelId: "google:gemini-2.5-flash",
+        modelScope: "channel",
+        scope: "channel",
+      },
+      thread: {
+        agent_id: "assistant",
+        assistant_thread_context_channel_id: "C-source",
+        root_message_ts: "1729999327.187299",
+        status: "active",
+      },
+      threadAutoReplyEnabled: true,
+    });
+    const handlers = createAgentSlackHandlers(runner as never, { routingRepository: repository });
+
+    await handlers.handleMessage({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+        conversations: { replies: async () => ({ messages: [] }) },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "D1",
+        text: "help with this channel",
+        thread_ts: "1729999327.187299",
+        ts: "1729999330.000100",
+        user: "U1",
+      },
+      logger: { error() {}, info() {}, warn() {} },
+    } as never);
+
+    expect(repository.routeInputs).toContainEqual({
+      channelId: "C-source",
+      teamId: "T1",
+      threadChannelId: "D1",
+      threadTs: "1729999327.187299",
+    });
+    expect(invocations).toEqual([
+      expect.objectContaining({
+        channelId: "D1",
+        modelId: "google:gemini-2.5-flash",
+        viewerContextChannelIds: ["C-source", "D1"],
+      }),
+    ]);
+    expect(repository.activations).toEqual([
+      expect.objectContaining({
+        agentId: "assistant",
+        channelId: "D1",
+        lastMessageTs: "1729999330.000100",
+        teamId: "T1",
+        threadTs: "1729999327.187299",
+      }),
+    ]);
+    expect(posts).toEqual([expect.objectContaining({ channel: "D1", text: "assistant reply" })]);
+  });
+
   it("posts a settings menu instead of running AI for mention-only active thread follow-ups", async () => {
     let runs = 0;
     const runner = {
@@ -8247,6 +8584,8 @@ class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsReposit
 
 class MemoryRoutingRepository {
   readonly activations: unknown[] = [];
+  readonly routeInputs: unknown[] = [];
+  readonly savedThreads: unknown[] = [];
 
   constructor(
     private readonly options: {
@@ -8286,7 +8625,7 @@ class MemoryRoutingRepository {
     return this.options.threadAutoReplyEnabled;
   }
 
-  async resolveAgent(): Promise<
+  async resolveAgent(input?: unknown): Promise<
     | {
         agent: JsonObject;
         agentId: string;
@@ -8302,7 +8641,12 @@ class MemoryRoutingRepository {
       }
     | undefined
   > {
+    this.routeInputs.push(input);
     return this.options.route;
+  }
+
+  async saveSlackThread(input: unknown): Promise<void> {
+    this.savedThreads.push(input);
   }
 }
 

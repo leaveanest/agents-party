@@ -28,6 +28,10 @@ import {
 export type SlackEventFeatureHandlers = {
   handleAppHomeOpened(args: SlackEventArgs<"app_home_opened">): Promise<void>;
   handleAppMention(args: SlackEventArgs<"app_mention">): Promise<void>;
+  handleAssistantThreadContextChanged(
+    args: SlackEventArgs<"assistant_thread_context_changed">,
+  ): Promise<void>;
+  handleAssistantThreadStarted(args: SlackEventArgs<"assistant_thread_started">): Promise<void>;
   handleWorkspaceCredentialConfigureAction(
     args: SlackActionMiddlewareArgs & AllMiddlewareArgs,
   ): Promise<void>;
@@ -91,6 +95,12 @@ export function registerSlackEventHandlers(
 
   app.event("app_home_opened", async (args) => handlers.handleAppHomeOpened(args));
   app.event("app_mention", async (args) => handlers.handleAppMention(args));
+  app.event("assistant_thread_context_changed", async (args) =>
+    handlers.handleAssistantThreadContextChanged(args),
+  );
+  app.event("assistant_thread_started", async (args) =>
+    handlers.handleAssistantThreadStarted(args),
+  );
   app.event("message", async (args) => handlers.handleMessage(args));
   app.event("reaction_added", async (args) => handlers.handleReactionAdded(args));
   app.action(WORKSPACE_CREDENTIAL_CONFIGURE_ACTION_ID, async (args) =>
@@ -163,6 +173,20 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
     },
     async handleAppMention({ body, context, logger }) {
       logger.warn("Slack app_mention feature execution is not ported yet.", {
+        eventId: readSlackEventId(body),
+        retryNum: context.retryNum,
+        retryReason: context.retryReason,
+      });
+    },
+    async handleAssistantThreadContextChanged({ body, context, logger }) {
+      logger.warn("Slack assistant_thread_context_changed feature execution is not ported yet.", {
+        eventId: readSlackEventId(body),
+        retryNum: context.retryNum,
+        retryReason: context.retryReason,
+      });
+    },
+    async handleAssistantThreadStarted({ body, context, logger }) {
+      logger.warn("Slack assistant_thread_started feature execution is not ported yet.", {
         eventId: readSlackEventId(body),
         retryNum: context.retryNum,
         retryReason: context.retryReason,

@@ -48,6 +48,8 @@ class StubDeduplicator implements SlackEventDeduplicator {
 const handlers: SlackEventFeatureHandlers = {
   async handleAppHomeOpened() {},
   async handleAppMention() {},
+  async handleAssistantThreadContextChanged() {},
+  async handleAssistantThreadStarted() {},
   async handleMessage() {},
   async handleReactionAdded() {},
   async handleModelRoutingConfigureAction() {},
@@ -71,6 +73,8 @@ describe("registerSlackEventHandlers", () => {
     expect([...app.events.keys()].sort()).toEqual([
       "app_home_opened",
       "app_mention",
+      "assistant_thread_context_changed",
+      "assistant_thread_started",
       "message",
       "reaction_added",
     ]);
