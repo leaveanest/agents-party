@@ -470,6 +470,8 @@ export function createDefaultAgentRunner(
                 teamId: invocation.teamId,
                 userId: invocation.userId,
               },
+              fallbackQuery: invocation.text,
+              logger: options.logger,
               tokenResolver: options.slackMcpTokenResolver,
             })),
         ...createMediaGenerationAgentTools({

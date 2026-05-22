@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import type { JsonValue } from "../../domain/messageHistory.js";
@@ -16,7 +18,9 @@ export type SlackRealTimeSearchToolContext = SlackMcpTokenLookup & {
 
 export type SlackRealTimeSearchToolOptions = {
   context: SlackRealTimeSearchToolContext;
+  fallbackQuery?: string;
   gatewayFactory?: (input: { token: string }) => SlackRealTimeSearchGateway;
+  logger?: unknown;
   tokenResolver: SlackMcpTokenResolver;
 };
 
@@ -30,9 +34,9 @@ const slackRealTimeSearchInputSchema = z
     before: z.number().int().positive().optional(),
     channelTypes: z.array(channelTypeSchema).min(1).max(4).optional(),
     contentTypes: z.array(contentTypeSchema).min(1).max(4).optional(),
-    contextChannelId: z.string().trim().min(1).optional(),
-    cursor: z.string().trim().min(1).optional(),
-    includeContextMessages: z.boolean().default(true).optional(),
+    contextChannelId: z.preprocess(emptyStringToUndefined, z.string().trim().min(1).optional()),
+    cursor: z.preprocess(emptyStringToUndefined, z.string().trim().min(1).optional()),
+    includeContextMessages: z.boolean().default(false).optional(),
     includeMessageBlocks: z.boolean().default(false).optional(),
     limit: z.number().int().min(1).max(20).default(10).optional(),
     query: z.string().trim().min(1).max(4000),
@@ -126,6 +130,10 @@ const slackRealTimeSearchOutputSchema = z
 
 type SlackRealTimeSearchToolInput = z.infer<typeof slackRealTimeSearchInputSchema>;
 type SlackRealTimeSearchToolOutput = z.infer<typeof slackRealTimeSearchOutputSchema>;
+type SlackRealTimeSearchContextRequest = Parameters<SlackRealTimeSearchGateway["searchContext"]>[0];
+type SlackRealTimeSearchContextResponse = Awaited<
+  ReturnType<SlackRealTimeSearchGateway["searchContext"]>
+>;
 
 export function createSlackRealTimeSearchAgentTools(
   options: SlackRealTimeSearchToolOptions,
@@ -133,7 +141,7 @@ export function createSlackRealTimeSearchAgentTools(
   return [
     {
       description:
-        "Search Slack with Slack's Real-time Search API. Use this as the first choice for Slack workspace search. Use it when the user asks about prior Slack messages, files, channels, or people beyond the current thread. Prefer this over slack_search_public. Use slack_read_channel or slack_read_thread instead when you only need the current channel or current thread.",
+        "Search Slack with Slack's Real-time Search API. Use this as the first choice for Slack workspace search. Use it when the user asks about prior Slack messages, files, channels, or people beyond the current thread. Default to public_channel messages search; only request private_channel, mpim, im, files, channels, or users when the user explicitly asks for those targets. Prefer this over slack_search_public. Use slack_read_channel or slack_read_thread instead when you only need the current channel or current thread.",
       execute: async (input) => searchSlack(input as SlackRealTimeSearchToolInput, options),
       name: "slack_real_time_search",
       outputSchema: slackRealTimeSearchOutputSchema as z.ZodType<JsonValue>,
@@ -158,17 +166,61 @@ async function searchSlack(
   let result: Awaited<ReturnType<SlackRealTimeSearchGateway["searchContext"]>>;
   try {
     const gateway = (options.gatewayFactory ?? defaultGatewayFactory)({ token: resolution.token });
-    result = await gateway.searchContext({
+    const query = resolveSearchQuery(input.query, options);
+    if (query === undefined) {
+      return failure(
+        "slack_rts_query_too_short",
+        "Slack Real-time Search needs a more specific search query. Retry with substantive keywords or a natural language question.",
+      );
+    }
+    const searchInput = {
       after: input.after,
       before: input.before,
-      channelTypes: input.channelTypes ?? defaultChannelTypesForScopes(resolution.scopes),
+      channelTypes: input.channelTypes ?? defaultChannelTypes(),
       contentTypes: input.contentTypes ?? ["messages"],
-      contextChannelId: input.contextChannelId ?? options.context.channelId,
-      cursor: input.cursor,
-      includeContextMessages: input.includeContextMessages ?? true,
+      contextChannelId: nonEmptyString(input.contextChannelId),
+      cursor: nonEmptyString(input.cursor),
+      includeContextMessages: input.includeContextMessages ?? false,
       includeMessageBlocks: input.includeMessageBlocks ?? false,
       limit: input.limit ?? 10,
-      query: input.query,
+      query,
+    };
+    let effectiveSearchInput = searchInput;
+    logInfo(options.logger, "Calling Slack Real-time Search.", {
+      channelTypes: effectiveSearchInput.channelTypes,
+      contentTypes: effectiveSearchInput.contentTypes,
+      hasCursor: effectiveSearchInput.cursor !== undefined,
+      limit: effectiveSearchInput.limit,
+      queryHash: hashValue(effectiveSearchInput.query),
+      queryLength: effectiveSearchInput.query.length,
+      teamId: options.context.teamId,
+      tokenFingerprint: tokenFingerprint(resolution.token),
+    });
+    result = await gateway.searchContext(effectiveSearchInput);
+    if (result.errorCode === "invalid_cursor" && searchInput.cursor !== undefined) {
+      logWarn(options.logger, "Retrying Slack Real-time Search without invalid cursor.", {
+        channelTypes: searchInput.channelTypes,
+        contentTypes: searchInput.contentTypes,
+        limit: searchInput.limit,
+        teamId: options.context.teamId,
+      });
+      effectiveSearchInput = {
+        ...searchInput,
+        cursor: undefined,
+      };
+      result = await gateway.searchContext(effectiveSearchInput);
+    }
+    result = await retryMessagesOnlyAfterInternalError({
+      gateway,
+      options,
+      result,
+      searchInput: effectiveSearchInput,
+    });
+    result = await retryPublicMessagesAfterInternalError({
+      gateway,
+      options,
+      result,
+      searchInput: effectiveSearchInput,
     });
   } catch (error) {
     return failure(
@@ -178,6 +230,10 @@ async function searchSlack(
   }
 
   if (!result.ok) {
+    logWarn(options.logger, "Slack Real-time Search failed.", {
+      errorCode: result.errorCode ?? "unknown_error",
+      teamId: options.context.teamId,
+    });
     return failure(
       result.errorCode ?? "slack_rts_search_failed",
       `Slack Real-time Search failed: ${result.errorCode ?? "unknown_error"}.`,
@@ -205,16 +261,161 @@ function defaultGatewayFactory(input: { token: string }): SlackRealTimeSearchGat
   return createSlackRealTimeSearchGateway(input.token);
 }
 
-function defaultChannelTypesForScopes(
-  scopes: readonly string[] | undefined,
-): Array<"public_channel" | "private_channel" | "mpim" | "im"> {
-  const normalizedScopes = new Set(scopes ?? []);
-  return [
-    "public_channel",
-    ...(normalizedScopes.has("search:read.private") ? (["private_channel"] as const) : []),
-    ...(normalizedScopes.has("search:read.mpim") ? (["mpim"] as const) : []),
-    ...(normalizedScopes.has("search:read.im") ? (["im"] as const) : []),
-  ];
+function resolveSearchQuery(
+  query: string,
+  options: SlackRealTimeSearchToolOptions,
+): string | undefined {
+  const trimmedQuery = query.trim();
+  if (hasEnoughSubstantiveSearchText(trimmedQuery)) {
+    return trimmedQuery;
+  }
+  const fallbackQuery = normalizeFallbackSearchQuery(options.fallbackQuery);
+  if (fallbackQuery !== undefined && hasEnoughSubstantiveSearchText(fallbackQuery)) {
+    logWarn(options.logger, "Expanding short Slack Real-time Search query from invocation text.", {
+      fallbackQueryLength: fallbackQuery.length,
+      queryLength: trimmedQuery.length,
+      teamId: options.context.teamId,
+    });
+    return fallbackQuery;
+  }
+  return trimmedQuery.length === 0 ? undefined : trimmedQuery;
+}
+
+function hasEnoughSubstantiveSearchText(query: string): boolean {
+  return query.replaceAll(/\s+/g, "").length >= 3;
+}
+
+function normalizeFallbackSearchQuery(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (trimmed === undefined || trimmed.length === 0) {
+    return undefined;
+  }
+  const latinTerms = trimmed.match(/[A-Za-z0-9][A-Za-z0-9._+:/-]*/g);
+  const latinQuery = latinTerms?.join(" ").trim();
+  return latinQuery !== undefined && hasEnoughSubstantiveSearchText(latinQuery)
+    ? latinQuery
+    : trimmed;
+}
+
+async function retryMessagesOnlyAfterInternalError(input: {
+  gateway: SlackRealTimeSearchGateway;
+  options: SlackRealTimeSearchToolOptions;
+  result: SlackRealTimeSearchContextResponse;
+  searchInput: SlackRealTimeSearchContextRequest;
+}): Promise<SlackRealTimeSearchContextResponse> {
+  if (
+    input.result.errorCode !== "internal_error" ||
+    !shouldRetryMessagesOnly(input.searchInput.contentTypes ?? [])
+  ) {
+    return input.result;
+  }
+
+  logWarn(input.options.logger, "Retrying Slack Real-time Search after internal_error.", {
+    channelTypes: input.searchInput.channelTypes,
+    contentTypes: input.searchInput.contentTypes,
+    fallbackContentTypes: ["messages"],
+    hasCursor: input.searchInput.cursor !== undefined,
+    limit: input.searchInput.limit,
+    teamId: input.options.context.teamId,
+  });
+  return await input.gateway.searchContext({
+    ...input.searchInput,
+    contentTypes: ["messages"],
+  });
+}
+
+async function retryPublicMessagesAfterInternalError(input: {
+  gateway: SlackRealTimeSearchGateway;
+  options: SlackRealTimeSearchToolOptions;
+  result: SlackRealTimeSearchContextResponse;
+  searchInput: SlackRealTimeSearchContextRequest;
+}): Promise<SlackRealTimeSearchContextResponse> {
+  if (
+    input.result.errorCode !== "internal_error" ||
+    isMinimalPublicMessagesRequest(input.searchInput)
+  ) {
+    return input.result;
+  }
+
+  logWarn(
+    input.options.logger,
+    "Retrying Slack Real-time Search with a minimal public message request.",
+    {
+      channelTypes: input.searchInput.channelTypes,
+      contentTypes: input.searchInput.contentTypes,
+      fallbackChannelTypes: ["public_channel"],
+      fallbackContentTypes: ["messages"],
+      fallbackIncludeContextMessages: false,
+      fallbackUsesContextChannel: false,
+      limit: input.searchInput.limit,
+      teamId: input.options.context.teamId,
+    },
+  );
+  return await input.gateway.searchContext({
+    ...input.searchInput,
+    channelTypes: ["public_channel"],
+    contentTypes: ["messages"],
+    contextChannelId: undefined,
+    cursor: undefined,
+    includeContextMessages: false,
+    includeMessageBlocks: false,
+  });
+}
+
+function emptyStringToUndefined(value: unknown): unknown {
+  return typeof value === "string" && value.trim().length === 0 ? undefined : value;
+}
+
+function nonEmptyString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+}
+
+function shouldRetryMessagesOnly(contentTypes: readonly string[]): boolean {
+  return contentTypes.length !== 1 || contentTypes[0] !== "messages";
+}
+
+function isMinimalPublicMessagesRequest(input: SlackRealTimeSearchContextRequest): boolean {
+  const channelTypes = input.channelTypes ?? [];
+  const contentTypes = input.contentTypes ?? [];
+  return (
+    channelTypes.length === 1 &&
+    channelTypes[0] === "public_channel" &&
+    contentTypes.length === 1 &&
+    contentTypes[0] === "messages" &&
+    input.contextChannelId === undefined &&
+    input.cursor === undefined &&
+    input.includeContextMessages === false &&
+    input.includeMessageBlocks === false
+  );
+}
+
+function logInfo(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.info === "function") {
+    logger.info(message, metadata);
+  }
+}
+
+function logWarn(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.warn === "function") {
+    logger.warn(message, metadata);
+  }
+}
+
+function tokenFingerprint(token: string): string {
+  return hashValue(token);
+}
+
+function hashValue(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 12);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function defaultChannelTypes(): Array<"public_channel"> {
+  return ["public_channel"];
 }
 
 function failure(code: string, message: string): SlackRealTimeSearchToolOutput {
