@@ -5576,6 +5576,93 @@ describe("createAgentSlackHandlers", () => {
     expect((uploads[0] as { file: Buffer }).file.toString()).toBe("image-bytes");
   });
 
+  it("posts an ephemeral message when image generation starts", async () => {
+    const runner = {
+      async run(
+        _invocation: unknown,
+        runtimeOptions: {
+          onImageGenerationStart?: (input: {
+            channelId: string;
+            modelId: string;
+            prompt: string;
+            provider: string;
+            teamId: string;
+          }) => Promise<void> | void;
+        },
+      ) {
+        await runtimeOptions.onImageGenerationStart?.({
+          channelId: "C1",
+          modelId: "google:gemini-2.5-flash-image",
+          prompt: "draw a diagram",
+          provider: "google",
+          teamId: "T1",
+        });
+        return {
+          decision: { action: "respond", reason: "test" },
+          message: "Image generated.",
+          toolResults: [],
+        };
+      },
+    };
+    const ephemerals: unknown[] = [];
+    const operations: string[] = [];
+    const posts: unknown[] = [];
+    const statuses: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        assistant: {
+          threads: {
+            setStatus: async (payload: unknown) => {
+              operations.push("setStatus");
+              statuses.push(payload);
+              return {};
+            },
+          },
+        },
+        chat: {
+          postEphemeral: async (payload: unknown) => {
+            operations.push("postEphemeral");
+            ephemerals.push(payload);
+            return {};
+          },
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> draw a diagram",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { error() {}, warn() {} },
+    } as never);
+
+    expect(statuses).toEqual([]);
+    expect(ephemerals).toEqual([
+      {
+        channel: "C1",
+        text: "Image generation has started. This can take a little while.",
+        thread_ts: "1712345678.000100",
+        user: "U1",
+      },
+    ]);
+    expect(operations).toEqual(["postEphemeral"]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "Image generated.",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
   it("uses image media types when naming generated Slack uploads", async () => {
     const uploads: unknown[] = [];
 
@@ -7362,6 +7449,57 @@ describe("createAgentSlackHandlers", () => {
       ),
     ).rejects.toThrow("provider timeout");
     expect(posts).toEqual([]);
+  });
+
+  it("does not retry queued AgentRunner context length failures", async () => {
+    const runner = {
+      async run() {
+        throw new AgentRunnerExecutionError(
+          { id: "openai:gpt-5.5", provider: "openai" },
+          {
+            error: {
+              code: "context_length_exceeded",
+              message: "Your input exceeds the context window of this model.",
+            },
+          },
+        );
+      },
+    };
+    const posts: unknown[] = [];
+
+    await processSlackAgentJob(
+      {
+        channelId: "C1",
+        eventType: "app_mention",
+        messageTs: "1712345678.000100",
+        teamId: "T1",
+        text: "hello",
+        threadTs: "1712345678.000100",
+        userId: "U1",
+      },
+      {
+        client: {
+          chat: {
+            postMessage: async (payload: unknown) => {
+              posts.push(payload);
+              return {};
+            },
+          },
+          conversations: { replies: async () => ({ messages: [] }) },
+          filesUploadV2: async () => ({}),
+        } as never,
+        logger: { error() {}, info() {}, warn() {} },
+        retryContext: { attempts: 3, attemptsMade: 0 },
+        runner: runner as never,
+      },
+    );
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "I couldn't complete that request. Please try again in a moment.",
+      }),
+    ]);
   });
 
   it("posts a fallback for queued AgentRunner failures on the final worker attempt", async () => {

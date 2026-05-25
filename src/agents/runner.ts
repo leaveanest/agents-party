@@ -39,7 +39,12 @@ import { createSpeechGenerationAgentTools } from "./speechGeneration/index.js";
 import { createSlackMcpToolSet, type SlackMcpTokenResolver } from "./slackMcp/index.js";
 import { createSlackRealTimeSearchAgentTools } from "./slackSearch/index.js";
 import { createSoracomAgentTools } from "./soracom/index.js";
-import { AgentToolRegistry, type AgentToolResult } from "./toolContracts.js";
+import {
+  AgentToolRegistry,
+  createAiSdkToolSetFromAgentTools,
+  type AgentToolDefinition,
+  type AgentToolResult,
+} from "./toolContracts.js";
 
 export type AgentRunnerResult = {
   decision: AgentRouterDecision;
@@ -85,6 +90,10 @@ export type AgentRunnerOptions = {
   credentialResolver?: ProviderCredentialResolver;
   aiSdkToolSetPreparationTimeoutMs?: number;
   defaultModelId: string;
+  directInvocationHandler?: (
+    invocation: SlackAgentInvocation,
+    runtimeOptions: AgentRunnerRuntimeOptions,
+  ) => Promise<AgentRunnerDirectInvocationResult | undefined>;
   featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
   imageGenerationModelId?: string;
   logger?: unknown;
@@ -96,6 +105,7 @@ export type AgentRunnerOptions = {
   aiSdkToolSetFactory?: (
     invocation: SlackAgentInvocation,
     model: ModelInfo,
+    runtimeOptions: AgentRunnerRuntimeOptions,
   ) =>
     | AgentRunnerAiSdkToolSetHandle
     | readonly AgentRunnerAiSdkToolSetHandle[]
@@ -113,6 +123,22 @@ export type AgentRunnerAiSdkToolSetHandle = {
   tools: ToolSet;
 };
 
+export type AgentRunnerRuntimeOptions = {
+  onImageGenerationStart?: (input: {
+    channelId: string;
+    modelId: string;
+    prompt: string;
+    provider: string;
+    teamId: string;
+  }) => Promise<void> | void;
+};
+
+type AgentRunnerDirectInvocationResult = {
+  model: ModelInfo;
+  result: LlmResult;
+  toolResults: AgentToolResult[];
+};
+
 const DEFAULT_SYSTEM_PROMPT =
   "You are the general Agents party assistant. Reply directly and concisely for Slack. Use available tools when they are helpful, and ask for missing details before taking ambiguous actions. When Slack workspace search is needed and the slack_real_time_search tool is available, use it as the first choice; use slack_search_public only as a fallback. Use slack_read_channel or slack_read_thread when you only need the current channel or thread.";
 const DEFAULT_MAX_TOOL_ROUNDS = 3;
@@ -121,10 +147,22 @@ const DEFAULT_AI_SDK_TOOLSET_PREPARATION_TIMEOUT_MS = 3000;
 export class AgentRunner {
   constructor(private readonly options: AgentRunnerOptions) {}
 
-  async run(invocationInput: unknown): Promise<AgentRunnerResult> {
+  async run(
+    invocationInput: unknown,
+    runtimeOptions: AgentRunnerRuntimeOptions = {},
+  ): Promise<AgentRunnerResult> {
     const invocation = slackAgentInvocationSchema.parse(invocationInput);
     const decision = selectAgentAction();
-    const { model, result, toolResults } = await this.runAgent(invocation);
+    const directResult = await this.options.directInvocationHandler?.(invocation, runtimeOptions);
+    if (directResult !== undefined) {
+      return normalizeRunnerResult(
+        decision,
+        directResult.model,
+        directResult.result,
+        directResult.toolResults,
+      );
+    }
+    const { model, result, toolResults } = await this.runAgent(invocation, runtimeOptions);
 
     try {
       return normalizeRunnerResult(decision, model, result, toolResults);
@@ -171,12 +209,28 @@ export class AgentRunner {
     }
   }
 
-  async *runStream(invocationInput: unknown): AsyncIterable<AgentRunnerStreamEvent> {
+  async *runStream(
+    invocationInput: unknown,
+    runtimeOptions: AgentRunnerRuntimeOptions = {},
+  ): AsyncIterable<AgentRunnerStreamEvent> {
     const invocation = slackAgentInvocationSchema.parse(invocationInput);
     const decision = selectAgentAction();
     const model = this.resolveModel(invocation.modelId);
     try {
-      const agentStream = this.runAgentStream(invocation, model);
+      const directResult = await this.options.directInvocationHandler?.(invocation, runtimeOptions);
+      if (directResult !== undefined) {
+        yield {
+          result: normalizeRunnerResult(
+            decision,
+            directResult.model,
+            directResult.result,
+            directResult.toolResults,
+          ),
+          type: "result",
+        };
+        return;
+      }
+      const agentStream = this.runAgentStream(invocation, model, runtimeOptions);
       let next = await agentStream.next();
       while (!next.done) {
         yield next.value;
@@ -197,9 +251,14 @@ export class AgentRunner {
 
   private async runAgent(
     invocation: SlackAgentInvocation,
+    runtimeOptions: AgentRunnerRuntimeOptions,
   ): Promise<{ model: ModelInfo; result: LlmResult; toolResults: AgentToolResult[] }> {
     const model = this.resolveModel(invocation.modelId);
-    const aiSdkToolSetHandles = await this.resolveAiSdkToolSetHandles(invocation, model);
+    const aiSdkToolSetHandles = await this.resolveAiSdkToolSetHandles(
+      invocation,
+      model,
+      runtimeOptions,
+    );
     const aiSdkTools = mergeAiSdkToolSets(aiSdkToolSetHandles.map((handle) => handle.tools));
     const toolRegistry =
       this.options.toolRegistryFactory?.(invocation, model) ?? this.options.toolRegistry;
@@ -227,6 +286,7 @@ export class AgentRunner {
       const maxToolRounds = this.options.maxToolRounds ?? DEFAULT_MAX_TOOL_ROUNDS;
       for (let round = 0; round <= maxToolRounds; round += 1) {
         const result = await this.options.providerRouter.generate({ ...requestBase, history });
+        toolResults.push(...(result.toolResults ?? []));
         if ((result.toolCalls?.length ?? 0) === 0) {
           return { model, result, toolResults };
         }
@@ -257,6 +317,7 @@ export class AgentRunner {
   private async *runAgentStream(
     invocation: SlackAgentInvocation,
     model: ModelInfo,
+    runtimeOptions: AgentRunnerRuntimeOptions,
   ): AsyncGenerator<
     Extract<AgentRunnerStreamEvent, { type: "text-delta" }>,
     { result: LlmResult; toolResults: AgentToolResult[] },
@@ -266,7 +327,11 @@ export class AgentRunner {
       throw new Error("The configured provider router does not support streaming.");
     }
 
-    const aiSdkToolSetHandles = await this.resolveAiSdkToolSetHandles(invocation, model);
+    const aiSdkToolSetHandles = await this.resolveAiSdkToolSetHandles(
+      invocation,
+      model,
+      runtimeOptions,
+    );
     const aiSdkTools = mergeAiSdkToolSets(aiSdkToolSetHandles.map((handle) => handle.tools));
     const toolRegistry =
       this.options.toolRegistryFactory?.(invocation, model) ?? this.options.toolRegistry;
@@ -318,6 +383,7 @@ export class AgentRunner {
         if (result === undefined) {
           throw new Error("Provider stream ended without a final result.");
         }
+        toolResults.push(...(result.toolResults ?? []));
         const toolCalls = mergeStreamToolCalls(roundToolCalls, result.toolCalls);
         const roundResult = { ...result, toolCalls };
         if (toolCalls.length === 0) {
@@ -349,6 +415,7 @@ export class AgentRunner {
   private async resolveAiSdkToolSetHandles(
     invocation: SlackAgentInvocation,
     model: ModelInfo,
+    runtimeOptions: AgentRunnerRuntimeOptions,
   ): Promise<readonly AgentRunnerAiSdkToolSetHandle[]> {
     const factory = this.options.aiSdkToolSetFactory;
     if (factory === undefined) {
@@ -361,7 +428,7 @@ export class AgentRunner {
     );
     let timedOut = false;
     const handlesPromise = Promise.resolve()
-      .then(() => factory(invocation, model))
+      .then(() => factory(invocation, model, runtimeOptions))
       .then(normalizeAiSdkToolSetHandles);
     void handlesPromise.then(
       async (handles) => {
@@ -431,92 +498,301 @@ export function createDefaultAgentRunner(
   return new AgentRunner({
     credentialResolver: options.credentialResolver,
     defaultModelId: settings.agentModelId,
+    directInvocationHandler: async (invocation, runtimeOptions) =>
+      runFocusedImageGenerationInvocation({
+        invocation,
+        modelRegistry: providerRouter.registry,
+        options,
+        runtimeOptions,
+        settings,
+      }),
     featureSettingsRepository: options.featureSettingsRepository,
     imageGenerationModelId: settings.imageGenerationModelId,
     logger: options.logger,
     providerRouter,
     textToSpeechModelId: settings.textToSpeechModelId,
-    aiSdkToolSetFactory: async (invocation, model) => {
-      if (
-        !model.capabilities.includes("tool_calling") ||
-        options.slackMcpTokenResolver === undefined
-      ) {
+    aiSdkToolSetFactory: async (invocation, model, runtimeOptions) => {
+      if (!model.capabilities.includes("tool_calling")) {
         return [];
       }
-      const slackMcpToolSet = await createSlackMcpToolSet({
-        context: {
-          enterpriseId: invocation.enterpriseId,
-          isEnterpriseInstall: invocation.isEnterpriseInstall,
-          teamId: invocation.teamId,
-          userId: invocation.userId,
-          viewerContextChannelIds: invocation.viewerContextChannelIds,
+      const toolSelection = selectDefaultAgentToolSelection(invocation);
+      const handles: AgentRunnerAiSdkToolSetHandle[] = [
+        {
+          close: async () => {},
+          tools: createAiSdkToolSetFromAgentTools(
+            createDefaultAgentTools({
+              invocation,
+              modelRegistry: providerRouter.registry,
+              options,
+              runtimeOptions,
+              salesforcePdfTools,
+              settings,
+              toolSelection,
+            }),
+          ),
         },
-        tokenResolver: options.slackMcpTokenResolver,
-      });
-      return slackMcpToolSet === undefined ? [] : [slackMcpToolSet];
-    },
-    toolRegistryFactory: (invocation, model) => {
-      if (!model.capabilities.includes("tool_calling")) {
-        return new AgentToolRegistry();
-      }
-      const tools = [
-        ...(options.slackMcpTokenResolver === undefined
-          ? []
-          : createSlackRealTimeSearchAgentTools({
-              context: {
-                channelId: invocation.channelId,
-                enterpriseId: invocation.enterpriseId,
-                isEnterpriseInstall: invocation.isEnterpriseInstall,
-                teamId: invocation.teamId,
-                userId: invocation.userId,
-              },
-              fallbackQuery: invocation.text,
-              logger: options.logger,
-              tokenResolver: options.slackMcpTokenResolver,
-            })),
-        ...createMediaGenerationAgentTools({
-          context: {
-            channelId: invocation.channelId,
-            teamId: invocation.teamId,
-            viewerContextChannelIds: invocation.viewerContextChannelIds,
-          },
-          credentialResolver: options.credentialResolver,
-          featureSettingsRepository: options.featureSettingsRepository,
-          imageGenerationFallbackModelIds: defaultImageGenerationFallbackModelIds,
-          imageGenerationModelId: settings.imageGenerationModelId,
-          modelRegistry: providerRouter.registry,
-        }),
-        ...createSpeechGenerationAgentTools({
-          context: {
-            channelId: invocation.channelId,
-            teamId: invocation.teamId,
-          },
-          credentialResolver: options.credentialResolver,
-          featureSettingsRepository: options.featureSettingsRepository,
-          modelRegistry: providerRouter.registry,
-          textToSpeechModelId: settings.textToSpeechModelId,
-        }),
-        ...(salesforcePdfTools === undefined
-          ? []
-          : createSalesforcePdfAgentTools({
-              ...salesforcePdfTools,
-              context: {
-                slackUserId: invocation.userId,
-                teamId: invocation.teamId,
-              },
-            })),
-        ...(options.credentialResolver === undefined
-          ? []
-          : createSoracomAgentTools({
-              context: {
-                teamId: invocation.teamId,
-              },
-              credentialResolver: options.credentialResolver,
-            })),
       ];
-      return new AgentToolRegistry(tools);
+      if (toolSelection.kind === "all" && options.slackMcpTokenResolver !== undefined) {
+        try {
+          const slackMcpToolSet = await createSlackMcpToolSet({
+            context: {
+              enterpriseId: invocation.enterpriseId,
+              isEnterpriseInstall: invocation.isEnterpriseInstall,
+              teamId: invocation.teamId,
+              userId: invocation.userId,
+              viewerContextChannelIds: invocation.viewerContextChannelIds,
+            },
+            tokenResolver: options.slackMcpTokenResolver,
+          });
+          if (slackMcpToolSet !== undefined) {
+            handles.push(slackMcpToolSet);
+          }
+        } catch (error) {
+          logWarn(options.logger, "Failed to prepare Slack MCP toolset for agent invocation.", {
+            channelId: invocation.channelId,
+            error,
+            modelId: model.id,
+            provider: model.provider,
+            teamId: invocation.teamId,
+          });
+        }
+      }
+      return handles;
     },
+    toolRegistryFactory: () => new AgentToolRegistry(),
   });
+}
+
+async function runFocusedImageGenerationInvocation(input: {
+  invocation: SlackAgentInvocation;
+  modelRegistry: ProviderRouter["registry"];
+  options: {
+    credentialResolver?: ProviderCredentialResolver;
+    featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
+  };
+  runtimeOptions: AgentRunnerRuntimeOptions;
+  settings: AppSettings;
+}): Promise<AgentRunnerDirectInvocationResult | undefined> {
+  const { invocation, modelRegistry, options, runtimeOptions, settings } = input;
+  if (!shouldUseFocusedImageGenerationInvocation(invocation)) {
+    return undefined;
+  }
+  const prompt = focusedImageGenerationPrompt(invocation);
+  const [generateImage] = createMediaGenerationAgentTools({
+    context: {
+      channelId: invocation.channelId,
+      teamId: invocation.teamId,
+      viewerContextChannelIds: invocation.viewerContextChannelIds,
+    },
+    credentialResolver: options.credentialResolver,
+    featureSettingsRepository: options.featureSettingsRepository,
+    imageGenerationFallbackModelIds: defaultImageGenerationFallbackModelIds,
+    imageGenerationModelId: settings.imageGenerationModelId,
+    modelRegistry,
+    onGenerationStart: runtimeOptions.onImageGenerationStart,
+  });
+  if (generateImage === undefined) {
+    return undefined;
+  }
+  const output = await generateImage.execute({ prompt });
+  const toolResult: AgentToolResult = {
+    input: { prompt },
+    output,
+    toolCallId: "direct-generate-image",
+    toolName: generateImage.name,
+  };
+  return {
+    model: modelForToolOutput(output, modelRegistry, settings.agentModelId),
+    result: {
+      content: toolOutputMessage(output),
+      finishReason: "stop",
+    },
+    toolResults: [toolResult],
+  };
+}
+
+function createDefaultAgentTools(input: {
+  invocation: SlackAgentInvocation;
+  modelRegistry: ProviderRouter["registry"];
+  options: {
+    credentialResolver?: ProviderCredentialResolver;
+    featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
+    logger?: unknown;
+    salesforcePdfTools?: Omit<SalesforcePdfToolOptions, "context">;
+    slackMcpTokenResolver?: SlackMcpTokenResolver;
+  };
+  runtimeOptions: AgentRunnerRuntimeOptions;
+  salesforcePdfTools?: Omit<SalesforcePdfToolOptions, "context">;
+  settings: AppSettings;
+  toolSelection: DefaultAgentToolSelection;
+}): AgentToolDefinition[] {
+  const {
+    invocation,
+    modelRegistry,
+    options,
+    runtimeOptions,
+    salesforcePdfTools,
+    settings,
+    toolSelection,
+  } = input;
+  return [
+    ...(toolSelection.kind !== "all" || options.slackMcpTokenResolver === undefined
+      ? []
+      : createSlackRealTimeSearchAgentTools({
+          context: {
+            channelId: invocation.channelId,
+            enterpriseId: invocation.enterpriseId,
+            isEnterpriseInstall: invocation.isEnterpriseInstall,
+            teamId: invocation.teamId,
+            userId: invocation.userId,
+          },
+          fallbackQuery: invocation.text,
+          logger: options.logger,
+          tokenResolver: options.slackMcpTokenResolver,
+        })),
+    ...createMediaGenerationAgentTools({
+      context: {
+        channelId: invocation.channelId,
+        teamId: invocation.teamId,
+        viewerContextChannelIds: invocation.viewerContextChannelIds,
+      },
+      credentialResolver: options.credentialResolver,
+      featureSettingsRepository: options.featureSettingsRepository,
+      imageGenerationFallbackModelIds: defaultImageGenerationFallbackModelIds,
+      imageGenerationModelId: settings.imageGenerationModelId,
+      modelRegistry,
+      onGenerationStart: runtimeOptions.onImageGenerationStart,
+    }),
+    ...(toolSelection.kind !== "all"
+      ? []
+      : createSpeechGenerationAgentTools({
+          context: {
+            channelId: invocation.channelId,
+            teamId: invocation.teamId,
+          },
+          credentialResolver: options.credentialResolver,
+          featureSettingsRepository: options.featureSettingsRepository,
+          modelRegistry,
+          textToSpeechModelId: settings.textToSpeechModelId,
+        })),
+    ...(toolSelection.kind !== "all" || salesforcePdfTools === undefined
+      ? []
+      : createSalesforcePdfAgentTools({
+          ...salesforcePdfTools,
+          context: {
+            slackUserId: invocation.userId,
+            teamId: invocation.teamId,
+          },
+        })),
+    ...(toolSelection.kind !== "all" || options.credentialResolver === undefined
+      ? []
+      : createSoracomAgentTools({
+          context: {
+            teamId: invocation.teamId,
+          },
+          credentialResolver: options.credentialResolver,
+        })),
+  ];
+}
+
+function modelForToolOutput(
+  output: JsonValue,
+  modelRegistry: ProviderRouter["registry"],
+  fallbackModelId: string,
+): ModelInfo {
+  const media = isJsonObject(output) ? output.media : undefined;
+  const modelId =
+    isJsonObject(media) && typeof media.modelId === "string" ? media.modelId : fallbackModelId;
+  try {
+    return modelRegistry.get(modelId);
+  } catch {
+    return modelRegistry.get(fallbackModelId);
+  }
+}
+
+function toolOutputMessage(output: JsonValue): string {
+  return isJsonObject(output) && typeof output.message === "string"
+    ? output.message
+    : "Image generation completed.";
+}
+
+type DefaultAgentToolSelection = {
+  kind: "all" | "image_generation_only";
+};
+
+function selectDefaultAgentToolSelection(
+  invocation: SlackAgentInvocation,
+): DefaultAgentToolSelection {
+  return shouldUseFocusedImageGenerationInvocation(invocation)
+    ? { kind: "image_generation_only" }
+    : { kind: "all" };
+}
+
+export function shouldUseFocusedImageGenerationInvocation(
+  invocation: SlackAgentInvocation,
+): boolean {
+  return (
+    shouldUseFocusedImageGenerationTools(invocation.text) ||
+    (findPriorImageGenerationRequest(invocation) !== undefined &&
+      isImageModificationRequest(invocation.text))
+  );
+}
+
+function focusedImageGenerationPrompt(invocation: SlackAgentInvocation): string {
+  const priorRequest = findPriorImageGenerationRequest(invocation);
+  if (priorRequest === undefined || shouldUseFocusedImageGenerationTools(invocation.text)) {
+    return invocation.text;
+  }
+  return [
+    "Create a new image based on the earlier image request, applying the follow-up change.",
+    `Earlier image request: ${priorRequest}`,
+    `Follow-up change: ${invocation.text}`,
+  ].join("\n");
+}
+
+export function shouldUseFocusedImageGenerationTools(text: string): boolean {
+  const normalizedText = text.normalize("NFKC").toLowerCase();
+  const hasImageTarget =
+    /\b(image|picture|photo|illustration|drawing)\b/u.test(normalizedText) ||
+    /(画像|イメージ|絵|写真|イラスト)/u.test(normalizedText);
+  const hasGenerationIntent =
+    /\b(generate|create|draw|render|produce)\b/u.test(normalizedText) ||
+    /\bmake\s+(an?\s+)?(image|picture|photo|illustration|drawing)\b/u.test(normalizedText) ||
+    /(生成|作成|作って|つくって|描いて|描画)/u.test(normalizedText);
+  return hasImageTarget && hasGenerationIntent;
+}
+
+function isImageModificationRequest(text: string): boolean {
+  const normalizedText = text.normalize("NFKC").toLowerCase();
+  return (
+    /\b(edit|modify)\b|\b(change|adjust|update)\s+(it|this|that|the image|the picture|the photo)\b/u.test(
+      normalizedText,
+    ) ||
+    /\b(make|turn)\s+(it|this|that|the image|the picture|the photo)?\s*(black|white|red|blue|green|brighter|darker|larger|smaller)\b/u.test(
+      normalizedText,
+    ) ||
+    /\b(change|set|adjust)\s+(the\s+)?colou?r\b|\bcolou?r\s+(to|into)\s+(black|white|red|blue|green)\b/u.test(
+      normalizedText,
+    ) ||
+    /(変えて|変更して|編集して|修正して|加工して)/u.test(normalizedText) ||
+    /(色|カラー).*(変えて|変更して)/u.test(normalizedText) ||
+    /(黒|白|赤|青|緑)(くして|にして|っぽくして|い[^。！？\n]*にして)/u.test(normalizedText) ||
+    /(明るく|暗く|大きく|小さく).*(して|変えて)/u.test(normalizedText)
+  );
+}
+
+function findPriorImageGenerationRequest(invocation: SlackAgentInvocation): string | undefined {
+  for (const message of [...invocation.threadHistory].reverse()) {
+    if (message.role === "user" && shouldUseFocusedImageGenerationTools(message.text)) {
+      return message.text;
+    }
+  }
+  for (const message of [...invocation.threadMessages].reverse()) {
+    if (shouldUseFocusedImageGenerationTools(message)) {
+      return message;
+    }
+  }
+  return undefined;
 }
 
 function normalizeAiSdkToolSetHandles(

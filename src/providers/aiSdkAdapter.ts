@@ -53,6 +53,7 @@ import type {
   LlmResult,
   LlmStreamEvent,
   LlmToolCall,
+  LlmToolResult,
   LlmUsage,
   ModelInfo,
 } from "./contracts.js";
@@ -63,6 +64,10 @@ import {
   type ProviderCredentialResolver,
   stringPayloadField,
 } from "./credentials.js";
+import {
+  aiSdkToolExecutionOutputsSymbol,
+  type AiSdkToolSetWithExecutionOutputs,
+} from "./aiSdkToolExecutionOutputs.js";
 import { mergeReasoningProviderOptions } from "./reasoningOptions.js";
 
 export type AiSdkModelResolver = (
@@ -150,6 +155,8 @@ export class AiSdkLlmAdapter implements LlmAdapter {
       const credential = await this.resolveCredential(request);
       const providerTools = this.resolveProviderTools(request.model, credential);
       const providerToolNames = providerToolNamesForRequest(request, providerTools);
+      const providerExecutedToolNames = providerExecutedToolNamesForRequest(providerTools);
+      const toolExecutionOutputs = toolExecutionOutputsForRequest(request.aiSdkTools);
       const tools = toolsForRequest(request, providerTools);
       const hasProviderExecutedTools =
         providerTools !== undefined || Object.keys(request.aiSdkTools ?? {}).length > 0;
@@ -182,6 +189,12 @@ export class AiSdkLlmAdapter implements LlmAdapter {
         toolCalls: result.toolCalls
           .filter((toolCall) => !isProviderToolCall(toolCall, providerToolNames))
           .map(mapToolCall),
+        toolResults: nonEmptyToolResults(
+          result.steps
+            .flatMap((step) => step.toolResults)
+            .filter((toolResult) => !isProviderToolCall(toolResult, providerExecutedToolNames))
+            .map((toolResult) => mapToolResult(toolResult, toolExecutionOutputs)),
+        ),
         usage: mapUsage(result.usage),
       };
     } catch (error) {
@@ -215,6 +228,8 @@ export class AiSdkLlmAdapter implements LlmAdapter {
       const credential = await this.resolveCredential(request);
       const providerTools = this.resolveProviderTools(request.model, credential);
       const providerToolNames = providerToolNamesForRequest(request, providerTools);
+      const providerExecutedToolNames = providerExecutedToolNamesForRequest(providerTools);
+      const toolExecutionOutputs = toolExecutionOutputsForRequest(request.aiSdkTools);
       const tools = toolsForRequest(request, providerTools);
       const hasProviderExecutedTools =
         providerTools !== undefined || Object.keys(request.aiSdkTools ?? {}).length > 0;
@@ -241,6 +256,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
       let usage: LanguageModelUsage | undefined;
       let hasError = false;
       const toolCalls: LlmToolCall[] = [];
+      const toolResults: LlmToolResult[] = [];
 
       for await (const part of result.fullStream) {
         switch (part.type) {
@@ -263,6 +279,11 @@ export class AiSdkLlmAdapter implements LlmAdapter {
             };
             break;
           }
+          case "tool-result":
+            if (!isProviderToolCall(part, providerExecutedToolNames)) {
+              toolResults.push(mapToolResult(part, toolExecutionOutputs));
+            }
+            break;
           case "finish":
             finishReason = part.finishReason;
             usage = part.totalUsage;
@@ -293,6 +314,7 @@ export class AiSdkLlmAdapter implements LlmAdapter {
           content: text,
           finishReason: finishReason === undefined ? "unknown" : mapFinishReason(finishReason),
           toolCalls,
+          toolResults: nonEmptyToolResults(toolResults),
           usage: mappedUsage,
         },
         type: "done",
@@ -930,6 +952,12 @@ function providerToolNamesForRequest(
   );
 }
 
+function providerExecutedToolNamesForRequest(
+  providerTools: ToolSet | undefined,
+): ReadonlySet<string> {
+  return new Set(Object.keys(providerTools ?? {}));
+}
+
 function isProviderToolCall(
   toolCall: { providerExecuted?: boolean; toolName: string },
   providerToolNames: ReadonlySet<string>,
@@ -949,6 +977,35 @@ function mapToolCall(toolCall: {
   };
 }
 
+function mapToolResult(
+  toolResult: {
+    input: unknown;
+    output: unknown;
+    toolCallId: string;
+    toolName: string;
+  },
+  toolExecutionOutputs: ReadonlyMap<string, JsonValue> | undefined,
+): LlmToolResult {
+  return {
+    input: toolResult.input,
+    output: toolExecutionOutputs?.get(toolResult.toolCallId) ?? toJsonValue(toolResult.output),
+    toolCallId: toolResult.toolCallId,
+    toolName: toolResult.toolName,
+  };
+}
+
+function toolExecutionOutputsForRequest(
+  tools: ToolSet | undefined,
+): ReadonlyMap<string, JsonValue> | undefined {
+  return (tools as AiSdkToolSetWithExecutionOutputs | undefined)?.[aiSdkToolExecutionOutputsSymbol];
+}
+
+function nonEmptyToolResults(
+  toolResults: readonly LlmToolResult[],
+): readonly LlmToolResult[] | undefined {
+  return toolResults.length === 0 ? undefined : toolResults;
+}
+
 function mapSources(
   sources: readonly { sourceType?: string; title?: string; url?: string }[] | undefined,
 ): LlmResult["sources"] {
@@ -962,12 +1019,18 @@ function mapSources(
 }
 
 function mapUsage(usage: LanguageModelUsage): LlmUsage {
-  return {
+  return compactObject({
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     reasoningTokens: usage.outputTokenDetails.reasoningTokens,
     totalTokens: usage.totalTokens,
-  };
+  });
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  ) as T;
 }
 
 function mapFinishReason(reason: FinishReason): LlmResult["finishReason"] {
@@ -992,6 +1055,22 @@ function normalizeProviderError(model: ModelInfo, error: unknown): LlmProviderEr
     return error;
   }
 
-  const message = error instanceof Error ? error.message : "Unknown provider invocation error.";
+  const message =
+    error instanceof Error
+      ? error.message
+      : (readNestedString(error, ["error", "message"]) ??
+        readNestedString(error, ["message"]) ??
+        "Unknown provider invocation error.");
   return new LlmProviderError(model.provider, model.id, message, error);
+}
+
+function readNestedString(value: unknown, path: readonly string[]): string | undefined {
+  let current = value;
+  for (const segment of path) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+    current = current[segment];
+  }
+  return typeof current === "string" && current.trim().length > 0 ? current : undefined;
 }

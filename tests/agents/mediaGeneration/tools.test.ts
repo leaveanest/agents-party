@@ -136,6 +136,95 @@ describe("createMediaGenerationAgentTools", () => {
     expect(generatedPrompts).toEqual(["draw a dog"]);
   });
 
+  it("notifies when image generation is about to start", async () => {
+    const notifications: unknown[] = [];
+    const operations: string[] = [];
+    const tool = createMediaGenerationAgentTools({
+      context: { channelId: "C1", teamId: "T1" },
+      credentialResolver: {
+        async resolveProviderCredential() {
+          return { apiKey: "sk-test" };
+        },
+      },
+      featureSettingsRepository: new MemoryFeatureSettingsRepository({
+        allowedChannelIds: ["C1"],
+        workspaceEnabled: true,
+      }),
+      imageGenerationModelId: model.id,
+      mediaGatewayFactory: () => ({
+        async generateImage() {
+          operations.push("generate");
+          return { dataBase64: "ZmFrZQ==", mimeType: "image/png" };
+        },
+      }),
+      modelRegistry: new ModelRegistry([model]),
+      onGenerationStart: async (input) => {
+        operations.push("notify");
+        notifications.push(input);
+      },
+    })[0];
+
+    await expect(tool.execute({ prompt: "draw a diagram" })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(operations).toEqual(["notify", "generate"]);
+    expect(notifications).toEqual([
+      {
+        channelId: "C1",
+        modelId: model.id,
+        prompt: "draw a diagram",
+        provider: "openai",
+        teamId: "T1",
+      },
+    ]);
+  });
+
+  it("keeps generated image bytes out of the model-visible tool output", async () => {
+    const tool = createMediaGenerationAgentTools({
+      context: { channelId: "C1", teamId: "T1" },
+      credentialResolver: {
+        async resolveProviderCredential() {
+          return { apiKey: "sk-test" };
+        },
+      },
+      featureSettingsRepository: new MemoryFeatureSettingsRepository({
+        allowedChannelIds: ["C1"],
+        workspaceEnabled: true,
+      }),
+      imageGenerationModelId: model.id,
+      mediaGatewayFactory: () => ({
+        async generateImage() {
+          return { dataBase64: "ZmFrZQ==", mimeType: "image/png", uri: "https://example.test/x" };
+        },
+      }),
+      modelRegistry: new ModelRegistry([model]),
+    })[0];
+
+    const output = await tool.execute({ prompt: "draw a diagram" });
+
+    await expect(
+      tool.toModelOutput?.({
+        input: { prompt: "draw a diagram" },
+        output,
+        toolCallId: "call-1",
+      }),
+    ).resolves.toEqual({
+      type: "json",
+      value: {
+        media: {
+          kind: "image",
+          mimeType: "image/png",
+          modelId: model.id,
+          provider: "openai",
+          status: "generated",
+        },
+        message: "Image generated.",
+        ok: true,
+      },
+    });
+    expect(JSON.stringify(output)).toContain("ZmFrZQ==");
+  });
+
   it("uses the Assistant source channel allowlist before direct message settings", async () => {
     let credentialCalls = 0;
     const tool = createMediaGenerationAgentTools({

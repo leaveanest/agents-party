@@ -178,6 +178,8 @@ export const englishTranslations = {
   "slack.error.queue": "I couldn't queue that request. Please try again in a moment.",
   "slack.error.translation": "I couldn't translate that message. Please try again in a moment.",
   "slack.error.unreadableReaction": "I couldn't read text from the reacted message.",
+  "slack.notice.imageGenerationStarted":
+    "Image generation has started. This can take a little while.",
   "slack.status.working": "is working on your request...",
 } as const;
 
@@ -371,6 +373,7 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
     "このメッセージを翻訳できませんでした。時間をおいて再試行してください。",
   "slack.error.unreadableReaction":
     "リアクションされたメッセージからテキストを読み取れませんでした。",
+  "slack.notice.imageGenerationStarted": "画像生成を開始しました。少し時間がかかる場合があります。",
   "slack.status.working": "リクエストを処理しています...",
 };
 

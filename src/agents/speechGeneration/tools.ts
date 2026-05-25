@@ -70,6 +70,10 @@ export function createSpeechGenerationAgentTools(
       outputSchema: speechToolOutputSchema as z.ZodType<JsonValue>,
       parameters: z.toJSONSchema(textToSpeechInputSchema) as JsonValue,
       schema: textToSpeechInputSchema as z.ZodType<JsonValue>,
+      toModelOutput: async ({ output }) => ({
+        type: "json",
+        value: modelVisibleSpeechToolOutput(speechToolOutputSchema.parse(output)),
+      }),
     },
   ];
 }
@@ -163,6 +167,22 @@ function failure(code: string, message: string): SpeechToolOutput {
     code,
     message,
     ok: false,
+  };
+}
+
+function modelVisibleSpeechToolOutput(output: SpeechToolOutput): JsonValue {
+  if (output.media === undefined) {
+    return output;
+  }
+  return {
+    ...output,
+    media: {
+      kind: output.media.kind,
+      ...(output.media.mimeType === undefined ? {} : { mimeType: output.media.mimeType }),
+      modelId: output.media.modelId,
+      provider: output.media.provider,
+      status: output.media.status,
+    },
   };
 }
 

@@ -175,6 +175,57 @@ describe("createSpeechGenerationAgentTools", () => {
       }),
     ]);
   });
+
+  it("keeps generated audio bytes out of the model-visible tool output", async () => {
+    const tool = createSpeechGenerationAgentTools({
+      context: { channelId: "C1", teamId: "T1" },
+      credentialResolver: {
+        async resolveProviderCredential() {
+          return { apiKey: "sk-test" };
+        },
+      },
+      featureSettingsRepository: new MemoryFeatureSettingsRepository({
+        allowedChannelIds: ["C1"],
+        modelId: model.id,
+        workspaceEnabled: true,
+      }),
+      modelRegistry: new ModelRegistry([model]),
+      speechGatewayFactory: () => ({
+        async generateSpeech() {
+          return {
+            dataBase64: "YXVkaW8=",
+            mimeType: "audio/mpeg",
+            uri: "https://example.test/audio.mp3",
+          };
+        },
+      }),
+      textToSpeechModelId: model.id,
+    })[0];
+
+    const output = await tool.execute({ text: "read this" });
+
+    await expect(
+      tool.toModelOutput?.({
+        input: { text: "read this" },
+        output,
+        toolCallId: "call-1",
+      }),
+    ).resolves.toEqual({
+      type: "json",
+      value: {
+        media: {
+          kind: "audio",
+          mimeType: "audio/mpeg",
+          modelId: model.id,
+          provider: "openai",
+          status: "generated",
+        },
+        message: "Speech generated.",
+        ok: true,
+      },
+    });
+    expect(JSON.stringify(output)).toContain("YXVkaW8=");
+  });
 });
 
 class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsRepository {
