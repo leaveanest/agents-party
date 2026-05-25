@@ -19,5 +19,6 @@ object_storage_prefix = "dev"
 enable_scheduler          = false
 scheduler_plan            = "scheduler:standard"
 rss_feed_scheduler_command = "node dist/rssFeedWorker.mjs"
+# The daily restart command is emitted as a Terraform output because it includes heroku_app_name.
 
 additional_config_vars = {}
