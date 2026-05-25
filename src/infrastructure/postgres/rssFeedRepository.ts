@@ -4,7 +4,6 @@ import type { Pool } from "pg";
 
 import type { JsonValue } from "../../domain/messageHistory.js";
 import type {
-  RssArticleContentCacheEntry,
   RssFeedFetchCacheEntry,
   RssFeedSubscription,
   RssProcessedArticle,
@@ -98,51 +97,6 @@ export class PostgresRssFeedRepository implements RssFeedRepository {
         entry.status ?? null,
         entry.fetchedAt,
         entry.expiresAt,
-        entry.errorCount,
-        entry.lastError ?? null,
-      ],
-    );
-  }
-
-  async findArticleContentCache(
-    articleUrl: string,
-  ): Promise<RssArticleContentCacheEntry | undefined> {
-    const result = await this.pool.query<RssArticleContentCacheRow>(
-      `
-        select article_url, content, content_hash, fetched_at, expires_at,
-               fetch_failed_at, error_count, last_error
-        from rss_article_content_cache
-        where article_url = $1
-      `,
-      [articleUrl],
-    );
-    return result.rows[0] === undefined ? undefined : mapArticleContentCache(result.rows[0]);
-  }
-
-  async saveArticleContentCache(entry: RssArticleContentCacheEntry): Promise<void> {
-    await this.pool.query(
-      `
-        insert into rss_article_content_cache
-          (article_url, content, content_hash, fetched_at, expires_at,
-           fetch_failed_at, error_count, last_error)
-        values ($1, $2, $3, $4, $5, $6, $7, $8)
-        on conflict (article_url)
-        do update set
-          content = excluded.content,
-          content_hash = excluded.content_hash,
-          fetched_at = excluded.fetched_at,
-          expires_at = excluded.expires_at,
-          fetch_failed_at = excluded.fetch_failed_at,
-          error_count = excluded.error_count,
-          last_error = excluded.last_error
-      `,
-      [
-        entry.articleUrl,
-        entry.content ?? null,
-        entry.contentHash ?? null,
-        entry.fetchedAt,
-        entry.expiresAt,
-        entry.fetchFailedAt ?? null,
         entry.errorCount,
         entry.lastError ?? null,
       ],
@@ -292,17 +246,6 @@ type RssFeedFetchCacheRow = {
   status: number | null;
 };
 
-type RssArticleContentCacheRow = {
-  article_url: string;
-  content: string | null;
-  content_hash: string | null;
-  error_count: number;
-  expires_at: Date;
-  fetch_failed_at: Date | null;
-  fetched_at: Date;
-  last_error: string | null;
-};
-
 function mapSubscription(row: RssFeedSubscriptionRow): RssFeedSubscription {
   return {
     channelId: row.channel_id,
@@ -329,18 +272,5 @@ function mapFeedFetchCache(row: RssFeedFetchCacheRow): RssFeedFetchCacheEntry {
     lastError: row.last_error ?? undefined,
     lastModified: row.last_modified ?? undefined,
     status: row.status ?? undefined,
-  };
-}
-
-function mapArticleContentCache(row: RssArticleContentCacheRow): RssArticleContentCacheEntry {
-  return {
-    articleUrl: row.article_url,
-    content: row.content ?? undefined,
-    contentHash: row.content_hash ?? undefined,
-    errorCount: row.error_count,
-    expiresAt: row.expires_at,
-    fetchFailedAt: row.fetch_failed_at ?? undefined,
-    fetchedAt: row.fetched_at,
-    lastError: row.last_error ?? undefined,
   };
 }

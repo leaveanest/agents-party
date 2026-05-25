@@ -47,22 +47,24 @@ describe("native provider adapters", () => {
       },
       provider: "openai",
       supports(_request, requiredCapabilities) {
-        return !requiredCapabilities.includes("web_search");
+        return !requiredCapabilities.includes("image_generation");
       },
     };
     const nativeAdapter = new UnsupportedNativeProviderAdapter({
-      capabilities: ["web_search"],
+      capabilities: ["text", "image_generation"],
       provider: "openai",
-      reason: "Native web search is not implemented in this test.",
+      reason: "Native image generation is not implemented in this test.",
     });
     const router = new ProviderRouter([commonAdapter, nativeAdapter], registry());
-    const model = router.resolveModel({ workspaceModelId: "openai:gpt-4o" }, ["web_search"]).model;
+    const model = router.resolveModel({ workspaceModelId: "openai:gpt-image-1.5" }, [
+      "image_generation",
+    ]).model;
 
     await expect(
       router.generate({
         history,
         model,
-        requiredCapabilities: ["web_search"],
+        requiredCapabilities: ["image_generation"],
       }),
     ).rejects.toThrow(NativeProviderUnsupportedError);
     expect(commonAdapterCalled).toBe(false);
@@ -75,17 +77,19 @@ describe("native provider adapters", () => {
       },
       provider: "openai",
       supports(_request, requiredCapabilities) {
-        return !requiredCapabilities.includes("web_search");
+        return !requiredCapabilities.includes("image_generation");
       },
     };
     const router = new ProviderRouter([commonAdapter], registry());
-    const model = router.resolveModel({ workspaceModelId: "openai:gpt-4o" }, ["web_search"]).model;
+    const model = router.resolveModel({ workspaceModelId: "openai:gpt-image-1.5" }, [
+      "image_generation",
+    ]).model;
 
     await expect(
       router.generate({
         history,
         model,
-        requiredCapabilities: ["web_search"],
+        requiredCapabilities: ["image_generation"],
       }),
     ).rejects.toThrow(NoProviderAdapterForCapabilitiesError);
   });
@@ -94,12 +98,48 @@ describe("native provider adapters", () => {
     const adapters = createNativeProviderAdapters();
 
     expect(adapters.map((adapter) => adapter.provider)).toEqual([
-      "google",
       "openai",
       "anthropic",
       "google",
       "dify",
     ]);
+  });
+
+  it("routes Gemini web search through the common adapter", async () => {
+    let commonAdapterCalled = false;
+    const commonAdapter: LlmAdapter = {
+      async generate() {
+        commonAdapterCalled = true;
+        return { content: "common" };
+      },
+      provider: "google",
+      supports(_request, requiredCapabilities) {
+        return !requiredCapabilities.includes("file_input");
+      },
+    };
+    const router = new ProviderRouter(
+      [...createNativeProviderAdapters(), commonAdapter],
+      new ModelRegistry([
+        {
+          capabilities: ["text", "streaming", "web_search"],
+          id: "google:gemini-2.5-flash",
+          provider: "google",
+          providerModelId: "gemini-2.5-flash",
+        },
+      ]),
+    );
+    const model = router.resolveModel({ workspaceModelId: "google:gemini-2.5-flash" }, [
+      "web_search",
+    ]).model;
+
+    await expect(
+      router.generate({
+        history,
+        model,
+        requiredCapabilities: ["web_search"],
+      }),
+    ).resolves.toEqual({ content: "common" });
+    expect(commonAdapterCalled).toBe(true);
   });
 
   it("routes Gemini file input to the native stub with common adapters registered first", async () => {
@@ -128,10 +168,10 @@ describe("native provider adapters", () => {
 function registry(): ModelRegistry {
   return new ModelRegistry([
     {
-      capabilities: ["text", "streaming", "web_search"],
-      id: "openai:gpt-4o",
+      capabilities: ["text", "image_generation"],
+      id: "openai:gpt-image-1.5",
       provider: "openai",
-      providerModelId: "gpt-4o",
+      providerModelId: "gpt-image-1.5",
     },
   ]);
 }

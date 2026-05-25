@@ -407,4 +407,11 @@ export const postgresMigrations: readonly PostgresMigration[] = [
         on channel_feature_settings (team_id, feature_key);
     `,
   },
+  {
+    id: "20260525_0011",
+    name: "drop_unused_rss_article_content_cache",
+    upSql: `
+      drop table if exists rss_article_content_cache;
+    `,
+  },
 ];

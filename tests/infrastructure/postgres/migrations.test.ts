@@ -40,6 +40,7 @@ describe("PostgresMigrationRunner", () => {
       "20260515_0008",
       "20260515_0009",
       "20260519_0010",
+      "20260525_0011",
     ]);
     expect(postgresMigrations[0]?.upSql).toContain(
       "create table if not exists slack_installations",
@@ -79,6 +80,9 @@ describe("PostgresMigrationRunner", () => {
     );
     expect(postgresMigrations[9]?.upSql).toContain(
       "create table if not exists channel_feature_settings",
+    );
+    expect(postgresMigrations[10]?.upSql).toContain(
+      "drop table if exists rss_article_content_cache",
     );
   });
 

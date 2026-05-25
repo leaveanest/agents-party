@@ -8,10 +8,14 @@ RSS state is stored in PostgreSQL:
 
 - `rss_feed_subscriptions`: enabled feeds per Slack team/channel.
 - `rss_feed_fetch_cache`: RSS XML cache with `ETag` / `Last-Modified` conditional request metadata.
-- `rss_article_content_cache`: extracted article text cache by canonical article URL.
 - `rss_processed_articles`: subscription/article processing log with a unique `(subscription_id, article_key)` constraint.
 
-Subscriptions can be inserted through the repository or directly by operations tooling until a Slack management UI is added.
+Slack workspace admins can add subscriptions from App Home. The add flow asks for a public
+channel, feed URL, and RSS-specific posting prompt, verifies that the URL returns readable RSS/Atom
+feed items, attempts to join the selected channel with `conversations.join`, then saves the
+subscription. The prompt is stored in the subscription payload and applied when selecting items and
+drafting Slack posts. Private channels still require inviting the app in Slack before RSS delivery.
+Subscriptions can also be inserted through the repository or directly by operations tooling.
 
 ## Processing
 
@@ -37,9 +41,12 @@ Batch behavior:
 - fetches each RSS URL once per batch
 - uses fresh DB cache without network access
 - sends `If-None-Match` / `If-Modified-Since` when cache is stale
-- caches article content by canonical article URL
+- does not fetch linked article pages in application code
+- requires a `web_search` capable model and lets the provider-executed web search tool inspect or
+  verify linked article URLs when drafting posts
 - skips already processed `(subscription_id, article_key)` pairs
 - resolves model as channel `default_model_id`, then workspace `default_model_id`
+- asks the LLM once per subscription to choose feed items and draft Slack updates as JSON
 - fails closed when no channel/workspace model is configured
 - invokes the existing `ProviderRouter`
 - posts through `src/slack/rssFeedPosts.ts`

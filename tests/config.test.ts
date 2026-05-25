@@ -52,6 +52,7 @@ describe("loadSettings", () => {
         "app_mentions:read",
         "assistant:write",
         "channels:history",
+        "channels:join",
         "channels:read",
         "chat:write",
         "files:read",

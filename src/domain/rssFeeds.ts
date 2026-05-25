@@ -52,17 +52,6 @@ export type RssFeedFetchCacheEntry = {
   status?: number;
 };
 
-export type RssArticleContentCacheEntry = {
-  articleUrl: string;
-  content?: string;
-  contentHash?: string;
-  errorCount: number;
-  expiresAt: Date;
-  fetchFailedAt?: Date;
-  fetchedAt: Date;
-  lastError?: string;
-};
-
 export function normalizeRssFeedUrl(value: string): string {
   return normalizeUrl(value);
 }

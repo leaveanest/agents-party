@@ -111,6 +111,9 @@ importers:
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
+      undici:
+        specifier: ^8.3.0
+        version: 8.3.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2342,6 +2345,10 @@ packages:
   undici-types@7.19.2:
     resolution: {integrity: sha512-qYVnV5OEm2AW8cJMCpdV20CDyaN3g0AjDlOGf1OW4iaDEx8MwdtChUp4zu4H0VP3nDRF/8RKWH+IPp9uW0YGZg==}
 
+  undici@8.3.0:
+    resolution: {integrity: sha512-TkUDgb6tl7KOGZ+7e8E3d2FYgUQgF6z5YypqjWmixVQSQERFcVrVg0ySADm2LVLRh5ljAaHTCR5Fmz3Q34rB7Q==}
+    engines: {node: '>=22.19.0'}
+
   unicode-properties@1.4.1:
     resolution: {integrity: sha512-CLjCCLQ6UuMxWnbIylkisbRj31qxHPAurvena/0iwSVbQ2G1VY5/HjV0IRabOEbDHlzZlRdCrD4NhB0JtU40Pg==}
 
@@ -4406,6 +4413,8 @@ snapshots:
   typescript@6.0.3: {}
 
   undici-types@7.19.2: {}
+
+  undici@8.3.0: {}
 
   unicode-properties@1.4.1:
     dependencies:

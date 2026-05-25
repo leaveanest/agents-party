@@ -1,5 +1,4 @@
 import type {
-  RssArticleContentCacheEntry,
   RssFeedFetchCacheEntry,
   RssFeedSubscription,
   RssProcessedArticle,
@@ -15,7 +14,6 @@ export type RssFeedRepository = {
     slackMessageTs: string;
     subscriptionId: string;
   }): Promise<void>;
-  findArticleContentCache(articleUrl: string): Promise<RssArticleContentCacheEntry | undefined>;
   findFeedFetchCache(feedUrl: string): Promise<RssFeedFetchCacheEntry | undefined>;
   listEnabledSubscriptions(input?: { limit?: number }): Promise<RssFeedSubscription[]>;
   listProcessedArticleKeys(
@@ -27,7 +25,6 @@ export type RssFeedRepository = {
     subscriptionId: string;
   }): Promise<void>;
   reserveProcessedArticle(article: RssProcessedArticle): Promise<boolean>;
-  saveArticleContentCache(entry: RssArticleContentCacheEntry): Promise<void>;
   saveFeedFetchCache(entry: RssFeedFetchCacheEntry): Promise<void>;
   saveSubscription(subscription: RssFeedSubscription): Promise<void>;
   updateSubscriptionCursor(input: {

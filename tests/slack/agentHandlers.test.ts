@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { AgentRunnerExecutionError } from "../../src/agents/runner.js";
 import type { JsonObject } from "../../src/infrastructure/postgres/jsonDocumentRepository.js";
+import type { RssFeedSubscription } from "../../src/domain/rssFeeds.js";
 import type {
   ChannelFeatureSettingDocument,
   WorkspaceFeatureKey,
@@ -2759,6 +2760,264 @@ describe("createAgentSlackHandlers", () => {
 
     expect(JSON.stringify(publishedViews[0])).toContain("API keys");
     expect(JSON.stringify(publishedViews[0])).toContain("workspace_credential_configure");
+  });
+
+  it("publishes an App Home RSS feed entry point when RSS storage is configured", async () => {
+    const publishedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedHome: {
+        repository: new MemoryRssFeedRepository(),
+      },
+    });
+
+    await handlers.handleAppHomeOpened({
+      body: { team_id: "T1" },
+      client: {
+        views: {
+          publish: async (payload: unknown) => {
+            publishedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      event: { user: "U1" },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(publishedViews[0])).toContain("RSS subscriptions");
+    expect(JSON.stringify(publishedViews[0])).toContain("rss_feed_configure");
+    expect(JSON.stringify(publishedViews[0])).toContain('\\"selectedTeamId\\":\\"T1\\"');
+  });
+
+  it("opens and saves RSS subscriptions after joining the selected public channel", async () => {
+    const openedViews: unknown[] = [];
+    const updatedViews: unknown[] = [];
+    const joinedChannels: string[] = [];
+    const callOrder: string[] = [];
+    const repository = new MemoryRssFeedRepository();
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedFetchFn: async () => {
+        callOrder.push("fetch");
+        return validRssFeedResponse();
+      },
+      rssFeedResolveHostname: publicRssResolver,
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedConfigureAction({
+      ack: async () => {},
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T1", source: "app_home" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "UADMIN" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const opened = JSON.stringify(openedViews[0]);
+    expect(opened).toContain("rss_feed_modal");
+    expect(opened).toContain("conversations_select");
+    expect(opened).toContain('"include":["public"]');
+    expect(opened).toContain("rss_feed_prompt");
+    expect(opened).toContain('"multiline":true');
+
+    await handlers.handleRssFeedModalSubmission({
+      ack: async (payload?: unknown) => {
+        updatedViews.push(["ack", payload]);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        conversations: {
+          join: async (payload: { channel: string }) => {
+            callOrder.push("join");
+            joinedChannels.push(payload.channel);
+            return {};
+          },
+        },
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { error() {}, warn() {} },
+      view: validRssFeedView({
+        channelId: "C1",
+        feedUrl: "HTTPS://Example.COM:443/feed.xml",
+        prompt: "Pick practical AI operations posts.",
+        teamId: "T1",
+      }),
+    } as never);
+
+    expect(joinedChannels).toEqual(["C1"]);
+    expect(callOrder).toEqual(["fetch", "join"]);
+    expect(repository.saved).toHaveLength(1);
+    expect(repository.saved[0]).toMatchObject({
+      channelId: "C1",
+      enabled: true,
+      feedUrl: "https://example.com/feed.xml",
+      payload: {
+        created_by_slack_user_id: "UADMIN",
+        prompt: "Pick practical AI operations posts.",
+        source: "slack_app_home",
+      },
+      teamId: "T1",
+    });
+    expect(JSON.stringify(updatedViews)).toContain("RSS subscription was saved.");
+  });
+
+  it("does not save RSS subscriptions when channel join is missing scope", async () => {
+    const updatedViews: unknown[] = [];
+    const repository = new MemoryRssFeedRepository();
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedFetchFn: async () => validRssFeedResponse(),
+      rssFeedResolveHostname: publicRssResolver,
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedModalSubmission({
+      ack: async (payload?: unknown) => {
+        updatedViews.push(["ack", payload]);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        conversations: {
+          join: async () => {
+            throw { data: { error: "missing_scope" } };
+          },
+        },
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+      view: validRssFeedView({
+        channelId: "C1",
+        feedUrl: "https://example.com/feed.xml",
+        teamId: "T1",
+      }),
+    } as never);
+
+    expect(repository.saved).toEqual([]);
+    expect(JSON.stringify(updatedViews)).toContain("channels:join scope");
+  });
+
+  it("does not join or save RSS subscriptions when the URL is not a feed", async () => {
+    const updatedViews: unknown[] = [];
+    const joinedChannels: string[] = [];
+    const repository = new MemoryRssFeedRepository();
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedFetchFn: async () =>
+        new Response("<html><body>not a feed</body></html>", {
+          headers: { "content-type": "text/html" },
+          status: 200,
+        }),
+      rssFeedResolveHostname: publicRssResolver,
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedModalSubmission({
+      ack: async (payload?: unknown) => {
+        updatedViews.push(["ack", payload]);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {
+        conversations: {
+          join: async (payload: { channel: string }) => {
+            joinedChannels.push(payload.channel);
+            return {};
+          },
+        },
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+      view: validRssFeedView({
+        channelId: "C1",
+        feedUrl: "https://example.com/not-feed",
+        teamId: "T1",
+      }),
+    } as never);
+
+    expect(joinedChannels).toEqual([]);
+    expect(repository.saved).toEqual([]);
+    expect(JSON.stringify(updatedViews)).toContain("did not contain readable RSS or Atom");
+  });
+
+  it("rejects RSS subscription submissions when Enterprise metadata team differs from body team", async () => {
+    const acks: unknown[] = [];
+    const repository = new MemoryRssFeedRepository();
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedFetchFn: async () => validRssFeedResponse(),
+      rssFeedResolveHostname: publicRssResolver,
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { enterprise: { id: "E1" }, team: { id: "T-body" }, user: { id: "UADMIN" } },
+      client: {
+        conversations: {
+          join: async () => {
+            throw new Error("join should not be called");
+          },
+        },
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { warn() {} },
+      view: validRssFeedView({
+        channelId: "C1",
+        enterpriseId: "E1",
+        feedUrl: "https://example.com/feed.xml",
+        teamId: "T-metadata",
+      }),
+    } as never);
+
+    expect(repository.saved).toEqual([]);
+    expect(acks).toEqual([
+      {
+        errors: {
+          rss_feed_channel: "Slack workspace context does not match.",
+        },
+        response_action: "errors",
+      },
+    ]);
   });
 
   it("publishes feature settings entry point when a supported image provider API key exists", async () => {
@@ -9136,6 +9395,69 @@ function validFeatureSettingsView(input: {
       },
     },
   };
+}
+
+function validRssFeedView(input: {
+  channelId: string;
+  enterpriseId?: string;
+  feedUrl: string;
+  prompt?: string;
+  teamId: string;
+}): unknown {
+  return {
+    hash: "HASH1",
+    id: "VIEW1",
+    private_metadata: JSON.stringify({
+      enterpriseId: input.enterpriseId,
+      source: "app_home",
+      teamId: input.teamId,
+    }),
+    state: {
+      values: {
+        rss_feed_channel: {
+          channel_id: {
+            selected_conversation: input.channelId,
+          },
+        },
+        rss_feed_url: {
+          feed_url: {
+            value: input.feedUrl,
+          },
+        },
+        ...(input.prompt === undefined
+          ? {}
+          : {
+              rss_feed_prompt: {
+                prompt: {
+                  value: input.prompt,
+                },
+              },
+            }),
+      },
+    },
+  };
+}
+
+function validRssFeedResponse(): Response {
+  return new Response(
+    `<rss><channel><item><title>One</title><link>https://example.com/one</link></item></channel></rss>`,
+    {
+      headers: { "content-type": "application/rss+xml" },
+      status: 200,
+    },
+  );
+}
+
+async function publicRssResolver() {
+  return ["93.184.216.34"];
+}
+
+class MemoryRssFeedRepository {
+  readonly saved: RssFeedSubscription[] = [];
+
+  async saveSubscription(subscription: RssFeedSubscription): Promise<void> {
+    this.saved.push(subscription);
+  }
 }
 
 class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsRepository {

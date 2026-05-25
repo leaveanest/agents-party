@@ -18,6 +18,7 @@ describe("RssFeedFetchGateway", () => {
       },
       now: () => new Date("2026-05-12T00:30:00.000Z"),
       repository,
+      resolveHostname: publicResolver,
     });
 
     await expect(gateway.fetchFeed("https://example.com/feed.xml")).resolves.toEqual({
@@ -45,6 +46,7 @@ describe("RssFeedFetchGateway", () => {
       },
       now: () => new Date("2026-05-12T01:00:00.000Z"),
       repository,
+      resolveHostname: publicResolver,
       ttlMs: 60_000,
     });
 
@@ -74,6 +76,7 @@ describe("RssFeedFetchGateway", () => {
       failureTtlMs: 120_000,
       now: () => new Date("2026-05-12T01:00:00.000Z"),
       repository,
+      resolveHostname: publicResolver,
     });
 
     await expect(gateway.fetchFeed("https://example.com/feed.xml")).resolves.toMatchObject({
@@ -103,9 +106,30 @@ describe("RssFeedFetchGateway", () => {
       },
       now: () => new Date("2026-05-12T01:10:00.000Z"),
       repository,
+      resolveHostname: publicResolver,
     });
 
     await expect(gateway.fetchFeed("https://example.com/feed.xml")).resolves.toBeUndefined();
+  });
+
+  it("blocks unsafe feed URLs before network access", async () => {
+    const repository = new MemoryFeedCacheRepository();
+    let fetched = false;
+    const gateway = new RssFeedFetchGateway({
+      fetchFn: async () => {
+        fetched = true;
+        return new Response("<rss />");
+      },
+      now: () => new Date("2026-05-12T01:00:00.000Z"),
+      repository,
+      resolveHostname: publicResolver,
+    });
+
+    await expect(gateway.fetchFeed("http://127.0.0.1/feed.xml")).resolves.toBeUndefined();
+    expect(fetched).toBe(false);
+    expect(repository.entry).toMatchObject({
+      lastError: "non_public_address",
+    });
   });
 });
 
@@ -119,4 +143,8 @@ class MemoryFeedCacheRepository {
   async saveFeedFetchCache(entry: RssFeedFetchCacheEntry) {
     (this as { entry?: RssFeedFetchCacheEntry }).entry = entry;
   }
+}
+
+async function publicResolver() {
+  return ["93.184.216.34"];
 }

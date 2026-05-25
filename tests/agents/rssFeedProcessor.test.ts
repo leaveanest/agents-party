@@ -3,36 +3,47 @@ import { describe, expect, it } from "vite-plus/test";
 import { RssFeedProcessor } from "../../src/agents/rssFeedProcessor.js";
 import type { RssFeedSubscription, RssProcessedArticle } from "../../src/domain/rssFeeds.js";
 import { rssArticleKey } from "../../src/domain/rssFeeds.js";
-import type { LlmRequest, LlmResult, ModelInfo } from "../../src/providers/contracts.js";
+import type {
+  LlmCapability,
+  LlmRequest,
+  LlmResult,
+  ModelInfo,
+} from "../../src/providers/contracts.js";
+import { MissingModelCapabilityError } from "../../src/providers/modelRegistry.js";
 
 const channelModel: ModelInfo = {
-  capabilities: ["text"],
+  capabilities: ["text", "web_search"],
   id: "openai:gpt-4o",
   provider: "openai",
   providerModelId: "gpt-4o",
 };
 const workspaceModel: ModelInfo = {
-  capabilities: ["text"],
+  capabilities: ["text", "web_search"],
   id: "google:gemini-2.5-flash",
   provider: "google",
   providerModelId: "gemini-2.5-flash",
+};
+const textOnlyModel: ModelInfo = {
+  capabilities: ["text"],
+  id: "openai:gpt-5-mini",
+  provider: "openai",
+  providerModelId: "gpt-5-mini",
 };
 
 describe("RssFeedProcessor", () => {
   it("fetches each feed once and resolves channel before workspace models", async () => {
     const repository = new MemoryRssRepository([
-      subscription({ channelId: "C1", id: "S1" }),
+      subscription({
+        channelId: "C1",
+        id: "S1",
+        prompt: "Prioritize product updates and write with an executive tone.",
+      }),
       subscription({ channelId: "C2", id: "S2" }),
     ]);
     const feedFetcher = new CountingFeedFetcher();
     const providerRouter = new FakeProviderRouter();
     const publisher = new RecordingPublisher();
     const processor = new RssFeedProcessor({
-      articleContentFetcher: {
-        async fetchArticleContent() {
-          return "Article body";
-        },
-      },
       articlePublisher: publisher,
       feedFetcher,
       modelSettingsRepository: {
@@ -58,12 +69,24 @@ describe("RssFeedProcessor", () => {
       "openai:gpt-4o",
       "google:gemini-2.5-flash",
     ]);
-    expect(providerRouter.requests[0]?.system).toBe(
-      "You write concise Slack mrkdwn updates for RSS articles. Summarize the article in Japanese, include why it matters, and keep the response under 900 characters.",
+    expect(providerRouter.requests[0]?.system).toContain(
+      "Use the available web search tool to inspect or verify linked article URLs",
     );
+    expect(providerRouter.requests[0]?.system).toContain(
+      "Prioritize product updates and write with an executive tone.",
+    );
+    expect(providerRouter.requests[1]?.system).not.toContain("RSS-specific posting instruction");
+    expect(providerRouter.resolveRequirements).toEqual([["web_search"], ["web_search"]]);
+    expect(providerRouter.requests.map((request) => request.requiredCapabilities)).toEqual([
+      ["web_search"],
+      ["web_search"],
+    ]);
     expect(
       providerRouter.requests[0]?.history.messages.map((message) => message.role),
     ).not.toContain("system");
+    expect(providerRouter.requests[0]?.history.messages[0]?.content[0]).toMatchObject({
+      type: "text",
+    });
     expect(publisher.posts).toHaveLength(2);
     expect(repository.completed.map((item) => item.modelSource)).toEqual(["channel", "workspace"]);
   });
@@ -81,11 +104,6 @@ describe("RssFeedProcessor", () => {
     const providerRouter = new FakeProviderRouter();
     const publisher = new RecordingPublisher();
     const processor = new RssFeedProcessor({
-      articleContentFetcher: {
-        async fetchArticleContent() {
-          return "Article body";
-        },
-      },
       articlePublisher: publisher,
       feedFetcher: new CountingFeedFetcher(),
       modelSettingsRepository: {
@@ -111,11 +129,6 @@ describe("RssFeedProcessor", () => {
     const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
     const providerRouter = new FakeProviderRouter();
     const processor = new RssFeedProcessor({
-      articleContentFetcher: {
-        async fetchArticleContent() {
-          return "Article body";
-        },
-      },
       articlePublisher: new RecordingPublisher(),
       feedFetcher: new CountingFeedFetcher(),
       modelSettingsRepository: {
@@ -137,6 +150,146 @@ describe("RssFeedProcessor", () => {
     expect(providerRouter.requests).toHaveLength(0);
   });
 
+  it("skips subscriptions when the configured model does not support web search", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter();
+    const processor = new RssFeedProcessor({
+      articlePublisher: new RecordingPublisher(),
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: textOnlyModel.id };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      postedArticles: 0,
+      skippedSubscriptions: 1,
+    });
+    expect(providerRouter.requests).toHaveLength(0);
+  });
+
+  it("does not hide non-capability model resolution errors", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter();
+    const processor = new RssFeedProcessor({
+      articlePublisher: new RecordingPublisher(),
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: "openai:missing-model" };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).rejects.toThrow("No model configured.");
+    expect(providerRouter.requests).toHaveLength(0);
+  });
+
+  it("counts unusable LLM draft output as failed articles", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter({ draftContent: "not json" });
+    const publisher = new RecordingPublisher();
+    const processor = new RssFeedProcessor({
+      articlePublisher: publisher,
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: channelModel.id };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 1,
+      postedArticles: 0,
+    });
+    expect(repository.reservationCount).toBe(0);
+    expect(repository.cursorUpdates).toHaveLength(0);
+    expect(publisher.posts).toHaveLength(0);
+  });
+
+  it("records empty LLM draft selections as model-skipped articles", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter({ draftContent: JSON.stringify({ posts: [] }) });
+    const publisher = new RecordingPublisher();
+    const processor = new RssFeedProcessor({
+      articlePublisher: publisher,
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: channelModel.id };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 0,
+      postedArticles: 0,
+    });
+    expect(repository.reservationCount).toBe(1);
+    expect(repository.reservationsPayloads).toEqual([{ status: "skipped_by_model" }]);
+    expect(repository.cursorUpdates).toHaveLength(1);
+    expect(publisher.posts).toHaveLength(0);
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 0,
+      postedArticles: 0,
+    });
+    expect(providerRouter.requests).toHaveLength(1);
+  });
+
+  it("counts non-empty LLM draft output with no usable posts as failed articles", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter({
+      draftContent: JSON.stringify({ posts: [{ articleKey: "missing", text: "No match" }] }),
+    });
+    const publisher = new RecordingPublisher();
+    const processor = new RssFeedProcessor({
+      articlePublisher: publisher,
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: channelModel.id };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 1,
+      postedArticles: 0,
+    });
+    expect(repository.reservationCount).toBe(0);
+    expect(repository.cursorUpdates).toHaveLength(0);
+    expect(publisher.posts).toHaveLength(0);
+  });
+
   it("advances the published cursor only for successfully posted articles", async () => {
     const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
     const failedArticleKey = rssArticleKey({
@@ -146,11 +299,6 @@ describe("RssFeedProcessor", () => {
     });
     const publisher = new RecordingPublisher({ failArticleKeys: new Set([failedArticleKey]) });
     const processor = new RssFeedProcessor({
-      articleContentFetcher: {
-        async fetchArticleContent() {
-          return "Article body";
-        },
-      },
       articlePublisher: publisher,
       feedFetcher: new MultiItemFeedFetcher(),
       modelSettingsRepository: {
@@ -185,11 +333,6 @@ describe("RssFeedProcessor", () => {
     const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
     const publisher = new RecordingPublisher({ failArticleKeys });
     const processor = new RssFeedProcessor({
-      articleContentFetcher: {
-        async fetchArticleContent() {
-          return "Article body";
-        },
-      },
       articlePublisher: publisher,
       feedFetcher: new MultiItemFeedFetcher(),
       modelSettingsRepository: {
@@ -229,11 +372,6 @@ describe("RssFeedProcessor", () => {
       failCompletion: true,
     });
     const processor = new RssFeedProcessor({
-      articleContentFetcher: {
-        async fetchArticleContent() {
-          return "Article body";
-        },
-      },
       articlePublisher: new RecordingPublisher(),
       feedFetcher: new CountingFeedFetcher(),
       modelSettingsRepository: {
@@ -299,20 +437,51 @@ class MultiItemFeedFetcher {
 
 class FakeProviderRouter {
   readonly requests: LlmRequest[] = [];
+  readonly resolveRequirements: string[][] = [];
 
-  resolveModel(input: { channelModelId?: string | null; workspaceModelId?: string | null }) {
+  constructor(private readonly options: { draftContent?: string } = {}) {}
+
+  resolveModel(
+    input: { channelModelId?: string | null; workspaceModelId?: string | null },
+    requiredCapabilities: readonly LlmCapability[] = [],
+  ) {
+    this.resolveRequirements.push([...requiredCapabilities]);
+    let resolved: { model: ModelInfo; source: "channel" | "workspace" } | undefined;
     if (input.channelModelId === channelModel.id) {
-      return { model: channelModel, source: "channel" as const };
+      resolved = { model: channelModel, source: "channel" as const };
+    } else if (input.channelModelId === textOnlyModel.id) {
+      resolved = { model: textOnlyModel, source: "channel" as const };
+    } else if (input.workspaceModelId === workspaceModel.id) {
+      resolved = { model: workspaceModel, source: "workspace" as const };
     }
-    if (input.workspaceModelId === workspaceModel.id) {
-      return { model: workspaceModel, source: "workspace" as const };
+    if (resolved === undefined) {
+      throw new Error("No model configured.");
     }
-    throw new Error("No model configured.");
+    const missing = requiredCapabilities.filter(
+      (capability) => !resolved.model.capabilities.includes(capability),
+    );
+    if (missing.length > 0) {
+      throw new MissingModelCapabilityError(resolved.model, missing);
+    }
+    return resolved;
   }
 
   async generate(request: LlmRequest): Promise<LlmResult> {
     this.requests.push(request);
-    return { content: `Summary from ${request.model.id}` };
+    if (this.options.draftContent !== undefined) {
+      return { content: this.options.draftContent };
+    }
+    const textPart = request.history.messages[0]?.content.find((part) => part.type === "text");
+    const text = textPart?.type === "text" ? textPart.text : "";
+    const articleKeys = [...text.matchAll(/^\d+\. Article Key: (.+)$/gmu)].map((match) => match[1]);
+    return {
+      content: JSON.stringify({
+        posts: articleKeys.map((articleKey) => ({
+          articleKey,
+          text: `Feed update from ${request.model.id}`,
+        })),
+      }),
+    };
   }
 }
 
@@ -334,6 +503,7 @@ class MemoryRssRepository {
   readonly completed: Array<{ modelSource: string }> = [];
   readonly cursorUpdates: Array<{ lastSeenPublishedAt?: Date }> = [];
   readonly releaseCalls: Array<{ articleKey: string; subscriptionId: string }> = [];
+  readonly reservationsPayloads: unknown[] = [];
   private readonly reservations = new Set<string>();
 
   constructor(
@@ -360,6 +530,10 @@ class MemoryRssRepository {
       return false;
     }
     this.reservations.add(reservationKey);
+    this.reservationsPayloads.push(article.payload);
+    if (article.payload.status === "skipped_by_model") {
+      this.processed.add(reservationKey);
+    }
     return true;
   }
 
@@ -390,23 +564,21 @@ class MemoryRssRepository {
 
   async saveFeedFetchCache() {}
 
-  async findArticleContentCache() {
-    return undefined;
-  }
-
-  async saveArticleContentCache() {}
-
   async saveSubscription() {}
 }
 
-function subscription(input: { channelId?: string; id: string }): RssFeedSubscription {
+function subscription(input: {
+  channelId?: string;
+  id: string;
+  prompt?: string;
+}): RssFeedSubscription {
   return {
     channelId: input.channelId ?? "C1",
     createdAt: new Date("2026-05-12T00:00:00.000Z"),
     enabled: true,
     feedUrl: "https://example.com/feed.xml",
     id: input.id,
-    payload: {},
+    payload: input.prompt === undefined ? {} : { prompt: input.prompt },
     teamId: "T1",
     updatedAt: new Date("2026-05-12T00:00:00.000Z"),
   };

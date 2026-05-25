@@ -57,6 +57,8 @@ const handlers: SlackEventFeatureHandlers = {
   async handleModelRoutingModalSubmission() {},
   async handleFeatureSettingsConfigureAction() {},
   async handleFeatureSettingsModalSubmission() {},
+  async handleRssFeedConfigureAction() {},
+  async handleRssFeedModalSubmission() {},
   async handleSalesforcePdfWorkflowConfigureAction() {},
   async handleSalesforcePdfWorkflowModalSubmission() {},
   async handleWorkspaceCredentialConfigureAction() {},
@@ -85,12 +87,14 @@ describe("registerSlackEventHandlers", () => {
       "model_routing_configure",
       "model_routing_thread_configure",
       "provider_kind",
+      "rss_feed_configure",
       "salesforce_pdf_workflow_configure",
       "workspace_credential_configure",
     ]);
     expect([...app.views.keys()].sort()).toEqual([
       "feature_settings_modal",
       "model_routing_modal",
+      "rss_feed_modal",
       "salesforce_pdf_workflow_modal",
       "workspace_credential_modal",
     ]);
