@@ -21,6 +21,7 @@ import { createDefaultTranscriptionGateway } from "./providers/transcriptionGate
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
 import { createSlackInstallationMcpTokenResolver } from "./slack/mcpTokenResolver.js";
+import { createSlackWebClientProvider } from "./slack/webClient.js";
 
 const settings = loadSettings();
 const appRepositoryPool =
@@ -57,6 +58,10 @@ const agentJobQueue =
   settings.databaseUrl === undefined
     ? undefined
     : createBullMqSlackAgentJobQueue(settings.redisUrl);
+const slackTeamClients =
+  appRepositoryPool === undefined
+    ? undefined
+    : createSlackWebClientProvider(settings, { pool: appRepositoryPool });
 const workspaceCredentialResolver =
   appRepositoryPool === undefined || settings.llmApiKeyEncryptionKey === undefined
     ? undefined
@@ -134,6 +139,7 @@ const slackGateway = settings.slackEnabled
           settings.salesforceOAuthEnabled && salesforcePdfWorkflowRepository !== undefined
             ? { repository: salesforcePdfWorkflowRepository }
             : undefined,
+        slackTeamClients,
         userSettingsRepository,
         workspaceCredentialSettings: workspaceCredentialResolver,
       }),
@@ -166,6 +172,9 @@ function shutdown(signal: NodeJS.Signals): void {
     }
     if (oauthGateway !== undefined) {
       await oauthGateway.close();
+    }
+    if (slackTeamClients !== undefined) {
+      await slackTeamClients.close();
     }
     if (appRepositoryPool !== undefined) {
       await appRepositoryPool.end();

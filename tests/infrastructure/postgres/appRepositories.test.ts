@@ -500,6 +500,53 @@ describe("Postgres app repositories", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("clears channel model overrides without deleting channel settings rows", async () => {
+    const pool = new RecordingPool();
+    const updatedAt = new Date("2026-05-11T00:00:00Z");
+
+    await new PostgresAgentRoutingRepository(pool as never).clearChannelModelOverride({
+      channelId: "C1",
+      teamId: "T1",
+      updatedAt,
+    });
+
+    expect(pool.queries).toEqual([
+      {
+        text: expect.stringContaining("update channel_app_settings"),
+        values: ["T1", "C1", updatedAt],
+      },
+    ]);
+    expect(pool.queries[0]?.text).toContain("default_model_id = null");
+    expect(pool.queries[0]?.text).toContain(
+      "payload = (payload::jsonb - 'default_model_id')::json",
+    );
+    expect(pool.queries[0]?.text).not.toContain("delete from");
+  });
+
+  it("clears thread model overrides without deleting thread rows", async () => {
+    const pool = new RecordingPool();
+    const updatedAt = new Date("2026-05-11T00:00:00Z");
+
+    await new PostgresAgentRoutingRepository(pool as never).clearThreadModelOverride({
+      channelId: "C1",
+      teamId: "T1",
+      threadTs: "1.0",
+      updatedAt,
+    });
+
+    expect(pool.queries).toEqual([
+      {
+        text: expect.stringContaining("update slack_threads"),
+        values: ["T1", "C1", "1.0", updatedAt],
+      },
+    ]);
+    expect(pool.queries[0]?.text).toContain("model_id = null");
+    expect(pool.queries[0]?.text).toContain(
+      "payload = (payload::jsonb - 'model_id' - 'model_scope')::json",
+    );
+    expect(pool.queries[0]?.text).not.toContain("delete from");
+  });
+
   it("ignores inactive thread agent and model routes", async () => {
     await expect(
       new PostgresAgentRoutingRepository(

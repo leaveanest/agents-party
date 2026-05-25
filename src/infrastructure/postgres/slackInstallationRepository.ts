@@ -73,7 +73,11 @@ export class PostgresSlackInstallationRepository implements SlackInstallationRep
       (await this.findInstallationRecord(lookup, teamId, lookup.userId)) ??
       (lookup.userId === undefined
         ? undefined
-        : await this.findInstallationRecord(lookup, teamId, undefined));
+        : await this.findInstallationRecord(lookup, teamId, undefined)) ??
+      (await this.findEnterpriseWorkspaceInstallationRecord(lookup, lookup.userId)) ??
+      (lookup.userId === undefined
+        ? undefined
+        : await this.findEnterpriseWorkspaceInstallationRecord(lookup, undefined));
     return row === undefined ? undefined : installationRecordToRow(row);
   }
 
@@ -92,7 +96,10 @@ export class PostgresSlackInstallationRepository implements SlackInstallationRep
        limit 1`,
       [this.clientId, lookup.enterpriseId, teamId],
     );
-    const [row] = result.rows;
+    const [row] =
+      result.rows.length > 0
+        ? result.rows
+        : await this.findEnterpriseWorkspaceBotRecords(lookup, teamId);
     return row === undefined ? undefined : botRecordToRow(row);
   }
 
@@ -175,6 +182,50 @@ export class PostgresSlackInstallationRepository implements SlackInstallationRep
       [this.clientId, lookup.enterpriseId, teamId, userId],
     );
     return result.rows[0];
+  }
+
+  private async findEnterpriseWorkspaceInstallationRecord(
+    lookup: SlackInstallationLookup,
+    userId: string | undefined,
+  ): Promise<SlackInstallationRecord | undefined> {
+    if (
+      lookup.enterpriseId === undefined ||
+      lookup.isEnterpriseInstall ||
+      lookup.teamId !== undefined
+    ) {
+      return undefined;
+    }
+    const result = await this.pool.query<SlackInstallationRecord>(
+      `select * from slack_installations
+       where client_id = $1
+         and enterprise_id is not distinct from $2
+         and team_id is not null
+         and ($3::text is null or user_id = $3)
+       order by installed_at desc
+       limit 1`,
+      [this.clientId, lookup.enterpriseId, userId],
+    );
+    return result.rows[0];
+  }
+
+  private async findEnterpriseWorkspaceBotRecords(
+    lookup: SlackInstallationLookup,
+    teamId: string | undefined,
+  ): Promise<SlackBotRecord[]> {
+    if (lookup.enterpriseId === undefined || lookup.isEnterpriseInstall || teamId !== undefined) {
+      return [];
+    }
+    const result = await this.pool.query<SlackBotRecord>(
+      `select * from slack_bots
+       where client_id = $1
+         and enterprise_id is not distinct from $2
+         and team_id is not null
+         and bot_token is not null
+       order by installed_at desc
+       limit 1`,
+      [this.clientId, lookup.enterpriseId],
+    );
+    return result.rows;
   }
 }
 

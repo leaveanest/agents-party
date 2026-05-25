@@ -65,6 +65,8 @@ export const englishTranslations = {
   "featureSettings.channels.placeholder": "Choose channels",
   "featureSettings.error.channelsRequired":
     "Choose at least one allowed channel before enabling this feature.",
+  "featureSettings.error.imageChannelsRequired":
+    "Choose at least one allowed channel or allow DMs before enabling image generation.",
   "featureSettings.error.contextMismatch": "Slack workspace context does not match.",
   "featureSettings.error.missingImageCredential":
     "Register the required image generation provider API key before enabling this feature.",
@@ -75,6 +77,7 @@ export const englishTranslations = {
   "featureSettings.error.unauthorized":
     "Only Slack workspace admins and owners can configure workspace features.",
   "featureSettings.image.enabled": "Enable image generation",
+  "featureSettings.image.directMessages": "Allow image generation in DMs",
   "featureSettings.image.model": "Image generation model",
   "featureSettings.image.modelPlaceholder": "Choose a model",
   "featureSettings.image.title": "Image generation",
@@ -115,6 +118,8 @@ export const englishTranslations = {
   "modelRouting.error.threadModelRequired": "Choose an available model for this thread.",
   "modelRouting.error.noCredentialedModels":
     "Register an API key or required credential before enabling models for this workspace.",
+  "modelRouting.error.noEnabledModel":
+    "No enabled model is configured for this workspace. Ask a workspace admin to configure model routing from App Home.",
   "modelRouting.error.notConfigured": "Model routing settings are not configured.",
   "modelRouting.error.saveFailed": "Could not save model routing settings. Try again later.",
   "modelRouting.error.unauthorized":
@@ -247,6 +252,8 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "featureSettings.channels.placeholder": "チャンネルを選択",
   "featureSettings.error.channelsRequired":
     "この機能を有効にする前に、少なくとも1つのチャンネルを選択してください。",
+  "featureSettings.error.imageChannelsRequired":
+    "画像生成を有効にする前に、少なくとも1つのチャンネルを選択するかDMを許可してください。",
   "featureSettings.error.contextMismatch": "Slackワークスペースのコンテキストが一致しません。",
   "featureSettings.error.missingImageCredential":
     "この機能を有効にする前に、必要な画像生成プロバイダーのAPIキーを登録してください。",
@@ -258,6 +265,7 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "featureSettings.error.unauthorized":
     "ワークスペース機能を設定できるのはSlackワークスペースの管理者またはオーナーのみです。",
   "featureSettings.image.enabled": "画像生成を有効にする",
+  "featureSettings.image.directMessages": "DMでの画像生成を許可する",
   "featureSettings.image.model": "画像生成モデル",
   "featureSettings.image.modelPlaceholder": "モデルを選択",
   "featureSettings.image.title": "画像生成",
@@ -297,6 +305,8 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "modelRouting.error.threadModelRequired": "このスレッドで利用できるモデルを選択してください。",
   "modelRouting.error.noCredentialedModels":
     "このワークスペースでモデルを有効にする前に、APIキーまたは必要な認証情報を登録してください。",
+  "modelRouting.error.noEnabledModel":
+    "このワークスペースで有効なモデルが設定されていません。ワークスペース管理者にApp Homeからモデルルーティングを設定してもらってください。",
   "modelRouting.error.notConfigured": "ワークスペースモデル設定は構成されていません。",
   "modelRouting.error.saveFailed":
     "ワークスペースモデル設定を保存できませんでした。時間をおいて再試行してください。",

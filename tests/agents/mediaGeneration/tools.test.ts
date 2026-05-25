@@ -68,6 +68,139 @@ describe("createMediaGenerationAgentTools", () => {
     expect(credentialCalls).toBe(0);
   });
 
+  it("fails closed for Slack direct messages unless direct messages are explicitly enabled", async () => {
+    let credentialCalls = 0;
+    const tool = createMediaGenerationAgentTools({
+      context: { channelId: "D1", teamId: "T1" },
+      credentialResolver: {
+        async resolveProviderCredential() {
+          credentialCalls += 1;
+          return { apiKey: "sk-test" };
+        },
+      },
+      featureSettingsRepository: new MemoryFeatureSettingsRepository({
+        allowedChannelIds: [],
+        workspaceEnabled: true,
+      }),
+      imageGenerationModelId: model.id,
+      modelRegistry: new ModelRegistry([model]),
+    })[0];
+
+    await expect(tool.execute({ prompt: "draw a diagram" })).resolves.toMatchObject({
+      code: "channel_not_allowed",
+      ok: false,
+    });
+    expect(credentialCalls).toBe(0);
+  });
+
+  it("allows Slack direct messages when direct messages are explicitly enabled", async () => {
+    const credentialCalls: unknown[] = [];
+    const generatedPrompts: unknown[] = [];
+    const tool = createMediaGenerationAgentTools({
+      context: { channelId: "D1", teamId: "T1" },
+      credentialResolver: {
+        async resolveProviderCredential(input) {
+          credentialCalls.push(input);
+          return { apiKey: "sk-test" };
+        },
+      },
+      featureSettingsRepository: new MemoryFeatureSettingsRepository({
+        allowedChannelIds: [],
+        allowDirectMessages: true,
+        workspaceEnabled: true,
+      }),
+      imageGenerationModelId: model.id,
+      mediaGatewayFactory: () => ({
+        async generateImage(input) {
+          generatedPrompts.push(input.prompt);
+          return { dataBase64: "ZmFrZQ==", mimeType: "image/png" };
+        },
+      }),
+      modelRegistry: new ModelRegistry([model]),
+    })[0];
+
+    await expect(tool.execute({ prompt: "draw a dog" })).resolves.toMatchObject({
+      media: {
+        mimeType: "image/png",
+        modelId: model.id,
+      },
+      ok: true,
+    });
+    expect(credentialCalls).toEqual([
+      {
+        credentialName: "api_key",
+        provider: "openai",
+        workspaceId: "T1",
+      },
+    ]);
+    expect(generatedPrompts).toEqual(["draw a dog"]);
+  });
+
+  it("uses the Assistant source channel allowlist before direct message settings", async () => {
+    let credentialCalls = 0;
+    const tool = createMediaGenerationAgentTools({
+      context: { channelId: "D1", teamId: "T1", viewerContextChannelIds: ["C1", "D1"] },
+      credentialResolver: {
+        async resolveProviderCredential() {
+          credentialCalls += 1;
+          return { apiKey: "sk-test" };
+        },
+      },
+      featureSettingsRepository: new MemoryFeatureSettingsRepository({
+        allowedChannelIds: ["C2"],
+        allowDirectMessages: true,
+        workspaceEnabled: true,
+      }),
+      imageGenerationModelId: model.id,
+      modelRegistry: new ModelRegistry([model]),
+    })[0];
+
+    await expect(tool.execute({ prompt: "draw a diagram" })).resolves.toMatchObject({
+      code: "channel_not_allowed",
+      ok: false,
+    });
+    expect(credentialCalls).toBe(0);
+  });
+
+  it("allows Assistant direct message requests when the source channel is allowlisted", async () => {
+    const credentialCalls: unknown[] = [];
+    const generatedPrompts: unknown[] = [];
+    const tool = createMediaGenerationAgentTools({
+      context: { channelId: "D1", teamId: "T1", viewerContextChannelIds: ["C1", "D1"] },
+      credentialResolver: {
+        async resolveProviderCredential(input) {
+          credentialCalls.push(input);
+          return { apiKey: "sk-test" };
+        },
+      },
+      featureSettingsRepository: new MemoryFeatureSettingsRepository({
+        allowedChannelIds: ["C1"],
+        allowDirectMessages: false,
+        workspaceEnabled: true,
+      }),
+      imageGenerationModelId: model.id,
+      mediaGatewayFactory: () => ({
+        async generateImage(input) {
+          generatedPrompts.push(input.prompt);
+          return { dataBase64: "ZmFrZQ==", mimeType: "image/png" };
+        },
+      }),
+      modelRegistry: new ModelRegistry([model]),
+    })[0];
+
+    await expect(tool.execute({ prompt: "draw a diagram" })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(credentialCalls).toEqual([
+      {
+        credentialName: "api_key",
+        provider: "openai",
+        workspaceId: "T1",
+      },
+    ]);
+    expect(generatedPrompts).toEqual(["draw a diagram"]);
+  });
+
   it("resolves the configured provider API key before generation", async () => {
     const calls: unknown[] = [];
     const tool = createMediaGenerationAgentTools({
@@ -156,7 +289,13 @@ describe("createMediaGenerationAgentTools", () => {
 });
 
 class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsRepository {
-  constructor(private readonly input: { allowedChannelIds: string[]; workspaceEnabled: boolean }) {}
+  constructor(
+    private readonly input: {
+      allowedChannelIds: string[];
+      allowDirectMessages?: boolean;
+      workspaceEnabled: boolean;
+    },
+  ) {}
 
   async findWorkspaceFeatureSetting(input: {
     featureKey: WorkspaceFeatureKey;
@@ -165,7 +304,7 @@ class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsReposit
     return {
       enabled: this.input.workspaceEnabled,
       featureKey: input.featureKey,
-      payload: {},
+      payload: { allow_direct_messages: this.input.allowDirectMessages ?? false },
       teamId: input.teamId,
       updatedAt: new Date("2026-05-19T00:00:00Z"),
     };

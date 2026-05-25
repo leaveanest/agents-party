@@ -82,6 +82,8 @@ import {
   FEATURE_SETTINGS_CONFIGURE_ACTION_ID,
   FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID,
   FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
+  FEATURE_SETTINGS_IMAGE_DIRECT_MESSAGES_ACTION_ID,
+  FEATURE_SETTINGS_IMAGE_DIRECT_MESSAGES_BLOCK_ID,
   FEATURE_SETTINGS_IMAGE_ENABLED_ACTION_ID,
   FEATURE_SETTINGS_IMAGE_ENABLED_BLOCK_ID,
   FEATURE_SETTINGS_IMAGE_MODEL_ACTION_ID,
@@ -189,6 +191,14 @@ type FeatureSettingsActionValue = {
   source?: "app_home";
   teamId?: string;
 };
+type ValidatedSlackAgentRoute =
+  | { reason?: undefined; route: SlackResolvedAgentRoute | undefined; valid: true }
+  | {
+      reason: "no_enabled_model";
+      route?: undefined;
+      skippedModelIds: string[];
+      valid: false;
+    };
 
 const DEFAULT_AGENT_OPTION = {
   description: "General Slack assistant.",
@@ -328,6 +338,17 @@ export type SlackAgentRoutingRepository = {
   findWorkspaceSettings?(teamId: string): Promise<JsonObject | undefined>;
   isChannelEnabled(teamId: string, channelId: string): Promise<boolean>;
   isThreadAutoReplyEnabled(teamId: string, channelId: string): Promise<boolean>;
+  clearChannelModelOverride?(input: {
+    channelId: string;
+    teamId: string;
+    updatedAt: Date;
+  }): Promise<void>;
+  clearThreadModelOverride?(input: {
+    channelId: string;
+    teamId: string;
+    threadTs: string;
+    updatedAt: Date;
+  }): Promise<void>;
   resolveAgent?(input: {
     channelId: string;
     teamId: string;
@@ -424,6 +445,14 @@ export type SlackInstalledWorkspaceDirectory = {
   listInstalledWorkspaces(input: { enterpriseId?: string }): Promise<SlackInstalledWorkspace[]>;
 };
 
+export type SlackTeamClientProviderForHandlers = {
+  forTeam(input: {
+    enterpriseId?: string;
+    isEnterpriseInstall?: boolean;
+    teamId: string;
+  }): Promise<SlackAgentClient>;
+};
+
 export type AgentSlackHandlerOptions = {
   agentJobQueue?: SlackAgentJobQueue;
   audioFetchFn?: typeof fetch;
@@ -435,6 +464,7 @@ export type AgentSlackHandlerOptions = {
   routingRepository?: SlackAgentRoutingRepository;
   salesforceConnectionHome?: SalesforceConnectionHome;
   salesforcePdfWorkflowHome?: SalesforcePdfWorkflowHome;
+  slackTeamClients?: SlackTeamClientProviderForHandlers;
   userSettingsRepository?: UserSettingsRepository;
   workspaceCredentialSettings?: WorkspaceCredentialSettingsHome;
 };
@@ -836,6 +866,27 @@ async function listAppHomeInstalledWorkspaces(input: {
   }
 }
 
+async function listInstalledWorkspacesForModelRouting(input: {
+  enterpriseId?: string;
+  logger: unknown;
+  options: AgentSlackHandlerOptions;
+}): Promise<SlackInstalledWorkspace[]> {
+  if (input.enterpriseId === undefined || input.options.installedWorkspaceDirectory === undefined) {
+    return [];
+  }
+  try {
+    return await input.options.installedWorkspaceDirectory.listInstalledWorkspaces({
+      enterpriseId: input.enterpriseId,
+    });
+  } catch (error) {
+    logWarn(input.logger, "Failed to list installed Slack workspaces for model routing.", {
+      enterpriseId: input.enterpriseId,
+      error,
+    });
+    return [];
+  }
+}
+
 async function handleModelRoutingConfigureAction(
   { ack, body, client, logger }: SlackActionArgs,
   options: AgentSlackHandlerOptions,
@@ -843,6 +894,7 @@ async function handleModelRoutingConfigureAction(
   await ack();
   const actionValue = parseModelRoutingActionValue(readActionValue(body));
   const enterpriseId = actionValue?.enterpriseId ?? readSlackEnterpriseId(body);
+  const isEnterpriseInstall = readSlackEnterpriseInstall(body);
   const bodyTeamId = readTeamId(body, {});
   const selectedTeamId =
     enterpriseId === undefined
@@ -881,35 +933,18 @@ async function handleModelRoutingConfigureAction(
     options,
     logger,
   );
-  const userContext = await resolveSlackUserContext(
-    client,
-    slackUserId,
-    translator,
-    logger,
-    selectedTeamId,
-  );
-  if (!userContext.isWorkspaceAdmin) {
-    await updateModelRoutingModal(
-      client,
-      openedView,
-      buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-      ),
-      logger,
-    );
-    return;
-  }
-
   if (isChannelSettings) {
     await updateChannelModelRoutingModal({
       actionValue,
       bodyTeamId,
       client,
+      enterpriseId,
+      isEnterpriseInstall,
       logger,
       openedView,
       options,
-      translator: userContext.translator,
+      slackUserId,
+      translator,
     });
     return;
   }
@@ -919,31 +954,54 @@ async function handleModelRoutingConfigureAction(
       actionValue,
       bodyTeamId,
       client,
+      enterpriseId,
+      isEnterpriseInstall,
       logger,
       openedView,
       options,
-      translator: userContext.translator,
+      slackUserId,
+      translator,
     });
     return;
   }
 
   const effectiveTeamId = enterpriseId === undefined ? bodyTeamId : (selectedTeamId ?? bodyTeamId);
-  if (
-    effectiveTeamId !== undefined &&
-    enterpriseId !== undefined &&
-    effectiveTeamId !== bodyTeamId
-  ) {
+  if (effectiveTeamId === undefined || bodyTeamId === undefined) {
+    await updateModelRoutingModal(
+      client,
+      openedView,
+      buildModelRoutingResultModal(translator.t("modelRouting.error.unauthorized"), translator),
+      logger,
+    );
+    return;
+  }
+  const workspaceValidation = await validateSelectedModelRoutingWorkspace({
+    actorUserId: slackUserId,
+    client,
+    enterpriseId,
+    isEnterpriseInstall,
+    logger,
+    options,
+    selectedTeamId: effectiveTeamId,
+    sourceTeamId: bodyTeamId,
+    translator,
+  });
+  if (!workspaceValidation.userContext.isWorkspaceAdmin) {
     await updateModelRoutingModal(
       client,
       openedView,
       buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
+        workspaceValidation.userContext.translator.t("modelRouting.error.unauthorized"),
+        workspaceValidation.userContext.translator,
       ),
       logger,
     );
     return;
   }
+  const installedWorkspaces =
+    enterpriseId === undefined || options.installedWorkspaceDirectory === undefined
+      ? []
+      : await listInstalledWorkspacesForModelRouting({ enterpriseId, logger, options });
   const workspaceSettings =
     effectiveTeamId === undefined
       ? undefined
@@ -957,16 +1015,16 @@ async function handleModelRoutingConfigureAction(
     openedView,
     credentialedProviders.length === 0
       ? buildModelRoutingResultModal(
-          userContext.translator.t("modelRouting.error.noCredentialedModels"),
-          userContext.translator,
+          workspaceValidation.userContext.translator.t("modelRouting.error.noCredentialedModels"),
+          workspaceValidation.userContext.translator,
         )
       : buildModelRoutingModal({
           credentialedProviders,
           enterpriseId,
           selectedTeamId: effectiveTeamId,
-          translator: userContext.translator,
+          translator: workspaceValidation.userContext.translator,
           workspaceSettings,
-          workspaces: [],
+          workspaces: installedWorkspaces,
         }),
     logger,
   );
@@ -976,9 +1034,12 @@ async function updateChannelModelRoutingModal(input: {
   actionValue: ModelRoutingActionValue | undefined;
   bodyTeamId?: string;
   client: SlackClient;
+  enterpriseId?: string;
+  isEnterpriseInstall?: boolean;
   logger: unknown;
   openedView: unknown;
   options: AgentSlackHandlerOptions;
+  slackUserId?: string;
   translator: Translator;
 }): Promise<void> {
   const selectedTeamId =
@@ -1002,7 +1063,18 @@ async function updateChannelModelRoutingModal(input: {
     );
     return;
   }
-  if (!canManageSelectedModelRoutingWorkspace({ selectedTeamId, sourceTeamId: input.bodyTeamId })) {
+  const participantValidation = await validateChannelModelRoutingParticipant({
+    actorUserId: input.slackUserId,
+    channelId,
+    client: input.client,
+    enterpriseId: input.enterpriseId ?? input.actionValue?.enterpriseId,
+    isEnterpriseInstall: input.isEnterpriseInstall,
+    logger: input.logger,
+    options: input.options,
+    selectedTeamId,
+    sourceTeamId: input.bodyTeamId,
+  });
+  if (!participantValidation.authorized) {
     await updateModelRoutingModal(
       input.client,
       input.openedView,
@@ -1059,9 +1131,12 @@ async function updateThreadModelRoutingModal(input: {
   actionValue: ModelRoutingActionValue | undefined;
   bodyTeamId?: string;
   client: SlackClient;
+  enterpriseId?: string;
+  isEnterpriseInstall?: boolean;
   logger: unknown;
   openedView: unknown;
   options: AgentSlackHandlerOptions;
+  slackUserId?: string;
   translator: Translator;
 }): Promise<void> {
   const selectedTeamId =
@@ -1087,7 +1162,18 @@ async function updateThreadModelRoutingModal(input: {
     );
     return;
   }
-  if (!canManageSelectedModelRoutingWorkspace({ selectedTeamId, sourceTeamId: input.bodyTeamId })) {
+  const participantValidation = await validateChannelModelRoutingParticipant({
+    actorUserId: input.slackUserId,
+    channelId,
+    client: input.client,
+    enterpriseId: input.enterpriseId ?? input.actionValue?.enterpriseId,
+    isEnterpriseInstall: input.isEnterpriseInstall,
+    logger: input.logger,
+    options: input.options,
+    selectedTeamId,
+    sourceTeamId: input.bodyTeamId,
+  });
+  if (!participantValidation.authorized) {
     await updateModelRoutingModal(
       input.client,
       input.openedView,
@@ -1432,6 +1518,7 @@ async function handleModelRoutingModalSubmission(
   );
   const bodyTeamId = readTeamId(body, {});
   const enterpriseId = metadata?.enterpriseId ?? readSlackEnterpriseId(body);
+  const isEnterpriseInstall = readSlackEnterpriseInstall(body);
   const selectedTeamId =
     enterpriseId === undefined
       ? bodyTeamId
@@ -1512,33 +1599,23 @@ async function handleModelRoutingModalSubmission(
     });
     return;
   }
-  const userContext = await resolveSlackUserContext(
+  const workspaceValidation = await validateSelectedModelRoutingWorkspace({
+    actorUserId: slackUserId,
     client,
-    slackUserId,
-    translator,
+    enterpriseId,
+    isEnterpriseInstall,
     logger,
-    selectedTeamId,
-  );
-  if (!userContext.isWorkspaceAdmin) {
-    await ack({
-      response_action: "update",
-      view: buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-      ) as never,
-    });
-    return;
-  }
-  const isSelectedWorkspaceAllowed = canManageSelectedModelRoutingWorkspace({
+    options,
     selectedTeamId,
     sourceTeamId: bodyTeamId,
+    translator,
   });
-  if (!isSelectedWorkspaceAllowed) {
+  if (!workspaceValidation.userContext.isWorkspaceAdmin) {
     await ack({
       response_action: "update",
       view: buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
+        workspaceValidation.userContext.translator.t("modelRouting.error.unauthorized"),
+        workspaceValidation.userContext.translator,
       ) as never,
     });
     return;
@@ -1614,8 +1691,8 @@ async function handleModelRoutingModalSubmission(
       client,
       view,
       buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.result.saved"),
-        userContext.translator,
+        workspaceValidation.userContext.translator.t("modelRouting.result.saved"),
+        workspaceValidation.userContext.translator,
       ),
       logger,
     );
@@ -1629,20 +1706,238 @@ async function handleModelRoutingModalSubmission(
       client,
       view,
       buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.saveFailed"),
-        userContext.translator,
+        workspaceValidation.userContext.translator.t("modelRouting.error.saveFailed"),
+        workspaceValidation.userContext.translator,
       ),
       logger,
     );
   }
 }
 
-function canManageSelectedModelRoutingWorkspace(input: {
+type SelectedModelRoutingWorkspaceValidation =
+  | { client: SlackAgentClient; userContext: { isWorkspaceAdmin: true; translator: Translator } }
+  | { client?: undefined; userContext: { isWorkspaceAdmin: false; translator: Translator } };
+
+async function validateSelectedModelRoutingWorkspace(input: {
+  actorUserId?: string;
+  client: SlackAgentClient;
+  enterpriseId?: string;
+  isEnterpriseInstall?: boolean;
+  logger: unknown;
+  options: AgentSlackHandlerOptions;
   selectedTeamId: string;
   sourceTeamId?: string;
-}): boolean {
+  translator: Translator;
+}): Promise<SelectedModelRoutingWorkspaceValidation> {
+  const unauthorized = (): SelectedModelRoutingWorkspaceValidation => ({
+    userContext: { isWorkspaceAdmin: false, translator: input.translator },
+  });
+  if (input.actorUserId === undefined || input.sourceTeamId === undefined) {
+    return unauthorized();
+  }
+  const isCrossWorkspaceSelection = input.selectedTeamId !== input.sourceTeamId;
+  if (input.enterpriseId === undefined && isCrossWorkspaceSelection) {
+    return unauthorized();
+  }
+  if (input.enterpriseId !== undefined) {
+    const installed = await isInstalledModelRoutingWorkspace({
+      enterpriseId: input.enterpriseId,
+      logger: input.logger,
+      options: input.options,
+      selectedTeamId: input.selectedTeamId,
+    });
+    if (!installed) {
+      return unauthorized();
+    }
+  }
+  const selectedTeamClient = await resolveSelectedTeamClient({
+    client: input.client,
+    enterpriseId: input.enterpriseId,
+    isEnterpriseInstall: input.isEnterpriseInstall,
+    logger: input.logger,
+    options: input.options,
+    selectedTeamId: input.selectedTeamId,
+    sourceTeamId: input.sourceTeamId,
+  });
+  if (selectedTeamClient === undefined) {
+    return unauthorized();
+  }
+  const userContext = await resolveSlackUserContext(
+    selectedTeamClient,
+    input.actorUserId,
+    input.translator,
+    input.logger,
+    input.selectedTeamId,
+  );
+  if (!userContext.isWorkspaceAdmin) {
+    return { userContext: { ...userContext, isWorkspaceAdmin: false } };
+  }
+  return { client: selectedTeamClient, userContext: { ...userContext, isWorkspaceAdmin: true } };
+}
+
+async function isInstalledModelRoutingWorkspace(input: {
+  enterpriseId?: string;
+  logger: unknown;
+  options: AgentSlackHandlerOptions;
+  selectedTeamId: string;
+}): Promise<boolean> {
+  if (input.enterpriseId === undefined || input.options.installedWorkspaceDirectory === undefined) {
+    return false;
+  }
+  try {
+    const workspaces = await input.options.installedWorkspaceDirectory.listInstalledWorkspaces({
+      enterpriseId: input.enterpriseId,
+    });
+    return workspaces.some(
+      (workspace) =>
+        workspace.teamId === input.selectedTeamId &&
+        (workspace.enterpriseId === undefined || workspace.enterpriseId === input.enterpriseId),
+    );
+  } catch (error) {
+    logWarn(input.logger, "Failed to validate selected Slack workspace for model routing.", {
+      enterpriseId: input.enterpriseId,
+      error,
+      targetTeamId: input.selectedTeamId,
+    });
+    return false;
+  }
+}
+
+async function resolveSelectedTeamClient(input: {
+  client: SlackAgentClient;
+  enterpriseId?: string;
+  isEnterpriseInstall?: boolean;
+  logger: unknown;
+  options: AgentSlackHandlerOptions;
+  selectedTeamId: string;
+  sourceTeamId?: string;
+}): Promise<SlackAgentClient | undefined> {
   if (input.selectedTeamId === input.sourceTeamId) {
-    return true;
+    return input.client;
+  }
+  if (input.options.slackTeamClients === undefined) {
+    logWarn(input.logger, "Cannot resolve selected Slack workspace client for model routing.", {
+      enterpriseId: input.enterpriseId,
+      sourceTeamId: input.sourceTeamId,
+      targetTeamId: input.selectedTeamId,
+    });
+    return undefined;
+  }
+  try {
+    return await input.options.slackTeamClients.forTeam({
+      enterpriseId: input.enterpriseId,
+      isEnterpriseInstall: input.isEnterpriseInstall,
+      teamId: input.selectedTeamId,
+    });
+  } catch (error) {
+    logWarn(input.logger, "Failed to resolve selected Slack workspace client for model routing.", {
+      enterpriseId: input.enterpriseId,
+      error,
+      sourceTeamId: input.sourceTeamId,
+      targetTeamId: input.selectedTeamId,
+    });
+    return undefined;
+  }
+}
+
+async function validateChannelModelRoutingParticipant(input: {
+  actorUserId?: string;
+  channelId: string;
+  client: SlackAgentClient;
+  enterpriseId?: string;
+  isEnterpriseInstall?: boolean;
+  logger: unknown;
+  options: AgentSlackHandlerOptions;
+  selectedTeamId: string;
+  sourceTeamId?: string;
+}): Promise<{ authorized: boolean; client?: SlackAgentClient }> {
+  if (input.actorUserId === undefined || input.sourceTeamId === undefined) {
+    return { authorized: false };
+  }
+  if (input.enterpriseId === undefined && input.selectedTeamId !== input.sourceTeamId) {
+    return { authorized: false };
+  }
+  if (input.enterpriseId !== undefined) {
+    const installed = await isInstalledModelRoutingWorkspace({
+      enterpriseId: input.enterpriseId,
+      logger: input.logger,
+      options: input.options,
+      selectedTeamId: input.selectedTeamId,
+    });
+    if (!installed) {
+      return { authorized: false };
+    }
+  }
+  const selectedTeamClient = await resolveSelectedTeamClient({
+    client: input.client,
+    enterpriseId: input.enterpriseId,
+    isEnterpriseInstall: input.isEnterpriseInstall,
+    logger: input.logger,
+    options: input.options,
+    selectedTeamId: input.selectedTeamId,
+    sourceTeamId: input.sourceTeamId,
+  });
+  if (selectedTeamClient === undefined) {
+    return { authorized: false };
+  }
+  const isMember = await isSlackChannelMember({
+    channelId: input.channelId,
+    client: selectedTeamClient,
+    logger: input.logger,
+    teamId: input.selectedTeamId,
+    userId: input.actorUserId,
+  });
+  if (isMember !== undefined) {
+    return { authorized: isMember, client: selectedTeamClient };
+  }
+  const userContext = await resolveSlackUserContext(
+    selectedTeamClient,
+    input.actorUserId,
+    createTranslator(FALLBACK_LOCALE),
+    input.logger,
+    input.selectedTeamId,
+  );
+  return { authorized: userContext.isWorkspaceAdmin, client: selectedTeamClient };
+}
+
+async function isSlackChannelMember(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  logger: unknown;
+  teamId: string;
+  userId: string;
+}): Promise<boolean | undefined> {
+  const members = input.client.conversations?.members;
+  if (members === undefined) {
+    return undefined;
+  }
+  let cursor: string | undefined;
+  try {
+    do {
+      const response = await members({
+        channel: input.channelId,
+        cursor,
+        limit: 1000,
+        team_id: input.teamId,
+      } as never);
+      const responseMembers = isRecord(response) ? response.members : undefined;
+      if (Array.isArray(responseMembers) && responseMembers.includes(input.userId)) {
+        return true;
+      }
+      const metadata =
+        isRecord(response) && isRecord(response.response_metadata)
+          ? response.response_metadata
+          : undefined;
+      cursor = metadata === undefined ? undefined : readString(metadata, "next_cursor");
+    } while (cursor !== undefined && cursor.length > 0);
+  } catch (error) {
+    logWarn(input.logger, "Failed to verify Slack channel membership for model routing.", {
+      channelId: input.channelId,
+      error,
+      teamId: input.teamId,
+      userId: input.userId,
+    });
+    return false;
   }
   return false;
 }
@@ -1686,36 +1981,24 @@ async function handleChannelModelRoutingModalSubmission(input: {
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
   const reasoningEffort = readReasoningEffortValue(input.view, defaultModelId);
-  if (
-    !canManageSelectedModelRoutingWorkspace({
-      selectedTeamId,
-      sourceTeamId: readTeamId(input.body, {}),
-    })
-  ) {
+  const participantValidation = await validateChannelModelRoutingParticipant({
+    actorUserId: input.slackUserId,
+    channelId,
+    client: input.client,
+    enterpriseId: input.metadata.enterpriseId ?? readSlackEnterpriseId(input.body),
+    isEnterpriseInstall: readSlackEnterpriseInstall(input.body),
+    logger: input.logger,
+    options: input.options,
+    selectedTeamId,
+    sourceTeamId: readTeamId(input.body, {}),
+  });
+  if (!participantValidation.authorized) {
     await input.ack({
       response_action: "update",
       view: buildModelRoutingResultModal(
         input.translator.t("modelRouting.error.unauthorized"),
         input.translator,
         input.translator.t("modelRouting.title.channel"),
-      ) as never,
-    });
-    return;
-  }
-  const userContext = await resolveSlackUserContext(
-    input.client,
-    input.slackUserId,
-    input.translator,
-    input.logger,
-    selectedTeamId,
-  );
-  if (!userContext.isWorkspaceAdmin) {
-    await input.ack({
-      response_action: "update",
-      view: buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-        userContext.translator.t("modelRouting.title.channel"),
       ) as never,
     });
     return;
@@ -1798,9 +2081,9 @@ async function handleChannelModelRoutingModalSubmission(input: {
       input.client,
       input.view,
       buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.result.channelSaved"),
-        userContext.translator,
-        userContext.translator.t("modelRouting.title.channel"),
+        input.translator.t("modelRouting.result.channelSaved"),
+        input.translator,
+        input.translator.t("modelRouting.title.channel"),
       ),
       input.logger,
     );
@@ -1815,9 +2098,9 @@ async function handleChannelModelRoutingModalSubmission(input: {
       input.client,
       input.view,
       buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.saveFailed"),
-        userContext.translator,
-        userContext.translator.t("modelRouting.title.channel"),
+        input.translator.t("modelRouting.error.saveFailed"),
+        input.translator,
+        input.translator.t("modelRouting.title.channel"),
       ),
       input.logger,
     );
@@ -1865,36 +2148,24 @@ async function handleThreadModelRoutingModalSubmission(input: {
     MODEL_ROUTING_DEFAULT_MODEL_ACTION_ID,
   );
   const reasoningEffort = readReasoningEffortValue(input.view, defaultModelId);
-  if (
-    !canManageSelectedModelRoutingWorkspace({
-      selectedTeamId,
-      sourceTeamId: readTeamId(input.body, {}),
-    })
-  ) {
+  const participantValidation = await validateChannelModelRoutingParticipant({
+    actorUserId: input.slackUserId,
+    channelId,
+    client: input.client,
+    enterpriseId: input.metadata.enterpriseId ?? readSlackEnterpriseId(input.body),
+    isEnterpriseInstall: readSlackEnterpriseInstall(input.body),
+    logger: input.logger,
+    options: input.options,
+    selectedTeamId,
+    sourceTeamId: readTeamId(input.body, {}),
+  });
+  if (!participantValidation.authorized) {
     await input.ack({
       response_action: "update",
       view: buildModelRoutingResultModal(
         input.translator.t("modelRouting.error.unauthorized"),
         input.translator,
         input.translator.t("modelRouting.title.thread"),
-      ) as never,
-    });
-    return;
-  }
-  const userContext = await resolveSlackUserContext(
-    input.client,
-    input.slackUserId,
-    input.translator,
-    input.logger,
-    selectedTeamId,
-  );
-  if (!userContext.isWorkspaceAdmin) {
-    await input.ack({
-      response_action: "update",
-      view: buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.unauthorized"),
-        userContext.translator,
-        userContext.translator.t("modelRouting.title.thread"),
       ) as never,
     });
     return;
@@ -1982,9 +2253,9 @@ async function handleThreadModelRoutingModalSubmission(input: {
       input.client,
       input.view,
       buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.result.threadSaved"),
-        userContext.translator,
-        userContext.translator.t("modelRouting.title.thread"),
+        input.translator.t("modelRouting.result.threadSaved"),
+        input.translator,
+        input.translator.t("modelRouting.title.thread"),
       ),
       input.logger,
     );
@@ -2000,9 +2271,9 @@ async function handleThreadModelRoutingModalSubmission(input: {
       input.client,
       input.view,
       buildModelRoutingResultModal(
-        userContext.translator.t("modelRouting.error.saveFailed"),
-        userContext.translator,
-        userContext.translator.t("modelRouting.title.thread"),
+        input.translator.t("modelRouting.error.saveFailed"),
+        input.translator,
+        input.translator.t("modelRouting.title.thread"),
       ),
       input.logger,
     );
@@ -2922,6 +3193,8 @@ async function handleFeatureSettingsConfigureAction(
     trigger_id: triggerId,
     view: buildFeatureSettingsModal({
       imageAllowedChannelIds: imageAllowedChannels.map((channel) => channel.channelId),
+      imageAllowDirectMessages:
+        booleanField(imageWorkspaceSetting?.payload, "allow_direct_messages") === true,
       imageEnabled: imageWorkspaceSetting?.enabled === true,
       enterpriseId,
       imageGenerationModelId:
@@ -3005,6 +3278,11 @@ async function handleFeatureSettingsModalSubmission(
     FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
     FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID,
   );
+  const imageAllowDirectMessages = readSelectedOptionValues(
+    view,
+    FEATURE_SETTINGS_IMAGE_DIRECT_MESSAGES_BLOCK_ID,
+    FEATURE_SETTINGS_IMAGE_DIRECT_MESSAGES_ACTION_ID,
+  ).includes("enabled");
   const selectedImageGenerationModelId =
     readSelectedOptionValue(
       view,
@@ -3027,11 +3305,11 @@ async function handleFeatureSettingsModalSubmission(
       FEATURE_SETTINGS_TTS_MODEL_BLOCK_ID,
       FEATURE_SETTINGS_TTS_MODEL_ACTION_ID,
     ) ?? options.featureSettingsHome?.textToSpeechModelId;
-  if (imageEnabled && imageChannelIds.length === 0) {
+  if (imageEnabled && imageChannelIds.length === 0 && !imageAllowDirectMessages) {
     await ack({
       errors: {
         [FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID]: translator.t(
-          "featureSettings.error.channelsRequired",
+          "featureSettings.error.imageChannelsRequired",
         ),
       },
       response_action: "errors",
@@ -3172,6 +3450,7 @@ async function handleFeatureSettingsModalSubmission(
             featureKey: "image_generation",
             payload: {
               feature_key: "image_generation",
+              allow_direct_messages: imageAllowDirectMessages,
               image_generation_model_id:
                 selectedImageGenerationModelId ??
                 options.featureSettingsHome.imageGenerationModelId,
@@ -3225,6 +3504,7 @@ async function handleFeatureSettingsModalSubmission(
 function buildFeatureSettingsModal(input: {
   enterpriseId?: string;
   imageAllowedChannelIds: readonly string[];
+  imageAllowDirectMessages: boolean;
   imageEnabled: boolean;
   imageGenerationModelId: string;
   imageGenerationModelOptions: readonly SlackOption[];
@@ -3237,6 +3517,13 @@ function buildFeatureSettingsModal(input: {
 }): Record<string, unknown> {
   const imageEnabledOption = {
     text: { text: input.translator.t("featureSettings.image.enabled"), type: "plain_text" },
+    value: "enabled",
+  };
+  const imageDirectMessagesOption = {
+    text: {
+      text: input.translator.t("featureSettings.image.directMessages"),
+      type: "plain_text",
+    },
     value: "enabled",
   };
   const textToSpeechEnabledOption = {
@@ -3299,6 +3586,23 @@ function buildFeatureSettingsModal(input: {
               type: "input",
             },
           ]),
+      {
+        block_id: FEATURE_SETTINGS_IMAGE_DIRECT_MESSAGES_BLOCK_ID,
+        element: {
+          action_id: FEATURE_SETTINGS_IMAGE_DIRECT_MESSAGES_ACTION_ID,
+          ...(input.imageAllowDirectMessages
+            ? { initial_options: [imageDirectMessagesOption] }
+            : {}),
+          options: [imageDirectMessagesOption],
+          type: "checkboxes",
+        },
+        label: {
+          text: input.translator.t("featureSettings.image.directMessages"),
+          type: "plain_text",
+        },
+        optional: true,
+        type: "input",
+      },
       {
         block_id: FEATURE_SETTINGS_IMAGE_CHANNELS_BLOCK_ID,
         element: {
@@ -4212,11 +4516,29 @@ async function handleMention(
       });
       return;
     }
+    const validatedRoute = await validateSlackAgentRouteForRunner({
+      channelId: event.channel,
+      eventType: "app_mention",
+      logger,
+      route,
+      routingRepository: options.routingRepository,
+      teamId,
+      threadTs,
+    });
+    if (!validatedRoute.valid) {
+      await postNoEnabledModelConfiguredMessage({
+        channelId: event.channel,
+        client,
+        text: translator.t("modelRouting.error.noEnabledModel"),
+        threadTs,
+      });
+      return;
+    }
     await notifyModelFallback({
       channelId: event.channel,
       client,
       logger,
-      route,
+      route: validatedRoute.route,
       threadTs,
       translator,
       userId: event.user,
@@ -4226,9 +4548,9 @@ async function handleMention(
       enterpriseId: readSlackEnterpriseId(body),
       isEnterpriseInstall: readSlackEnterpriseInstall(body),
       messageTs: event.ts,
-      modelId: route?.modelId,
+      modelId: validatedRoute.route?.modelId,
       referenceImages,
-      reasoningEffort: route?.reasoningEffort,
+      reasoningEffort: validatedRoute.route?.reasoningEffort,
       teamId,
       text: mentionText,
       threadHistory: readThreadHistoryMessages(threadMessages, {
@@ -4283,8 +4605,8 @@ async function handleMention(
           agentId: route?.agentId ?? "assistant",
           channelId: event.channel,
           lastMessageTs: event.ts,
-          modelId: threadScopedModelId(route),
-          reasoningEffort: threadScopedReasoningEffort(route),
+          modelId: threadScopedModelId(validatedRoute.route),
+          reasoningEffort: threadScopedReasoningEffort(validatedRoute.route),
           rootMessageTs: threadTs,
           teamId,
           threadTs,
@@ -4462,18 +4784,45 @@ async function handleMessage(
     if (options.routingRepository.resolveAgent !== undefined && route === undefined) {
       return;
     }
+    const validatedRoute = await validateSlackAgentRouteForRunner({
+      channelId: routeChannelId,
+      eventType: "message_follow_up",
+      logger,
+      route,
+      routingRepository: options.routingRepository,
+      teamId,
+      thread,
+      threadChannelId: event.channel,
+      threadTs,
+    });
+    if (!validatedRoute.valid) {
+      await postNoEnabledModelEphemeral({
+        channelId: event.channel,
+        client,
+        logger,
+        text: translator.t("modelRouting.error.noEnabledModel"),
+        threadTs,
+        userId: event.user,
+      });
+      return;
+    }
     await notifyModelFallback({
       channelId: event.channel,
       client,
       logger,
-      route,
+      route: validatedRoute.route,
       threadTs,
       translator,
       userId: event.user,
     });
-    const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
+    const modelId =
+      validatedRoute.route === undefined
+        ? stringField(thread, "model_id")
+        : validatedRoute.route.modelId;
     const reasoningEffort =
-      route === undefined ? stringField(thread, REASONING_EFFORT_FIELD) : route.reasoningEffort;
+      validatedRoute.route === undefined
+        ? stringField(thread, REASONING_EFFORT_FIELD)
+        : validatedRoute.route.reasoningEffort;
     const invocation = {
       channelId: event.channel,
       enterpriseId: readSlackEnterpriseId(body),
@@ -4499,7 +4848,7 @@ async function handleMessage(
         teamId,
       }),
       userId: event.user,
-      viewerContextChannelIds: slackThreadViewerContextChannelIds(thread, event.channel),
+      viewerContextChannelIds: slackThreadViewerContextChannelIds(thread, event.channel, teamId),
     };
     const streamingResult =
       sayStream === undefined
@@ -4535,11 +4884,14 @@ async function handleMessage(
         agentId: route?.agentId ?? stringField(thread, "agent_id") ?? "assistant",
         channelId: event.channel,
         lastMessageTs: event.ts,
-        modelId: route === undefined ? stringField(thread, "model_id") : threadScopedModelId(route),
+        modelId:
+          validatedRoute.route === undefined
+            ? stringField(thread, "model_id")
+            : threadScopedModelId(validatedRoute.route),
         reasoningEffort:
-          route === undefined
+          validatedRoute.route === undefined
             ? stringField(thread, REASONING_EFFORT_FIELD)
-            : threadScopedReasoningEffort(route),
+            : threadScopedReasoningEffort(validatedRoute.route),
         rootMessageTs: stringField(thread, "root_message_ts") ?? threadTs,
         teamId,
         threadTs,
@@ -4704,11 +5056,29 @@ async function processAppMentionJob(
       });
       return;
     }
+    const validatedRoute = await validateSlackAgentRouteForRunner({
+      channelId: job.channelId,
+      eventType: "app_mention",
+      logger: input.logger,
+      route,
+      routingRepository: input.routingRepository,
+      teamId: job.teamId,
+      threadTs: job.threadTs,
+    });
+    if (!validatedRoute.valid) {
+      await postNoEnabledModelConfiguredMessage({
+        channelId: job.channelId,
+        client: input.client,
+        text: translator.t("modelRouting.error.noEnabledModel"),
+        threadTs: job.threadTs,
+      });
+      return;
+    }
     await notifyModelFallback({
       channelId: job.channelId,
       client: input.client,
       logger: input.logger,
-      route,
+      route: validatedRoute.route,
       threadTs: job.threadTs,
       translator,
       userId: job.userId,
@@ -4718,9 +5088,9 @@ async function processAppMentionJob(
       enterpriseId: job.enterpriseId,
       isEnterpriseInstall: job.isEnterpriseInstall,
       messageTs: job.messageTs,
-      modelId: route?.modelId,
+      modelId: validatedRoute.route?.modelId,
       referenceImages,
-      reasoningEffort: route?.reasoningEffort,
+      reasoningEffort: validatedRoute.route?.reasoningEffort,
       teamId: job.teamId,
       text: job.text,
       threadHistory: readThreadHistoryMessages(threadMessages, {
@@ -4779,8 +5149,8 @@ async function processAppMentionJob(
           agentId: route?.agentId ?? "assistant",
           channelId: job.channelId,
           lastMessageTs: job.messageTs,
-          modelId: threadScopedModelId(route),
-          reasoningEffort: threadScopedReasoningEffort(route),
+          modelId: threadScopedModelId(validatedRoute.route),
+          reasoningEffort: threadScopedReasoningEffort(validatedRoute.route),
           rootMessageTs: job.threadTs,
           teamId: job.teamId,
           threadTs: job.threadTs,
@@ -4912,11 +5282,33 @@ async function processFollowUpMessageJob(
     if (input.routingRepository.resolveAgent !== undefined && route === undefined) {
       return;
     }
+    const validatedRoute = await validateSlackAgentRouteForRunner({
+      channelId: routeChannelId,
+      eventType: "message_follow_up",
+      logger: input.logger,
+      route,
+      routingRepository: input.routingRepository,
+      teamId: job.teamId,
+      thread,
+      threadChannelId: job.channelId,
+      threadTs: job.threadTs,
+    });
+    if (!validatedRoute.valid) {
+      await postNoEnabledModelEphemeral({
+        channelId: job.channelId,
+        client: input.client,
+        logger: input.logger,
+        text: translator.t("modelRouting.error.noEnabledModel"),
+        threadTs: job.threadTs,
+        userId: job.userId,
+      });
+      return;
+    }
     await notifyModelFallback({
       channelId: job.channelId,
       client: input.client,
       logger: input.logger,
-      route,
+      route: validatedRoute.route,
       threadTs: job.threadTs,
       translator,
       userId: job.userId,
@@ -4928,9 +5320,14 @@ async function processFollowUpMessageJob(
       translator,
       threadTs: job.threadTs,
     });
-    const modelId = route === undefined ? stringField(thread, "model_id") : route.modelId;
+    const modelId =
+      validatedRoute.route === undefined
+        ? stringField(thread, "model_id")
+        : validatedRoute.route.modelId;
     const reasoningEffort =
-      route === undefined ? stringField(thread, REASONING_EFFORT_FIELD) : route.reasoningEffort;
+      validatedRoute.route === undefined
+        ? stringField(thread, REASONING_EFFORT_FIELD)
+        : validatedRoute.route.reasoningEffort;
     const invocation = {
       channelId: job.channelId,
       enterpriseId: job.enterpriseId,
@@ -4955,7 +5352,11 @@ async function processFollowUpMessageJob(
         teamId: job.teamId,
       }),
       userId: job.userId,
-      viewerContextChannelIds: slackThreadViewerContextChannelIds(thread, job.channelId),
+      viewerContextChannelIds: slackThreadViewerContextChannelIds(
+        thread,
+        job.channelId,
+        job.teamId,
+      ),
     };
     const streamingResult = await tryPostStreamingAgentRun({
       channel: job.channelId,
@@ -4996,11 +5397,14 @@ async function processFollowUpMessageJob(
         agentId: route?.agentId ?? stringField(thread, "agent_id") ?? "assistant",
         channelId: job.channelId,
         lastMessageTs: job.messageTs,
-        modelId: route === undefined ? stringField(thread, "model_id") : threadScopedModelId(route),
+        modelId:
+          validatedRoute.route === undefined
+            ? stringField(thread, "model_id")
+            : threadScopedModelId(validatedRoute.route),
         reasoningEffort:
-          route === undefined
+          validatedRoute.route === undefined
             ? stringField(thread, REASONING_EFFORT_FIELD)
-            : threadScopedReasoningEffort(route),
+            : threadScopedReasoningEffort(validatedRoute.route),
         rootMessageTs: stringField(thread, "root_message_ts") ?? job.threadTs,
         teamId: job.teamId,
         threadTs: job.threadTs,
@@ -5102,11 +5506,31 @@ async function processReactionAddedJob(
     if (input.routingRepository.resolveAgent !== undefined && route === undefined) {
       return;
     }
+    const validatedRoute = await validateSlackAgentRouteForRunner({
+      channelId: job.channelId,
+      eventType: "reaction_added",
+      logger: input.logger,
+      route,
+      routingRepository: input.routingRepository,
+      teamId: job.teamId,
+      threadTs,
+    });
+    if (!validatedRoute.valid) {
+      await postNoEnabledModelEphemeral({
+        channelId: job.channelId,
+        client: input.client,
+        logger: input.logger,
+        text: translator.t("modelRouting.error.noEnabledModel"),
+        threadTs,
+        userId: job.userId,
+      });
+      return;
+    }
     await notifyModelFallback({
       channelId: job.channelId,
       client: input.client,
       logger: input.logger,
-      route,
+      route: validatedRoute.route,
       threadTs,
       translator,
       userId: job.userId,
@@ -5132,8 +5556,8 @@ async function processReactionAddedJob(
         enterpriseId: job.enterpriseId,
         isEnterpriseInstall: job.isEnterpriseInstall,
         messageTs: job.messageTs,
-        modelId: route?.modelId,
-        reasoningEffort: route?.reasoningEffort,
+        modelId: validatedRoute.route?.modelId,
+        reasoningEffort: validatedRoute.route?.reasoningEffort,
         teamId: job.teamId,
         text:
           `Translate the following Slack message to ${job.targetLanguage}.\n` +
@@ -5258,6 +5682,52 @@ async function postNoAgentConfiguredMessage(input: {
   });
 }
 
+async function postNoEnabledModelConfiguredMessage(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  text: string;
+  threadTs: string;
+}): Promise<void> {
+  await input.client.chat.postMessage({
+    channel: input.channelId,
+    text: input.text,
+    thread_ts: input.threadTs,
+  });
+}
+
+async function postNoEnabledModelEphemeral(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  logger: unknown;
+  text: string;
+  threadTs: string;
+  userId?: string;
+}): Promise<void> {
+  if (input.userId === undefined || input.client.chat.postEphemeral === undefined) {
+    logWarn(input.logger, "Cannot post no-enabled-model ephemeral Slack message.", {
+      channelId: input.channelId,
+      threadTs: input.threadTs,
+      userId: input.userId,
+    });
+    return;
+  }
+  try {
+    await input.client.chat.postEphemeral({
+      channel: input.channelId,
+      text: input.text,
+      thread_ts: input.threadTs,
+      user: input.userId,
+    });
+  } catch (error) {
+    logWarn(input.logger, "Failed to post no-enabled-model ephemeral Slack message.", {
+      channelId: input.channelId,
+      error,
+      threadTs: input.threadTs,
+      userId: input.userId,
+    });
+  }
+}
+
 async function postMentionMenuMessage(input: {
   channelId: string;
   client: SlackAgentClient;
@@ -5342,6 +5812,202 @@ async function setSlackAssistantThreadStatus(input: {
       error,
       threadTs: input.threadTs,
     });
+  }
+}
+
+async function validateSlackAgentRouteForRunner(input: {
+  channelId: string;
+  eventType: string;
+  logger: unknown;
+  route: SlackResolvedAgentRoute | undefined;
+  routingRepository?: SlackAgentRoutingRepository;
+  teamId: string;
+  thread?: JsonObject;
+  threadChannelId?: string;
+  threadTs?: string;
+}): Promise<ValidatedSlackAgentRoute> {
+  const repository = input.routingRepository;
+  if (
+    repository === undefined ||
+    repository.findWorkspaceSettings === undefined ||
+    repository.findChannelSettings === undefined
+  ) {
+    const modelId =
+      input.route === undefined ? stringField(input.thread, "model_id") : input.route.modelId;
+    if (modelId !== undefined && !createDefaultModelRegistry().has(modelId)) {
+      logWarn(input.logger, "Rejected Slack route with unknown model before runner invocation.", {
+        channelId: input.channelId,
+        eventType: input.eventType,
+        routeFailure: { reason: "unknown_model" },
+        skippedModelIds: [modelId],
+        teamId: input.teamId,
+        threadTs: input.threadTs,
+      });
+      return { reason: "no_enabled_model", skippedModelIds: [modelId], valid: false };
+    }
+    return { route: input.route, valid: true };
+  }
+
+  const threadLookupChannelId = input.threadChannelId ?? input.channelId;
+  const [workspaceSettings, channelSettings, thread] = await Promise.all([
+    repository.findWorkspaceSettings(input.teamId),
+    repository.findChannelSettings(input.teamId, input.channelId),
+    input.threadTs === undefined || repository.findSlackThread === undefined
+      ? Promise.resolve(input.thread)
+      : repository.findSlackThread(input.teamId, threadLookupChannelId, input.threadTs),
+  ]);
+  const activeThread = isActiveThread(thread) ? thread : undefined;
+  const enabledModelIds = stringArrayField(workspaceSettings, "enabled_model_ids");
+  const candidates: Array<{ modelId?: string; scope: "channel" | "thread" | "workspace" }> = [
+    {
+      modelId:
+        stringField(activeThread, "model_scope") === "thread"
+          ? stringField(activeThread, "model_id")
+          : undefined,
+      scope: "thread",
+    },
+    { modelId: stringField(channelSettings, "default_model_id"), scope: "channel" },
+    { modelId: stringField(workspaceSettings, "default_model_id"), scope: "workspace" },
+  ];
+  const modelRegistry = createDefaultModelRegistry();
+  const skipped: Array<{ modelId: string; scope: "channel" | "thread" | "workspace" }> = [];
+  let selected: { modelId: string; scope: "channel" | "thread" | "workspace" } | undefined;
+  if (enabledModelIds.length > 0) {
+    for (const candidate of candidates) {
+      if (candidate.modelId === undefined) {
+        continue;
+      }
+      if (modelRegistry.has(candidate.modelId) && enabledModelIds.includes(candidate.modelId)) {
+        selected = { modelId: candidate.modelId, scope: candidate.scope };
+        break;
+      }
+      skipped.push({ modelId: candidate.modelId, scope: candidate.scope });
+    }
+  } else {
+    for (const candidate of candidates) {
+      if (candidate.modelId !== undefined) {
+        skipped.push({ modelId: candidate.modelId, scope: candidate.scope });
+      }
+    }
+  }
+
+  await repairSkippedSlackModelOverrides({
+    channelId: input.channelId,
+    logger: input.logger,
+    repository,
+    skipped,
+    teamId: input.teamId,
+    threadChannelId: input.threadChannelId,
+    threadTs: input.threadTs,
+  });
+
+  if (selected === undefined) {
+    logWarn(input.logger, "Rejected Slack route without a validated enabled model.", {
+      channelId: input.channelId,
+      eventType: input.eventType,
+      routeFailure: { reason: "no_enabled_model" },
+      skippedModelIds: skipped.map((item) => item.modelId),
+      teamId: input.teamId,
+      threadChannelId: input.threadChannelId,
+      threadTs: input.threadTs,
+    });
+    return {
+      reason: "no_enabled_model",
+      skippedModelIds: skipped.map((item) => item.modelId),
+      valid: false,
+    };
+  }
+
+  const fallbackFrom = skipped[0];
+  return {
+    route: {
+      ...(input.route ?? {
+        agent: {},
+        agentId: stringField(activeThread, "agent_id") ?? DEFAULT_AGENT_OPTION.id,
+        scope: "thread",
+      }),
+      modelFallback:
+        fallbackFrom === undefined
+          ? input.route?.modelFallback
+          : {
+              fromModelId: fallbackFrom.modelId,
+              fromScope: fallbackFrom.scope,
+              toModelId: selected.modelId,
+              toScope: selected.scope,
+            },
+      modelId: selected.modelId,
+      modelScope: selected.scope,
+      reasoningEffort: reasoningEffortForResolvedModelScope({
+        channelSettings,
+        scope: selected.scope,
+        thread: activeThread,
+        workspaceSettings,
+      }),
+    },
+    valid: true,
+  };
+}
+
+async function repairSkippedSlackModelOverrides(input: {
+  channelId: string;
+  logger: unknown;
+  repository: SlackAgentRoutingRepository;
+  skipped: readonly { modelId: string; scope: "channel" | "thread" | "workspace" }[];
+  teamId: string;
+  threadChannelId?: string;
+  threadTs?: string;
+}): Promise<void> {
+  const now = new Date();
+  for (const skipped of input.skipped) {
+    try {
+      if (skipped.scope === "thread" && input.threadTs !== undefined) {
+        await input.repository.clearThreadModelOverride?.({
+          channelId: input.threadChannelId ?? input.channelId,
+          teamId: input.teamId,
+          threadTs: input.threadTs,
+          updatedAt: now,
+        });
+      }
+      if (skipped.scope === "channel") {
+        await input.repository.clearChannelModelOverride?.({
+          channelId: input.channelId,
+          teamId: input.teamId,
+          updatedAt: now,
+        });
+      }
+    } catch (error) {
+      logWarn(input.logger, "Failed to repair invalid Slack model routing override.", {
+        channelId: input.channelId,
+        error,
+        repair: { disabledModelId: skipped.modelId, kind: skipped.scope },
+        teamId: input.teamId,
+        threadChannelId: input.threadChannelId,
+        threadTs: input.threadTs,
+      });
+    }
+  }
+}
+
+function reasoningEffortForResolvedModelScope(input: {
+  channelSettings?: JsonObject;
+  scope: "channel" | "thread" | "workspace";
+  thread?: JsonObject;
+  workspaceSettings?: JsonObject;
+}): string | undefined {
+  switch (input.scope) {
+    case "thread":
+      return (
+        stringField(input.thread, REASONING_EFFORT_FIELD) ??
+        stringField(input.channelSettings, REASONING_EFFORT_FIELD) ??
+        stringField(input.workspaceSettings, REASONING_EFFORT_FIELD)
+      );
+    case "channel":
+      return (
+        stringField(input.channelSettings, REASONING_EFFORT_FIELD) ??
+        stringField(input.workspaceSettings, REASONING_EFFORT_FIELD)
+      );
+    case "workspace":
+      return stringField(input.workspaceSettings, REASONING_EFFORT_FIELD);
   }
 }
 
@@ -5501,14 +6167,35 @@ async function handleReactionAdded(
     if (options.routingRepository.resolveAgent !== undefined && route === undefined) {
       return;
     }
+    const reactionUserId = readString(event, "user") ?? "unknown";
+    const validatedRoute = await validateSlackAgentRouteForRunner({
+      channelId,
+      eventType: "reaction_added",
+      logger,
+      route,
+      routingRepository: options.routingRepository,
+      teamId,
+      threadTs,
+    });
+    if (!validatedRoute.valid) {
+      await postNoEnabledModelEphemeral({
+        channelId,
+        client,
+        logger,
+        text: translator.t("modelRouting.error.noEnabledModel"),
+        threadTs,
+        userId: reactionUserId,
+      });
+      return;
+    }
     await notifyModelFallback({
       channelId,
       client,
       logger,
-      route,
+      route: validatedRoute.route,
       threadTs,
       translator,
-      userId: readString(event, "user") ?? "unknown",
+      userId: reactionUserId,
     });
     if (sourceText === undefined || sourceText.trim() === "") {
       await client.chat.postMessage({
@@ -5531,15 +6218,15 @@ async function handleReactionAdded(
         enterpriseId: readSlackEnterpriseId(body),
         isEnterpriseInstall: readSlackEnterpriseInstall(body),
         messageTs,
-        modelId: route?.modelId,
-        reasoningEffort: route?.reasoningEffort,
+        modelId: validatedRoute.route?.modelId,
+        reasoningEffort: validatedRoute.route?.reasoningEffort,
         teamId,
         text:
           `Translate the following Slack message to ${targetLanguage}.\n` +
           "Return only the structured translation result. Preserve Slack mentions, URLs, emoji, and code blocks where possible.\n\n" +
           sourceText,
         threadTs,
-        userId: readString(event, "user") ?? "unknown",
+        userId: reactionUserId,
         viewerContextChannelIds: [channelId],
       },
       TRANSLATION_RESULT_RESPONSE_FORMAT,
@@ -7720,10 +8407,16 @@ function slackThreadRouteChannelId(
 function slackThreadViewerContextChannelIds(
   thread: JsonObject | undefined,
   fallbackChannelId: string,
+  teamId: string,
 ): string[] {
+  const contextTeamId = stringField(thread, "assistant_thread_context_team_id");
+  const contextChannelId =
+    contextTeamId === teamId
+      ? stringField(thread, "assistant_thread_context_channel_id")
+      : undefined;
   return [
     ...new Set(
-      [stringField(thread, "assistant_thread_context_channel_id"), fallbackChannelId].filter(
+      [contextChannelId, fallbackChannelId].filter(
         (channelId): channelId is string => channelId !== undefined,
       ),
     ),

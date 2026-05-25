@@ -18,6 +18,7 @@ export const defaultImageGenerationFallbackModelIds = [
 export type MediaGenerationToolContext = {
   channelId: string;
   teamId: string;
+  viewerContextChannelIds?: readonly string[];
 };
 
 type MediaGateway = {
@@ -103,11 +104,7 @@ async function generateImageTool(
   if (workspaceSetting?.enabled !== true) {
     return failure("feature_disabled", "Image generation is disabled for this workspace.");
   }
-  const channelAllowed = await options.featureSettingsRepository.isChannelAllowed({
-    channelId: options.context.channelId,
-    featureKey: "image_generation",
-    teamId: options.context.teamId,
-  });
+  const channelAllowed = await isImageGenerationAllowedForSlackContext(options, workspaceSetting);
   if (!channelAllowed) {
     return failure(
       "channel_not_allowed",
@@ -225,7 +222,49 @@ function failure(code: string, message: string): MediaToolOutput {
   };
 }
 
+function isSlackDirectMessageChannel(channelId: string): boolean {
+  return channelId.startsWith("D");
+}
+
+async function isImageGenerationAllowedForSlackContext(
+  options: MediaGenerationToolOptions,
+  workspaceSetting: { payload: Record<string, JsonValue> },
+): Promise<boolean> {
+  const contextChannelIds = [
+    ...new Set([options.context.channelId, ...(options.context.viewerContextChannelIds ?? [])]),
+  ];
+  const sourceChannelIds = contextChannelIds.filter(
+    (channelId) => !isSlackDirectMessageChannel(channelId),
+  );
+  if (sourceChannelIds.length > 0) {
+    for (const channelId of sourceChannelIds) {
+      if (
+        await options.featureSettingsRepository?.isChannelAllowed({
+          channelId,
+          featureKey: "image_generation",
+          teamId: options.context.teamId,
+        })
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return (
+    isSlackDirectMessageChannel(options.context.channelId) &&
+    booleanPayloadField(workspaceSetting.payload, "allow_direct_messages") === true
+  );
+}
+
 function stringPayloadField(payload: Record<string, JsonValue>, field: string): string | undefined {
   const value = payload[field];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function booleanPayloadField(
+  payload: Record<string, JsonValue>,
+  field: string,
+): boolean | undefined {
+  const value = payload[field];
+  return typeof value === "boolean" ? value : undefined;
 }
