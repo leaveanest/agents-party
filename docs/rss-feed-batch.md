@@ -8,8 +8,6 @@ RSS state is stored in PostgreSQL:
 
 - `rss_feed_subscriptions`: enabled feeds per Slack team/channel.
 - `rss_feed_fetch_cache`: RSS XML cache with `ETag` / `Last-Modified` conditional request metadata.
-- `rss_article_content_cache`: legacy article text cache table, not used by the current
-  feed-only batch path.
 - `rss_processed_articles`: subscription/article processing log with a unique `(subscription_id, article_key)` constraint.
 
 Slack workspace admins can add subscriptions from App Home. The add flow asks for a public
