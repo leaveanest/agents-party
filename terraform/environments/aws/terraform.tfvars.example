@@ -1,7 +1,9 @@
 container_image = "123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/agents-party:latest"
 
-# Optional HTTPS listener. Leave null for HTTP-only test environments.
-certificate_arn = null
+# Public deployments should terminate TLS at the ALB. For a temporary HTTP-only test
+# environment, set allow_plain_http = true and leave certificate_arn = null.
+certificate_arn = "arn:aws:acm:ap-northeast-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+# allow_plain_http = true
 
 # Store DATABASE_URL, Slack/OAuth secrets, and encryption keys outside Terraform state.
 runtime_secret_arns = {

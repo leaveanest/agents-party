@@ -174,7 +174,7 @@ async function fetchInstallationOrUndefined(
     return await installationStore.fetchInstallation({
       enterpriseId: source.enterpriseId,
       isEnterpriseInstall: source.isEnterpriseInstall,
-      teamId: source.isEnterpriseInstall ? undefined : source.teamId,
+      teamId: source.teamId,
       userId: source.userId,
     });
   } catch {

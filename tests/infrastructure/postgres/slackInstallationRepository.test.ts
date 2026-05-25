@@ -161,6 +161,56 @@ describe("PostgresSlackInstallationRepository", () => {
     expect(pool.queries[1]?.text).toContain("team_id is not null");
   });
 
+  it("keeps Enterprise Grid installation lookups scoped to the supplied team", async () => {
+    const pool = new RecordingPool([
+      {
+        ...installationRecord(),
+        enterprise_id: "E1",
+        team_id: "T1",
+      },
+    ]);
+    const repository = new PostgresSlackInstallationRepository("C1", { pool: pool as never });
+
+    await expect(
+      repository.findInstallation({
+        enterpriseId: "E1",
+        isEnterpriseInstall: true,
+        teamId: "T1",
+        userId: "U1",
+      }),
+    ).resolves.toMatchObject({
+      enterpriseId: "E1",
+      teamId: "T1",
+    });
+
+    expect(pool.queries.map((query) => query.values)).toEqual([["C1", "E1", "T1", "U1"]]);
+  });
+
+  it("keeps Enterprise Grid bot lookups scoped to the supplied team", async () => {
+    const pool = new RecordingPool([
+      {
+        ...botRecord(),
+        enterprise_id: "E1",
+        team_id: "T1",
+      },
+    ]);
+    const repository = new PostgresSlackInstallationRepository("C1", { pool: pool as never });
+
+    await expect(
+      repository.findBot({
+        enterpriseId: "E1",
+        isEnterpriseInstall: true,
+        teamId: "T1",
+      }),
+    ).resolves.toMatchObject({
+      botId: "B1",
+      enterpriseId: "E1",
+      teamId: "T1",
+    });
+
+    expect(pool.queries.map((query) => query.values)).toEqual([["C1", "E1", "T1"]]);
+  });
+
   it("does not run broad installation lookups without enterprise or team scope", async () => {
     const pool = new RecordingPool([installationRecord()]);
     const repository = new PostgresSlackInstallationRepository("C1", { pool: pool as never });

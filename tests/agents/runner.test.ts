@@ -189,6 +189,11 @@ describe("AgentRunner", () => {
     });
     expect(router.requests[0]?.history.messages.at(-1)).toMatchObject({
       id: "1.0",
+      provenance: {
+        externalMessageId: "1.0",
+        source: "slack",
+        threadId: "T1:C1:1.0",
+      },
       role: "user",
     });
     expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
@@ -966,12 +971,84 @@ describe("AgentRunner", () => {
         author: { id: "slack:T1:U1", kind: "user" },
         role: "user",
         content: [{ text: "root question", type: "text" }],
+        provenance: {
+          externalMessageId: "1.0",
+          source: "slack",
+          threadId: "T1:C1:1.0",
+        },
       }),
       expect.objectContaining({
         role: "assistant",
         content: [{ text: "previous answer", type: "text" }],
+        provenance: {
+          externalMessageId: "1.1",
+          source: "slack",
+          threadId: "T1:C1:1.0",
+        },
       }),
     ]);
+  });
+
+  it("uses the current Slack message as scoped provenance when thread timestamp is absent", async () => {
+    const router = new FakeProviderRouter({
+      content: "root reply",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "root message",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.history.messages.at(-1)).toMatchObject({
+      provenance: {
+        externalMessageId: "1.0",
+        source: "slack",
+        threadId: "T1:C1:1.0",
+      },
+    });
+  });
+
+  it("uses scoped provenance for fallback thread messages", async () => {
+    const router = new FakeProviderRouter({
+      content: "thread reply",
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "2.0",
+      teamId: "T1",
+      text: "continue",
+      threadMessages: ["root fallback"],
+      threadTs: "1.0",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.history.messages[0]).toMatchObject({
+      id: "thread-0",
+      provenance: {
+        source: "slack",
+        threadId: "T1:C1:1.0",
+      },
+      role: "user",
+    });
+    expect(router.requests[0]?.history.messages.at(-1)).toMatchObject({
+      provenance: {
+        externalMessageId: "2.0",
+        source: "slack",
+        threadId: "T1:C1:1.0",
+      },
+    });
   });
 });
 

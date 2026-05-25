@@ -426,7 +426,7 @@ function botRecordToRow(record: SlackBotRecord): SlackBotRow | undefined {
 }
 
 function resolvedTeamId(lookup: SlackInstallationLookup): string | undefined {
-  return lookup.isEnterpriseInstall ? undefined : lookup.teamId;
+  return lookup.teamId;
 }
 
 function nullable<T>(value: T | null): T | undefined {

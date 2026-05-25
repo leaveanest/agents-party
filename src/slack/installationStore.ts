@@ -131,7 +131,7 @@ export function installationQueryToLookup(
   return {
     enterpriseId: query.enterpriseId,
     isEnterpriseInstall: query.isEnterpriseInstall,
-    teamId: query.isEnterpriseInstall ? undefined : query.teamId,
+    teamId: query.teamId,
     userId: query.userId,
   };
 }

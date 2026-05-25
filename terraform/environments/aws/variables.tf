@@ -63,8 +63,14 @@ variable "assign_public_ip" {
   default     = true
 }
 
+variable "allow_plain_http" {
+  description = "Explicitly allow a public HTTP listener without ACM TLS. Keep false for production-like deployments."
+  type        = bool
+  default     = false
+}
+
 variable "certificate_arn" {
-  description = "Optional ACM certificate ARN. When set, ALB HTTP redirects to HTTPS."
+  description = "ACM certificate ARN for the public ALB HTTPS listener. Required unless allow_plain_http is explicitly true."
   type        = string
   default     = null
 }

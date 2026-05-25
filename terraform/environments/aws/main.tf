@@ -7,6 +7,8 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
+  certificate_arn                    = try(trimspace(var.certificate_arn), "")
+  has_certificate                    = local.certificate_arn != ""
   name_prefix                        = "${var.project_name}-${var.environment}"
   bucket_name                        = coalesce(var.object_storage_bucket_name, "${local.name_prefix}-objects")
   object_storage_prefix              = var.object_storage_prefix == null ? null : trimprefix(trimsuffix(var.object_storage_prefix, "/"), "/")
@@ -185,6 +187,13 @@ resource "aws_lb" "app" {
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
+
+  lifecycle {
+    precondition {
+      condition     = local.has_certificate || var.allow_plain_http
+      error_message = "certificate_arn is required for public ALB traffic unless allow_plain_http is explicitly true."
+    }
+  }
 }
 
 resource "aws_lb_target_group" "web" {
@@ -201,7 +210,7 @@ resource "aws_lb_target_group" "web" {
 }
 
 resource "aws_lb_listener" "http_forward" {
-  count = var.certificate_arn == null ? 1 : 0
+  count = local.has_certificate ? 0 : var.allow_plain_http ? 1 : 0
 
   default_action {
     target_group_arn = aws_lb_target_group.web.arn
@@ -214,7 +223,7 @@ resource "aws_lb_listener" "http_forward" {
 }
 
 resource "aws_lb_listener" "http_redirect" {
-  count = var.certificate_arn == null ? 0 : 1
+  count = local.has_certificate ? 1 : 0
 
   default_action {
     type = "redirect"
@@ -232,9 +241,9 @@ resource "aws_lb_listener" "http_redirect" {
 }
 
 resource "aws_lb_listener" "https" {
-  count = var.certificate_arn == null ? 0 : 1
+  count = local.has_certificate ? 1 : 0
 
-  certificate_arn = var.certificate_arn
+  certificate_arn = local.certificate_arn
 
   default_action {
     target_group_arn = aws_lb_target_group.web.arn
