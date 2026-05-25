@@ -98,12 +98,48 @@ describe("native provider adapters", () => {
     const adapters = createNativeProviderAdapters();
 
     expect(adapters.map((adapter) => adapter.provider)).toEqual([
-      "google",
       "openai",
       "anthropic",
       "google",
       "dify",
     ]);
+  });
+
+  it("routes Gemini web search through the common adapter", async () => {
+    let commonAdapterCalled = false;
+    const commonAdapter: LlmAdapter = {
+      async generate() {
+        commonAdapterCalled = true;
+        return { content: "common" };
+      },
+      provider: "google",
+      supports(_request, requiredCapabilities) {
+        return !requiredCapabilities.includes("file_input");
+      },
+    };
+    const router = new ProviderRouter(
+      [...createNativeProviderAdapters(), commonAdapter],
+      new ModelRegistry([
+        {
+          capabilities: ["text", "streaming", "web_search"],
+          id: "google:gemini-2.5-flash",
+          provider: "google",
+          providerModelId: "gemini-2.5-flash",
+        },
+      ]),
+    );
+    const model = router.resolveModel({ workspaceModelId: "google:gemini-2.5-flash" }, [
+      "web_search",
+    ]).model;
+
+    await expect(
+      router.generate({
+        history,
+        model,
+        requiredCapabilities: ["web_search"],
+      }),
+    ).resolves.toEqual({ content: "common" });
+    expect(commonAdapterCalled).toBe(true);
   });
 
   it("routes Gemini file input to the native stub with common adapters registered first", async () => {

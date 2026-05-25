@@ -1,4 +1,9 @@
 import type { RssFeedRepository } from "../../repositories/rssFeeds.js";
+import {
+  fetchSafeRssUrl,
+  type RssUrlHostnameResolver,
+  UnsafeRssFeedUrlError,
+} from "./rssUrlSafety.js";
 
 export type RssFetchResult = {
   body: string;
@@ -14,6 +19,7 @@ export class RssFeedFetchGateway {
       repository: Pick<RssFeedRepository, "findFeedFetchCache" | "saveFeedFetchCache">;
       ttlMs?: number;
       failureTtlMs?: number;
+      resolveHostname?: RssUrlHostnameResolver;
     },
   ) {}
 
@@ -36,9 +42,19 @@ export class RssFeedFetchGateway {
 
     let response: Response;
     try {
-      response = await this.fetchFn()(feedUrl, { headers });
-    } catch {
-      await this.saveFailure(feedUrl, cache, now, "network_error");
+      response = await fetchSafeRssUrl({
+        fetchFn: this.fetchFn(),
+        init: { headers },
+        resolveHostname: this.options.resolveHostname,
+        url: feedUrl,
+      });
+    } catch (error) {
+      await this.saveFailure(
+        feedUrl,
+        cache,
+        now,
+        error instanceof UnsafeRssFeedUrlError ? error.reason : "network_error",
+      );
       return cache?.body === undefined
         ? undefined
         : { body: cache.body, cacheStatus: "hit", feedUrl };

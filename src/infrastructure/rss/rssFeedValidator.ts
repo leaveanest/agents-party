@@ -1,4 +1,5 @@
 import { parseRssArticles } from "./rssParser.js";
+import { fetchSafeRssUrl, type RssUrlHostnameResolver } from "./rssUrlSafety.js";
 
 export type RssFeedValidationResult =
   | { articleCount: number; ok: true }
@@ -7,15 +8,19 @@ export type RssFeedValidationResult =
 export async function validateRssFeedUrl(input: {
   feedUrl: string;
   fetchFn?: typeof fetch;
+  resolveHostname?: RssUrlHostnameResolver;
 }): Promise<RssFeedValidationResult> {
-  const fetchFn = input.fetchFn ?? fetch;
   let response: Response;
   try {
-    response = await fetchFn(input.feedUrl, {
-      headers: {
-        accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+    response = await fetchSafeRssUrl({
+      fetchFn: input.fetchFn,
+      init: {
+        headers: {
+          accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+        },
       },
-      redirect: "follow",
+      resolveHostname: input.resolveHostname,
+      url: input.feedUrl,
     });
   } catch {
     return { ok: false, reason: "unreachable" };

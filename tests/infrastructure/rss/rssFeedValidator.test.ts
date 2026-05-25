@@ -11,6 +11,7 @@ describe("validateRssFeedUrl", () => {
           `<rss><channel><item><title>One</title><link>https://example.com/one</link></item></channel></rss>`,
           { status: 200 },
         ),
+      resolveHostname: publicResolver,
     });
 
     expect(result).toEqual({ articleCount: 1, ok: true });
@@ -24,6 +25,7 @@ describe("validateRssFeedUrl", () => {
           `<feed><entry><title>One</title><link rel="alternate" href="/one" /></entry></feed>`,
           { status: 200 },
         ),
+      resolveHostname: publicResolver,
     });
 
     expect(result).toEqual({ articleCount: 1, ok: true });
@@ -34,6 +36,7 @@ describe("validateRssFeedUrl", () => {
       validateRssFeedUrl({
         feedUrl: "https://example.com/feed.xml",
         fetchFn: async () => new Response("missing", { status: 404 }),
+        resolveHostname: publicResolver,
       }),
     ).resolves.toEqual({ ok: false, reason: "unreachable" });
 
@@ -43,6 +46,7 @@ describe("validateRssFeedUrl", () => {
         fetchFn: async () => {
           throw new Error("network failed");
         },
+        resolveHostname: publicResolver,
       }),
     ).resolves.toEqual({ ok: false, reason: "unreachable" });
   });
@@ -56,7 +60,42 @@ describe("validateRssFeedUrl", () => {
             headers: { "content-type": "text/html" },
             status: 200,
           }),
+        resolveHostname: publicResolver,
       }),
     ).resolves.toEqual({ ok: false, reason: "not_feed" });
   });
+
+  it("rejects private hosts before fetching", async () => {
+    let fetched = false;
+    await expect(
+      validateRssFeedUrl({
+        feedUrl: "http://169.254.169.254/latest/meta-data",
+        fetchFn: async () => {
+          fetched = true;
+          return new Response("<rss />");
+        },
+        resolveHostname: publicResolver,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "unreachable" });
+
+    expect(fetched).toBe(false);
+  });
+
+  it("rejects redirects to private hosts", async () => {
+    await expect(
+      validateRssFeedUrl({
+        feedUrl: "https://example.com/feed.xml",
+        fetchFn: async () =>
+          new Response(null, {
+            headers: { location: "http://127.0.0.1/feed.xml" },
+            status: 302,
+          }),
+        resolveHostname: publicResolver,
+      }),
+    ).resolves.toEqual({ ok: false, reason: "unreachable" });
+  });
 });
+
+async function publicResolver() {
+  return ["93.184.216.34"];
+}

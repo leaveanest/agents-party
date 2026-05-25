@@ -9,6 +9,7 @@ import type {
   LlmResult,
   ModelInfo,
 } from "../../src/providers/contracts.js";
+import { MissingModelCapabilityError } from "../../src/providers/modelRegistry.js";
 
 const channelModel: ModelInfo = {
   capabilities: ["text", "web_search"],
@@ -174,6 +175,84 @@ describe("RssFeedProcessor", () => {
     expect(providerRouter.requests).toHaveLength(0);
   });
 
+  it("does not hide non-capability model resolution errors", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter();
+    const processor = new RssFeedProcessor({
+      articlePublisher: new RecordingPublisher(),
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: "openai:missing-model" };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).rejects.toThrow("No model configured.");
+    expect(providerRouter.requests).toHaveLength(0);
+  });
+
+  it("counts unusable LLM draft output as failed articles", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter({ draftContent: "not json" });
+    const publisher = new RecordingPublisher();
+    const processor = new RssFeedProcessor({
+      articlePublisher: publisher,
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: channelModel.id };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 1,
+      postedArticles: 0,
+    });
+    expect(repository.reservationCount).toBe(0);
+    expect(repository.cursorUpdates).toHaveLength(0);
+    expect(publisher.posts).toHaveLength(0);
+  });
+
+  it("counts empty LLM draft selections as failed articles", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter({ draftContent: JSON.stringify({ posts: [] }) });
+    const publisher = new RecordingPublisher();
+    const processor = new RssFeedProcessor({
+      articlePublisher: publisher,
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: channelModel.id };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 1,
+      postedArticles: 0,
+    });
+    expect(repository.reservationCount).toBe(0);
+    expect(repository.cursorUpdates).toHaveLength(0);
+    expect(publisher.posts).toHaveLength(0);
+  });
+
   it("advances the published cursor only for successfully posted articles", async () => {
     const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
     const failedArticleKey = rssArticleKey({
@@ -323,6 +402,8 @@ class FakeProviderRouter {
   readonly requests: LlmRequest[] = [];
   readonly resolveRequirements: string[][] = [];
 
+  constructor(private readonly options: { draftContent?: string } = {}) {}
+
   resolveModel(
     input: { channelModelId?: string | null; workspaceModelId?: string | null },
     requiredCapabilities: readonly LlmCapability[] = [],
@@ -343,13 +424,16 @@ class FakeProviderRouter {
       (capability) => !resolved.model.capabilities.includes(capability),
     );
     if (missing.length > 0) {
-      throw new Error(`Missing capabilities: ${missing.join(", ")}`);
+      throw new MissingModelCapabilityError(resolved.model, missing);
     }
     return resolved;
   }
 
   async generate(request: LlmRequest): Promise<LlmResult> {
     this.requests.push(request);
+    if (this.options.draftContent !== undefined) {
+      return { content: this.options.draftContent };
+    }
     const textPart = request.history.messages[0]?.content.find((part) => part.type === "text");
     const text = textPart?.type === "text" ? textPart.text : "";
     const articleKeys = [...text.matchAll(/^\d+\. Article Key: (.+)$/gmu)].map((match) => match[1]);

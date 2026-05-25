@@ -2,6 +2,7 @@ import type { ConversationHistory } from "../domain/messageHistory.js";
 import { type RssArticle, type RssFeedSubscription, rssArticleKey } from "../domain/rssFeeds.js";
 import { parseRssArticles } from "../infrastructure/rss/rssParser.js";
 import type { LlmRequest, ModelInfo } from "../providers/contracts.js";
+import { MissingModelCapabilityError } from "../providers/modelRegistry.js";
 import type { ProviderRouter } from "../providers/providerRouter.js";
 import type { RssFeedRepository } from "../repositories/rssFeeds.js";
 
@@ -112,6 +113,9 @@ export class RssFeedProcessor {
     try {
       resolvedModel = await this.resolveModel(subscription);
     } catch (error) {
+      if (!isMissingWebSearchCapability(error)) {
+        throw error;
+      }
       this.options.logger?.warn?.("RSS subscription skipped because web search is unavailable.", {
         channelId: subscription.channelId,
         error,
@@ -391,6 +395,9 @@ function parseDraftedFeedPosts(
   candidates: ReadonlyArray<{ article: RssArticle; articleKey: string }>,
 ): RssArticlePost[] {
   const parsed = parseJsonObject(value);
+  if (parsed === undefined || !Array.isArray(parsed.posts)) {
+    throw new Error("RSS feed item drafting returned invalid JSON.");
+  }
   const posts = Array.isArray(parsed?.posts) ? parsed.posts : [];
   const candidatesByKey = new Map(candidates.map((candidate) => [candidate.articleKey, candidate]));
   const drafted: RssArticlePost[] = [];
@@ -420,6 +427,9 @@ function parseDraftedFeedPosts(
       text,
       title: candidate.article.title,
     });
+  }
+  if (drafted.length === 0) {
+    throw new Error("RSS feed item drafting returned no usable posts.");
   }
   return drafted;
 }
@@ -472,6 +482,12 @@ function stringValue(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isMissingWebSearchCapability(error: unknown): boolean {
+  return (
+    error instanceof MissingModelCapabilityError && error.missingCapabilities.includes("web_search")
+  );
 }
 
 const MAX_FEED_FIELD_CHARS = 2_000;

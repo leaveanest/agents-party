@@ -2800,6 +2800,7 @@ describe("createAgentSlackHandlers", () => {
         callOrder.push("fetch");
         return validRssFeedResponse();
       },
+      rssFeedResolveHostname: publicRssResolver,
       rssFeedHome: { repository },
     });
 
@@ -2886,6 +2887,7 @@ describe("createAgentSlackHandlers", () => {
     const repository = new MemoryRssFeedRepository();
     const handlers = createAgentSlackHandlers({} as never, {
       rssFeedFetchFn: async () => validRssFeedResponse(),
+      rssFeedResolveHostname: publicRssResolver,
       rssFeedHome: { repository },
     });
 
@@ -2932,6 +2934,7 @@ describe("createAgentSlackHandlers", () => {
           headers: { "content-type": "text/html" },
           status: 200,
         }),
+      rssFeedResolveHostname: publicRssResolver,
       rssFeedHome: { repository },
     });
 
@@ -2968,6 +2971,53 @@ describe("createAgentSlackHandlers", () => {
     expect(joinedChannels).toEqual([]);
     expect(repository.saved).toEqual([]);
     expect(JSON.stringify(updatedViews)).toContain("did not contain readable RSS or Atom");
+  });
+
+  it("rejects RSS subscription submissions when Enterprise metadata team differs from body team", async () => {
+    const acks: unknown[] = [];
+    const repository = new MemoryRssFeedRepository();
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedFetchFn: async () => validRssFeedResponse(),
+      rssFeedResolveHostname: publicRssResolver,
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { enterprise: { id: "E1" }, team: { id: "T-body" }, user: { id: "UADMIN" } },
+      client: {
+        conversations: {
+          join: async () => {
+            throw new Error("join should not be called");
+          },
+        },
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async () => ({}),
+        },
+      },
+      logger: { warn() {} },
+      view: validRssFeedView({
+        channelId: "C1",
+        enterpriseId: "E1",
+        feedUrl: "https://example.com/feed.xml",
+        teamId: "T-metadata",
+      }),
+    } as never);
+
+    expect(repository.saved).toEqual([]);
+    expect(acks).toEqual([
+      {
+        errors: {
+          rss_feed_channel: "Slack workspace context does not match.",
+        },
+        response_action: "errors",
+      },
+    ]);
   });
 
   it("publishes feature settings entry point when a supported image provider API key exists", async () => {
@@ -9349,6 +9399,7 @@ function validFeatureSettingsView(input: {
 
 function validRssFeedView(input: {
   channelId: string;
+  enterpriseId?: string;
   feedUrl: string;
   prompt?: string;
   teamId: string;
@@ -9357,6 +9408,7 @@ function validRssFeedView(input: {
     hash: "HASH1",
     id: "VIEW1",
     private_metadata: JSON.stringify({
+      enterpriseId: input.enterpriseId,
       source: "app_home",
       teamId: input.teamId,
     }),
@@ -9394,6 +9446,10 @@ function validRssFeedResponse(): Response {
       status: 200,
     },
   );
+}
+
+async function publicRssResolver() {
+  return ["93.184.216.34"];
 }
 
 class MemoryRssFeedRepository {

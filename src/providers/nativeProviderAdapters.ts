@@ -5,16 +5,8 @@ import type {
   LlmRequest,
   LlmResult,
   LlmStreamEvent,
-  LlmToolCall,
 } from "./contracts.js";
-import { createGoogleGenerativeAI, google } from "@ai-sdk/google";
-import { generateText, type FinishReason } from "ai";
-import {
-  aiSdkMessageConversionCapabilitiesForModel,
-  convertHistoryToAiSdkMessages,
-} from "./aiSdkMessageConverter.js";
-import { type ProviderCredentialResolver, resolveCredentialForRequest } from "./credentials.js";
-import { mergeReasoningProviderOptions } from "./reasoningOptions.js";
+import type { ProviderCredentialResolver } from "./credentials.js";
 
 export type NativeProviderAdapterSpec = {
   capabilities: readonly LlmCapability[];
@@ -76,78 +68,12 @@ export class UnsupportedNativeProviderAdapter implements LlmAdapter {
   }
 }
 
-export class GoogleWebSearchNativeAdapter implements LlmAdapter {
-  readonly provider = "google" as const;
-
-  constructor(private readonly credentialResolver?: ProviderCredentialResolver) {}
-
-  supports(_request: LlmRequest, requiredCapabilities: readonly LlmCapability[]): boolean {
-    return requiredCapabilities.includes("web_search");
-  }
-
-  async generate(request: LlmRequest): Promise<LlmResult> {
-    const credential = await resolveCredentialForRequest(
-      this.credentialResolver,
-      request,
-      request.model.provider,
-    );
-    const googleProvider =
-      credential === undefined
-        ? google
-        : createGoogleGenerativeAI({
-            apiKey: credential.apiKey,
-          });
-    const result = await generateText({
-      maxOutputTokens: request.maxOutputTokens,
-      messages: convertHistoryToAiSdkMessages(
-        request.history,
-        aiSdkMessageConversionCapabilitiesForModel(request.model),
-      ),
-      model: googleProvider(request.model.providerModelId),
-      providerOptions: mergeReasoningProviderOptions({
-        model: request.model,
-        providerOptions: request.providerOptions,
-        reasoningEffort: request.reasoningEffort,
-      }),
-      system: request.system,
-      temperature: request.temperature,
-      tools: {
-        google_search: googleProvider.tools.googleSearch({}),
-      },
-    });
-    return {
-      content: result.text,
-      finishReason: mapFinishReason(result.finishReason),
-      raw: result,
-      sources: result.sources
-        .filter((source) => source.sourceType === "url")
-        .map((source) => ({
-          title: source.title,
-          url: source.url,
-        })),
-      toolCalls: result.toolCalls.map(mapToolCall),
-      usage:
-        result.usage === undefined
-          ? undefined
-          : {
-              inputTokens: result.usage.inputTokens,
-              outputTokens: result.usage.outputTokens,
-              reasoningTokens: result.usage.outputTokenDetails.reasoningTokens,
-              totalTokens: result.usage.totalTokens,
-            },
-    };
-  }
-}
-
 export function createNativeProviderAdapters(
-  input: {
+  _input: {
     credentialResolver?: ProviderCredentialResolver;
   } = {},
 ): LlmAdapter[] {
-  return [
-    new GoogleWebSearchNativeAdapter(input.credentialResolver),
-    ...nativeProviderAdapterSpecs.map((spec) => new UnsupportedNativeProviderAdapter(spec)),
-  ];
+  return nativeProviderAdapterSpecs.map((spec) => new UnsupportedNativeProviderAdapter(spec));
 }
 
 export const nativeProviderAdapterSpecs: readonly NativeProviderAdapterSpec[] = [
@@ -172,34 +98,3 @@ export const nativeProviderAdapterSpecs: readonly NativeProviderAdapterSpec[] = 
     reason: "Use a future Dify endpoint adapter with workspace endpoint and credential lookup.",
   },
 ];
-
-function mapToolCall(toolCall: {
-  input: unknown;
-  toolCallId: string;
-  toolName: string;
-}): LlmToolCall {
-  return {
-    input: toolCall.input,
-    toolCallId: toolCall.toolCallId,
-    toolName: toolCall.toolName,
-  };
-}
-
-function mapFinishReason(
-  reason: FinishReason,
-): "stop" | "length" | "tool_call" | "content_filter" | "error" | "unknown" {
-  switch (reason) {
-    case "stop":
-      return "stop";
-    case "length":
-      return "length";
-    case "tool-calls":
-      return "tool_call";
-    case "content-filter":
-      return "content_filter";
-    case "error":
-      return "error";
-    default:
-      return "unknown";
-  }
-}

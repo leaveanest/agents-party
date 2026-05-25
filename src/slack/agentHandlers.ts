@@ -57,6 +57,7 @@ import {
 } from "../domain/salesforcePdfWorkflows.js";
 import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
 import { validateRssFeedUrl } from "../infrastructure/rss/rssFeedValidator.js";
+import type { RssUrlHostnameResolver } from "../infrastructure/rss/rssUrlSafety.js";
 import type { TranscriptionGateway } from "../providers/transcriptionGateway.js";
 import { createDefaultModelRegistry } from "../providers/modelRegistry.js";
 import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
@@ -486,6 +487,7 @@ export type AgentSlackHandlerOptions = {
   featureSettingsHome?: WorkspaceFeatureSettingsHome;
   routingRepository?: SlackAgentRoutingRepository;
   rssFeedFetchFn?: typeof fetch;
+  rssFeedResolveHostname?: RssUrlHostnameResolver;
   rssFeedHome?: RssFeedHome;
   salesforceConnectionHome?: SalesforceConnectionHome;
   salesforcePdfWorkflowHome?: SalesforcePdfWorkflowHome;
@@ -3229,12 +3231,7 @@ async function handleRssFeedModalSubmission(
     });
     return;
   }
-  if (
-    metadata?.enterpriseId === undefined &&
-    metadataTeamId !== undefined &&
-    bodyTeamId !== undefined &&
-    metadataTeamId !== bodyTeamId
-  ) {
+  if (hasTeamContextMismatch(metadataTeamId, bodyTeamId)) {
     await ack({
       errors: {
         [RSS_FEED_CHANNEL_BLOCK_ID]: translator.t("rssFeeds.error.contextMismatch"),
@@ -3280,6 +3277,7 @@ async function handleRssFeedModalSubmission(
   const feedValidation = await validateRssFeedUrl({
     feedUrl: parsed.feedUrl,
     fetchFn: options.rssFeedFetchFn,
+    resolveHostname: options.rssFeedResolveHostname,
   });
   if (!feedValidation.ok) {
     const messageKey =
@@ -3940,6 +3938,13 @@ function parseRssFeedModal(
 function normalizeOptionalRssPrompt(value: string | undefined): string | undefined {
   const prompt = value?.trim();
   return prompt === undefined || prompt.length === 0 ? undefined : prompt;
+}
+
+function hasTeamContextMismatch(
+  metadataTeamId: string | undefined,
+  bodyTeamId: string | undefined,
+): boolean {
+  return metadataTeamId !== undefined && bodyTeamId !== undefined && metadataTeamId !== bodyTeamId;
 }
 
 async function joinRssFeedChannel(
