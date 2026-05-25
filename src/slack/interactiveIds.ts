@@ -54,6 +54,8 @@ export const RSS_FEED_URL_BLOCK_ID = "rss_feed_url";
 export const RSS_FEED_URL_ACTION_ID = "feed_url";
 export const RSS_FEED_CHANNEL_BLOCK_ID = "rss_feed_channel";
 export const RSS_FEED_CHANNEL_ACTION_ID = "channel_id";
+export const RSS_FEED_PROMPT_BLOCK_ID = "rss_feed_prompt";
+export const RSS_FEED_PROMPT_ACTION_ID = "prompt";
 
 export const SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID = "salesforce_pdf_workflow_configure";
 export const SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID = "salesforce_pdf_workflow_modal";

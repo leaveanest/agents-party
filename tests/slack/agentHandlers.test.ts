@@ -2829,6 +2829,8 @@ describe("createAgentSlackHandlers", () => {
     expect(opened).toContain("rss_feed_modal");
     expect(opened).toContain("conversations_select");
     expect(opened).toContain('"include":["public"]');
+    expect(opened).toContain("rss_feed_prompt");
+    expect(opened).toContain('"multiline":true');
 
     await handlers.handleRssFeedModalSubmission({
       ack: async (payload?: unknown) => {
@@ -2857,6 +2859,7 @@ describe("createAgentSlackHandlers", () => {
       view: validRssFeedView({
         channelId: "C1",
         feedUrl: "HTTPS://Example.COM:443/feed.xml",
+        prompt: "Pick practical AI operations posts.",
         teamId: "T1",
       }),
     } as never);
@@ -2868,6 +2871,11 @@ describe("createAgentSlackHandlers", () => {
       channelId: "C1",
       enabled: true,
       feedUrl: "https://example.com/feed.xml",
+      payload: {
+        created_by_slack_user_id: "UADMIN",
+        prompt: "Pick practical AI operations posts.",
+        source: "slack_app_home",
+      },
       teamId: "T1",
     });
     expect(JSON.stringify(updatedViews)).toContain("RSS subscription was saved.");
@@ -9339,7 +9347,12 @@ function validFeatureSettingsView(input: {
   };
 }
 
-function validRssFeedView(input: { channelId: string; feedUrl: string; teamId: string }): unknown {
+function validRssFeedView(input: {
+  channelId: string;
+  feedUrl: string;
+  prompt?: string;
+  teamId: string;
+}): unknown {
   return {
     hash: "HASH1",
     id: "VIEW1",
@@ -9359,6 +9372,15 @@ function validRssFeedView(input: { channelId: string; feedUrl: string; teamId: s
             value: input.feedUrl,
           },
         },
+        ...(input.prompt === undefined
+          ? {}
+          : {
+              rss_feed_prompt: {
+                prompt: {
+                  value: input.prompt,
+                },
+              },
+            }),
       },
     },
   };

@@ -115,6 +115,8 @@ import {
   RSS_FEED_CHANNEL_BLOCK_ID,
   RSS_FEED_CONFIGURE_ACTION_ID,
   RSS_FEED_MODAL_CALLBACK_ID,
+  RSS_FEED_PROMPT_ACTION_ID,
+  RSS_FEED_PROMPT_BLOCK_ID,
   RSS_FEED_URL_ACTION_ID,
   RSS_FEED_URL_BLOCK_ID,
   SALESFORCE_PDF_WORKFLOW_ALLOWED_STAGES_ACTION_ID,
@@ -3327,6 +3329,7 @@ async function handleRssFeedModalSubmission(
       id: randomUUID(),
       payload: {
         created_by_slack_user_id: slackUserId,
+        ...(parsed.prompt === undefined ? {} : { prompt: parsed.prompt }),
         source: "slack_app_home",
       },
       teamId,
@@ -3852,6 +3855,22 @@ function buildRssFeedModal(input: {
         label: { text: input.translator.t("rssFeeds.label.channel"), type: "plain_text" },
         type: "input",
       },
+      {
+        block_id: RSS_FEED_PROMPT_BLOCK_ID,
+        element: {
+          action_id: RSS_FEED_PROMPT_ACTION_ID,
+          max_length: 3000,
+          multiline: true,
+          placeholder: {
+            text: input.translator.t("rssFeeds.prompt.placeholder"),
+            type: "plain_text",
+          },
+          type: "plain_text_input",
+        },
+        label: { text: input.translator.t("rssFeeds.label.prompt"), type: "plain_text" },
+        optional: true,
+        type: "input",
+      },
     ],
     callback_id: RSS_FEED_MODAL_CALLBACK_ID,
     close: { text: input.translator.t("common.cancel"), type: "plain_text" },
@@ -3883,8 +3902,10 @@ function buildRssFeedResultModal(message: string, translator: Translator): Recor
 function parseRssFeedModal(
   view: unknown,
   translator: Translator,
-): { channelId: string; feedUrl: string } | { errors: Record<string, string> } {
+): { channelId: string; feedUrl: string; prompt?: string } | { errors: Record<string, string> } {
   const rawFeedUrl = readModalInputValue(view, RSS_FEED_URL_BLOCK_ID, RSS_FEED_URL_ACTION_ID);
+  const rawPrompt = readModalInputValue(view, RSS_FEED_PROMPT_BLOCK_ID, RSS_FEED_PROMPT_ACTION_ID);
+  const prompt = normalizeOptionalRssPrompt(rawPrompt);
   let feedUrl: string | undefined;
   try {
     feedUrl = rawFeedUrl === undefined ? undefined : normalizeRssFeedUrl(rawFeedUrl);
@@ -3913,7 +3934,12 @@ function parseRssFeedModal(
       },
     };
   }
-  return { channelId, feedUrl };
+  return prompt === undefined ? { channelId, feedUrl } : { channelId, feedUrl, prompt };
+}
+
+function normalizeOptionalRssPrompt(value: string | undefined): string | undefined {
+  const prompt = value?.trim();
+  return prompt === undefined || prompt.length === 0 ? undefined : prompt;
 }
 
 async function joinRssFeedChannel(

@@ -13,9 +13,10 @@ RSS state is stored in PostgreSQL:
 - `rss_processed_articles`: subscription/article processing log with a unique `(subscription_id, article_key)` constraint.
 
 Slack workspace admins can add subscriptions from App Home. The add flow asks for a public
-channel and feed URL, verifies that the URL returns readable RSS/Atom feed items, attempts to join
-the selected channel with `conversations.join`, then saves the subscription. Private channels still
-require inviting the app in Slack before RSS delivery.
+channel, feed URL, and RSS-specific posting prompt, verifies that the URL returns readable RSS/Atom
+feed items, attempts to join the selected channel with `conversations.join`, then saves the
+subscription. The prompt is stored in the subscription payload and applied when selecting items and
+drafting Slack posts. Private channels still require inviting the app in Slack before RSS delivery.
 Subscriptions can also be inserted through the repository or directly by operations tooling.
 
 ## Processing

@@ -32,7 +32,11 @@ const textOnlyModel: ModelInfo = {
 describe("RssFeedProcessor", () => {
   it("fetches each feed once and resolves channel before workspace models", async () => {
     const repository = new MemoryRssRepository([
-      subscription({ channelId: "C1", id: "S1" }),
+      subscription({
+        channelId: "C1",
+        id: "S1",
+        prompt: "Prioritize product updates and write with an executive tone.",
+      }),
       subscription({ channelId: "C2", id: "S2" }),
     ]);
     const feedFetcher = new CountingFeedFetcher();
@@ -67,6 +71,10 @@ describe("RssFeedProcessor", () => {
     expect(providerRouter.requests[0]?.system).toContain(
       "Use the available web search tool to inspect or verify linked article URLs",
     );
+    expect(providerRouter.requests[0]?.system).toContain(
+      "Prioritize product updates and write with an executive tone.",
+    );
+    expect(providerRouter.requests[1]?.system).not.toContain("RSS-specific posting instruction");
     expect(providerRouter.resolveRequirements).toEqual([["web_search"], ["web_search"]]);
     expect(providerRouter.requests.map((request) => request.requiredCapabilities)).toEqual([
       ["web_search"],
@@ -433,14 +441,18 @@ class MemoryRssRepository {
   async saveSubscription() {}
 }
 
-function subscription(input: { channelId?: string; id: string }): RssFeedSubscription {
+function subscription(input: {
+  channelId?: string;
+  id: string;
+  prompt?: string;
+}): RssFeedSubscription {
   return {
     channelId: input.channelId ?? "C1",
     createdAt: new Date("2026-05-12T00:00:00.000Z"),
     enabled: true,
     feedUrl: "https://example.com/feed.xml",
     id: input.id,
-    payload: {},
+    payload: input.prompt === undefined ? {} : { prompt: input.prompt },
     teamId: "T1",
     updatedAt: new Date("2026-05-12T00:00:00.000Z"),
   };

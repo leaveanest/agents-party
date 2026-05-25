@@ -302,7 +302,6 @@ export class RssFeedProcessor {
         workspaceId: input.subscription.teamId,
       },
       history: rssFeedSelectionHistory(input.subscription.feedUrl, input.candidates),
-      maxOutputTokens: 1200,
       metadata: {
         rss_channel_id: input.subscription.channelId,
         rss_feed_url: input.subscription.feedUrl,
@@ -311,7 +310,7 @@ export class RssFeedProcessor {
       },
       model: input.model,
       requiredCapabilities: ["web_search"],
-      system: `You review RSS feed items for a Slack channel. The user message contains feed-provided title, URL, author, published timestamp, summary, and feed content. Use the available web search tool to inspect or verify linked article URLs when needed, and avoid relying on unstated assumptions. Pick up to ${input.candidates.length} items worth posting. For each selected item, write a concise Japanese Slack mrkdwn update. Return strict JSON with a top-level "posts" array of objects containing "articleKey" and "text".`,
+      system: rssFeedSystemPrompt(input.candidates.length, input.subscription.payload),
     } satisfies LlmRequest);
     return parseDraftedFeedPosts(result.content, input.candidates);
   }
@@ -319,6 +318,27 @@ export class RssFeedProcessor {
   private now(): Date {
     return this.options.now?.() ?? new Date();
   }
+}
+
+function rssFeedSystemPrompt(
+  candidateCount: number,
+  payload: RssFeedSubscription["payload"],
+): string {
+  const basePrompt = `You review RSS feed items for a Slack channel. The user message contains feed-provided title, URL, author, published timestamp, summary, and feed content. Use the available web search tool to inspect or verify linked article URLs when needed, and avoid relying on unstated assumptions. Pick up to ${candidateCount} items worth posting. For each selected item, write a concise Japanese Slack mrkdwn update. Return strict JSON with a top-level "posts" array of objects containing "articleKey" and "text".`;
+  const customPrompt = rssSubscriptionPrompt(payload);
+  if (customPrompt === undefined) {
+    return basePrompt;
+  }
+  return `${basePrompt}\n\nRSS-specific posting instruction:\n${customPrompt}\n\nApply the RSS-specific instruction when selecting items and writing text. It must not override the required JSON schema, articleKey matching, or the instruction to avoid unstated assumptions.`;
+}
+
+function rssSubscriptionPrompt(payload: RssFeedSubscription["payload"]): string | undefined {
+  const value = payload.prompt;
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const prompt = value.trim();
+  return prompt.length === 0 ? undefined : prompt;
 }
 
 function rssFeedSelectionHistory(
