@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
+import { tool } from "ai";
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test";
+import { z } from "zod";
 
+import { createAiSdkToolSetFromAgentTools } from "../../src/agents/toolContracts.js";
 import type { ConversationHistory } from "../../src/domain/messageHistory.js";
 import {
   AiSdkLlmAdapter,
@@ -495,6 +498,168 @@ describe("AiSdkLlmAdapter", () => {
     expect(result.toolCalls).toEqual([]);
   });
 
+  it("maps AI SDK-executed tool results into repository LLM results", async () => {
+    let calls = 0;
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            content: [
+              {
+                input: JSON.stringify({ text: "ok" }),
+                toolCallId: "call-1",
+                toolName: "echo",
+                type: "tool-call",
+              },
+            ],
+            finishReason: { raw: "tool-calls", unified: "tool-calls" },
+            usage: usage(3, 4),
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ text: "final", type: "text" }],
+          finishReason: { raw: "stop", unified: "stop" },
+          usage: usage(1, 2),
+          warnings: [],
+        };
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    const result = await adapter.generate({
+      aiSdkTools: {
+        echo: tool({
+          execute: async ({ text }) => ({ echoed: text }),
+          inputSchema: z.object({ text: z.string() }),
+        }),
+      },
+      history,
+      model,
+    });
+
+    expect(result.content).toBe("final");
+    expect(result.toolCalls).toEqual([]);
+    expect(result.toolResults).toEqual([
+      {
+        input: { text: "ok" },
+        output: { echoed: "ok" },
+        toolCallId: "call-1",
+        toolName: "echo",
+      },
+    ]);
+  });
+
+  it("keeps application tool results separate from model-visible tool output", async () => {
+    let calls = 0;
+    const languageModel = new MockLanguageModelV3({
+      doGenerate: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            content: [
+              {
+                input: JSON.stringify({ prompt: "draw" }),
+                toolCallId: "call-1",
+                toolName: "generate_image",
+                type: "tool-call",
+              },
+            ],
+            finishReason: { raw: "tool-calls", unified: "tool-calls" },
+            usage: usage(3, 4),
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ text: "final", type: "text" }],
+          finishReason: { raw: "stop", unified: "stop" },
+          usage: usage(1, 2),
+          warnings: [],
+        };
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    const result = await adapter.generate({
+      aiSdkTools: createAiSdkToolSetFromAgentTools([
+        {
+          description: "Generate an image.",
+          execute: async () => ({
+            media: {
+              dataBase64: "ZmFrZQ==",
+              kind: "image" as const,
+              modelId: "openai:gpt-image-test",
+              provider: "openai",
+              status: "generated" as const,
+            },
+            message: "Image generated.",
+            ok: true,
+          }),
+          name: "generate_image",
+          outputSchema: z.object({
+            media: z.object({
+              dataBase64: z.string(),
+              kind: z.literal("image"),
+              modelId: z.string(),
+              provider: z.string(),
+              status: z.literal("generated"),
+            }),
+            message: z.string(),
+            ok: z.boolean(),
+          }) as never,
+          parameters: { type: "object" },
+          schema: z.object({ prompt: z.string() }) as never,
+          toModelOutput: async ({ output }) => {
+            const result = output as {
+              media: { kind: string; modelId: string; provider: string; status: string };
+              message: string;
+              ok: boolean;
+            };
+            return {
+              type: "json",
+              value: {
+                media: {
+                  kind: result.media.kind,
+                  modelId: result.media.modelId,
+                  provider: result.media.provider,
+                  status: result.media.status,
+                },
+                message: result.message,
+                ok: result.ok,
+              },
+            };
+          },
+        },
+      ]),
+      history,
+      model,
+    });
+
+    expect(result.toolResults).toEqual([
+      {
+        input: { prompt: "draw" },
+        output: {
+          media: {
+            dataBase64: "ZmFrZQ==",
+            kind: "image",
+            modelId: "openai:gpt-image-test",
+            provider: "openai",
+            status: "generated",
+          },
+          message: "Image generated.",
+          ok: true,
+        },
+        toolCallId: "call-1",
+        toolName: "generate_image",
+      },
+    ]);
+  });
+
   it("uses AI SDK provider-specific web search tool names", () => {
     const resolveTools = createAiSdkProviderToolResolver();
     const providers = [
@@ -885,6 +1050,39 @@ describe("AiSdkLlmAdapter", () => {
       provider: "openai",
     });
     await expect(adapter.generate({ history, model })).rejects.toThrow("provider failed");
+  });
+
+  it("normalizes nested provider error payload messages", async () => {
+    const providerError = {
+      error: {
+        code: "context_length_exceeded",
+        message: "Your input exceeds the context window of this model.",
+      },
+    };
+    const languageModel = new MockLanguageModelV3({
+      async doGenerate() {
+        throw providerError;
+      },
+      modelId: "test-model",
+      provider: "openai",
+    });
+    const adapter = new AiSdkLlmAdapter("openai", () => languageModel);
+
+    let caught: unknown;
+    try {
+      await adapter.generate({ history, model });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(LlmProviderError);
+    expect(caught).toMatchObject({
+      cause: providerError,
+      message: "Your input exceeds the context window of this model.",
+      modelId: "openai:test-model",
+      name: "LlmProviderError",
+      provider: "openai",
+    });
   });
 
   it("creates common-lane adapters for AI SDK and OpenAI-compatible providers", () => {

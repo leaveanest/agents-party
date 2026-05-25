@@ -5,6 +5,8 @@ import { z } from "zod";
 import {
   AgentRunner,
   selectAgentAction,
+  shouldUseFocusedImageGenerationInvocation,
+  shouldUseFocusedImageGenerationTools,
   type AgentRunnerAiSdkToolSetHandle,
 } from "../../src/agents/runner.js";
 import { AgentToolRegistry } from "../../src/agents/toolContracts.js";
@@ -48,6 +50,100 @@ describe("AgentRunner", () => {
       action: "respond",
       reason: "agent_invocation",
     });
+  });
+
+  it("detects image generation requests for focused tool selection", () => {
+    expect(shouldUseFocusedImageGenerationTools("野良犬の画像を生成して")).toBe(true);
+    expect(shouldUseFocusedImageGenerationTools("draw a picture of a city")).toBe(true);
+    expect(shouldUseFocusedImageGenerationTools("野良犬の画像を探して")).toBe(false);
+    expect(shouldUseFocusedImageGenerationTools("render this markdown")).toBe(false);
+    expect(shouldUseFocusedImageGenerationTools("summarize this thread")).toBe(false);
+    expect(shouldUseFocusedImageGenerationTools("explain this drawing")).toBe(false);
+    expect(shouldUseFocusedImageGenerationTools("what do you make of this picture?")).toBe(false);
+  });
+
+  it("detects image modification follow-ups for focused tool selection", () => {
+    expect(
+      shouldUseFocusedImageGenerationInvocation({
+        channelId: "C1",
+        messageTs: "2.0",
+        referenceImages: [],
+        teamId: "T1",
+        text: "色を黒くして",
+        threadHistory: [
+          {
+            messageTs: "1.0",
+            role: "user",
+            teamId: "T1",
+            text: "野良犬の画像を生成して",
+            userId: "U1",
+          },
+        ],
+        threadMessages: [],
+        transientAttachments: [],
+        userId: "U1",
+        viewerContextChannelIds: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("does not route ordinary follow-ups after an image request to focused image generation", () => {
+    const priorImageInvocation = {
+      channelId: "C1",
+      messageTs: "2.0",
+      referenceImages: [],
+      teamId: "T1",
+      threadHistory: [
+        {
+          messageTs: "1.0",
+          role: "user" as const,
+          teamId: "T1",
+          text: "野良犬の画像を生成して",
+          userId: "U1",
+        },
+      ],
+      threadMessages: [],
+      transientAttachments: [],
+      userId: "U1",
+      viewerContextChannelIds: [],
+    };
+
+    expect(
+      shouldUseFocusedImageGenerationInvocation({
+        ...priorImageInvocation,
+        text: "説明して",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseFocusedImageGenerationInvocation({
+        ...priorImageInvocation,
+        text: "確認して",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseFocusedImageGenerationInvocation({
+        ...priorImageInvocation,
+        text: "何色ですか？",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseFocusedImageGenerationInvocation({
+        ...priorImageInvocation,
+        text: "黒について説明して",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseFocusedImageGenerationInvocation({
+        ...priorImageInvocation,
+        text: "色は黒ですか？",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseFocusedImageGenerationInvocation({
+        ...priorImageInvocation,
+        text: "この画像の色は白っぽい？",
+      }),
+    ).toBe(false);
   });
 
   it("routes primary Slack mentions through the provider-backed agent runner", async () => {
@@ -496,6 +592,53 @@ describe("AgentRunner", () => {
     });
     expect(JSON.stringify(router.requests[1]?.history)).not.toContain("raw-image-bytes");
     expect(JSON.stringify(router.requests[1]?.history)).toContain("[redacted]");
+  });
+
+  it("uses AI SDK-executed tool results for generated media outputs", async () => {
+    const router = new FakeProviderRouter({
+      content: "",
+      toolResults: [
+        {
+          input: { prompt: "draw" },
+          output: {
+            media: {
+              dataBase64: "raw-image-bytes",
+              kind: "image",
+              mimeType: "image/png",
+              modelId: "openai:gpt-image-1.5",
+              prompt: "draw",
+              provider: "openai",
+              status: "generated",
+            },
+            message: "Image generated.",
+            ok: true,
+          },
+          toolCallId: "call-1",
+          toolName: "generate_image",
+        },
+      ],
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "draw",
+      userId: "U1",
+    });
+
+    expect(result.message).toBe("Image generated.");
+    expect(result.structuredResult).toMatchObject({
+      media: {
+        dataBase64: "raw-image-bytes",
+        kind: "image",
+      },
+    });
+    expect(result.toolResults).toHaveLength(1);
   });
 
   it("allows multiple tool rounds before the final provider response", async () => {

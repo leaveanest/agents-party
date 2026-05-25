@@ -127,11 +127,19 @@ export type LlmResult = {
   sources?: readonly LlmSource[];
   structuredOutput?: JsonValue;
   toolCalls?: readonly LlmToolCall[];
+  toolResults?: readonly LlmToolResult[];
   usage?: LlmUsage;
 };
 
 export type LlmToolCall = {
   input: unknown;
+  toolCallId: string;
+  toolName: string;
+};
+
+export type LlmToolResult = {
+  input: unknown;
+  output?: JsonValue;
   toolCallId: string;
   toolName: string;
 };

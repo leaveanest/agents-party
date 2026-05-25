@@ -13,6 +13,7 @@ import {
   AgentRunnerExecutionError,
   type AgentRunner,
   type AgentRunnerResult,
+  type AgentRunnerRuntimeOptions,
   type AgentRunnerStreamEvent,
   type AgentRunnerStructuredResult,
 } from "../agents/runner.js";
@@ -4570,6 +4571,14 @@ async function handleMention(
       userId: event.user,
       viewerContextChannelIds: [event.channel],
     };
+    const runtimeOptions = imageGenerationRuntimeOptions({
+      channelId: event.channel,
+      client,
+      logger,
+      threadTs,
+      translator,
+      userId: event.user,
+    });
     const streamingResult =
       sayStream === undefined
         ? undefined
@@ -4579,6 +4588,7 @@ async function handleMention(
             invocation,
             logger,
             runner,
+            runtimeOptions,
             startStream: () => sayStream({ buffer_size: SLACK_AGENT_STREAM_BUFFER_SIZE }),
             threadTs,
             translator,
@@ -4588,7 +4598,9 @@ async function handleMention(
     }
     postedResult = streamingResult?.type === "success";
     const result =
-      streamingResult?.type === "success" ? streamingResult.result : await runner.run(invocation);
+      streamingResult?.type === "success"
+        ? streamingResult.result
+        : await runner.run(invocation, runtimeOptions);
     runnerResult = result;
     text = result.message;
     logAgentRunnerSuccess(logger, {
@@ -4850,6 +4862,14 @@ async function handleMessage(
       userId: event.user,
       viewerContextChannelIds: slackThreadViewerContextChannelIds(thread, event.channel, teamId),
     };
+    const runtimeOptions = imageGenerationRuntimeOptions({
+      channelId: event.channel,
+      client,
+      logger,
+      threadTs,
+      translator,
+      userId: event.user,
+    });
     const streamingResult =
       sayStream === undefined
         ? undefined
@@ -4859,6 +4879,7 @@ async function handleMessage(
             invocation,
             logger,
             runner,
+            runtimeOptions,
             startStream: () => sayStream({ buffer_size: SLACK_AGENT_STREAM_BUFFER_SIZE }),
             threadTs,
             translator,
@@ -4868,7 +4889,9 @@ async function handleMessage(
     }
     postedResult = streamingResult?.type === "success";
     const result =
-      streamingResult?.type === "success" ? streamingResult.result : await runner.run(invocation);
+      streamingResult?.type === "success"
+        ? streamingResult.result
+        : await runner.run(invocation, runtimeOptions);
     runnerResult = result;
     text = result.message;
     logAgentRunnerSuccess(logger, {
@@ -5109,12 +5132,21 @@ async function processAppMentionJob(
       userId: job.userId,
       viewerContextChannelIds: [job.channelId],
     };
+    const runtimeOptions = imageGenerationRuntimeOptions({
+      channelId: job.channelId,
+      client: input.client,
+      logger: input.logger,
+      threadTs: job.threadTs,
+      translator,
+      userId: job.userId,
+    });
     const streamingResult = await tryPostStreamingAgentRun({
       channel: job.channelId,
       client: input.client,
       invocation,
       logger: input.logger,
       runner: input.runner,
+      runtimeOptions,
       startStream: createSlackClientStreamStarter({
         channelId: job.channelId,
         client: input.client,
@@ -5132,7 +5164,7 @@ async function processAppMentionJob(
     const result =
       streamingResult.type === "success"
         ? streamingResult.result
-        : await input.runner.run(invocation);
+        : await input.runner.run(invocation, runtimeOptions);
     runnerResult = result;
     text = result.message;
     logAgentRunnerSuccess(input.logger, {
@@ -5182,7 +5214,7 @@ async function processAppMentionJob(
     ) {
       return;
     }
-    if (shouldRetryJobFailure(input.retryContext)) {
+    if (shouldRetryJobFailure(error, input.retryContext)) {
       throw error;
     }
     text = runnerUserFacingErrorMessage(error, translator);
@@ -5358,12 +5390,21 @@ async function processFollowUpMessageJob(
         job.teamId,
       ),
     };
+    const runtimeOptions = imageGenerationRuntimeOptions({
+      channelId: job.channelId,
+      client: input.client,
+      logger: input.logger,
+      threadTs: job.threadTs,
+      translator,
+      userId: job.userId,
+    });
     const streamingResult = await tryPostStreamingAgentRun({
       channel: job.channelId,
       client: input.client,
       invocation,
       logger: input.logger,
       runner: input.runner,
+      runtimeOptions,
       startStream: createSlackClientStreamStarter({
         channelId: job.channelId,
         client: input.client,
@@ -5381,7 +5422,7 @@ async function processFollowUpMessageJob(
     const result =
       streamingResult.type === "success"
         ? streamingResult.result
-        : await input.runner.run(invocation);
+        : await input.runner.run(invocation, runtimeOptions);
     runnerResult = result;
     text = result.message;
     logAgentRunnerSuccess(input.logger, {
@@ -5439,7 +5480,7 @@ async function processFollowUpMessageJob(
     ) {
       return;
     }
-    if (shouldRetryJobFailure(input.retryContext)) {
+    if (shouldRetryJobFailure(error, input.retryContext)) {
       throw error;
     }
     text = runnerUserFacingErrorMessage(error, translator);
@@ -5586,7 +5627,7 @@ async function processReactionAddedJob(
       teamId: job.teamId,
       threadTs,
     });
-    if (shouldRetryJobFailure(input.retryContext)) {
+    if (shouldRetryJobFailure(error, input.retryContext)) {
       throw error;
     }
     text = translator.t("slack.error.translation");
@@ -5720,6 +5761,55 @@ async function postNoEnabledModelEphemeral(input: {
     });
   } catch (error) {
     logWarn(input.logger, "Failed to post no-enabled-model ephemeral Slack message.", {
+      channelId: input.channelId,
+      error,
+      threadTs: input.threadTs,
+      userId: input.userId,
+    });
+  }
+}
+
+function imageGenerationRuntimeOptions(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  logger: unknown;
+  threadTs: string;
+  translator: Translator;
+  userId: string;
+}): AgentRunnerRuntimeOptions {
+  return {
+    onImageGenerationStart: async () => {
+      await postImageGenerationStartedEphemeral(input);
+    },
+  };
+}
+
+async function postImageGenerationStartedEphemeral(input: {
+  channelId: string;
+  client: SlackAgentClient;
+  logger: unknown;
+  threadTs: string;
+  translator: Translator;
+  userId: string;
+}): Promise<void> {
+  const postEphemeral = input.client.chat.postEphemeral;
+  if (postEphemeral === undefined) {
+    logWarn(input.logger, "Cannot post image generation started ephemeral Slack message.", {
+      channelId: input.channelId,
+      threadTs: input.threadTs,
+      userId: input.userId,
+    });
+    return;
+  }
+  try {
+    await postEphemeral({
+      channel: input.channelId,
+      text: input.translator.t("slack.notice.imageGenerationStarted"),
+      thread_ts: input.threadTs,
+      user: input.userId,
+    });
+  } catch (error) {
+    logWarn(input.logger, "Failed to post image generation started ephemeral Slack message.", {
       channelId: input.channelId,
       error,
       threadTs: input.threadTs,
@@ -6695,7 +6785,7 @@ async function postImageInputValidationErrorForQueuedJob(input: {
       threadTs: input.job.threadTs,
       userId: input.job.userId,
     });
-    if (!posted && shouldRetryJobFailure(input.input.retryContext)) {
+    if (!posted && shouldRetryJobFailure(error, input.input.retryContext)) {
       throw error;
     }
   }
@@ -6777,6 +6867,7 @@ async function tryPostStreamingAgentRun(input: {
   invocation: unknown;
   logger: unknown;
   runner: AgentRunner;
+  runtimeOptions: AgentRunnerRuntimeOptions;
   startStream(): SlackAgentMessageStream | undefined;
   threadTs: string;
   translator: Translator;
@@ -6800,6 +6891,7 @@ async function tryPostStreamingAgentRun(input: {
     for await (const event of runStream.call(
       input.runner,
       input.invocation,
+      input.runtimeOptions,
     ) as AsyncIterable<AgentRunnerStreamEvent>) {
       if (event.type === "text-delta") {
         if (event.text.length === 0) {
@@ -7156,11 +7248,48 @@ function runnerFailureLogFields(error: unknown): Record<string, unknown> {
   };
 }
 
-function shouldRetryJobFailure(context: SlackAgentJobRetryContext | undefined): boolean {
+function shouldRetryJobFailure(
+  error: unknown,
+  context: SlackAgentJobRetryContext | undefined,
+): boolean {
   if (context === undefined) {
     return false;
   }
+  if (isNonRetryableProviderFailure(error)) {
+    return false;
+  }
   return context.attemptsMade + 1 < context.attempts;
+}
+
+function isNonRetryableProviderFailure(error: unknown): boolean {
+  return errorContainsField(error, "code", "context_length_exceeded");
+}
+
+function errorContainsField(error: unknown, field: string, expected: string): boolean {
+  const visited = new Set<unknown>();
+  const stack = [error];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!isRecord(current) || visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    if (current[field] === expected) {
+      return true;
+    }
+    for (const linkedField of ["cause", "error"]) {
+      const linkedValue = current[linkedField];
+      if (typeof linkedValue === "object" && linkedValue !== null) {
+        stack.push(linkedValue);
+      }
+    }
+    for (const value of Object.values(current)) {
+      if (typeof value === "object" && value !== null) {
+        stack.push(value);
+      }
+    }
+  }
+  return false;
 }
 
 function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia | undefined {

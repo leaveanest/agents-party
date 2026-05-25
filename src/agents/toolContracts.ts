@@ -1,7 +1,12 @@
+import { tool, type ToolSet } from "ai";
 import type { z } from "zod";
 
 import type { JsonValue } from "../domain/messageHistory.js";
 import type { LlmToolCall, LlmToolDefinition } from "../providers/contracts.js";
+import {
+  aiSdkToolExecutionOutputsSymbol,
+  type AiSdkToolSetWithExecutionOutputs,
+} from "../providers/aiSdkToolExecutionOutputs.js";
 
 export type AgentToolDefinition<
   TInput extends JsonValue = JsonValue,
@@ -13,7 +18,22 @@ export type AgentToolDefinition<
   outputSchema: z.ZodType<TResult>;
   parameters: JsonValue;
   schema: z.ZodType<TInput>;
+  toModelOutput?(input: {
+    input: TInput;
+    output: TResult;
+    toolCallId: string;
+  }): AgentToolModelOutput | Promise<AgentToolModelOutput>;
 };
+
+export type AgentToolModelOutput =
+  | {
+      type: "json";
+      value: JsonValue;
+    }
+  | {
+      type: "text";
+      value: string;
+    };
 
 export type AgentToolResult = {
   input: unknown;
@@ -99,4 +119,49 @@ export class AgentToolRegistry {
     }
     return results;
   }
+}
+
+export function createAiSdkToolSetFromAgentTools(
+  definitions: readonly AgentToolDefinition[],
+): ToolSet {
+  const executionOutputs = new Map<string, JsonValue>();
+  const toolSet = Object.fromEntries(
+    definitions.map((definition) => [
+      definition.name,
+      tool({
+        description: definition.description,
+        execute: async (input, options) => {
+          const parsed = definition.schema.safeParse(input);
+          if (!parsed.success) {
+            throw new InvalidAgentToolInputError(definition.name, parsed.error.message);
+          }
+          const output = await definition.execute(parsed.data);
+          const parsedOutput = definition.outputSchema.safeParse(output);
+          if (!parsedOutput.success) {
+            throw new InvalidAgentToolOutputError(definition.name, parsedOutput.error.message);
+          }
+          executionOutputs.set(options.toolCallId, parsedOutput.data);
+          return parsedOutput.data;
+        },
+        inputSchema: definition.schema,
+        toModelOutput:
+          definition.toModelOutput === undefined
+            ? undefined
+            : async ({ input, output, toolCallId }) => {
+                const parsedInput = definition.schema.parse(input);
+                const parsedOutput = definition.outputSchema.parse(output);
+                return definition.toModelOutput?.({
+                  input: parsedInput,
+                  output: parsedOutput,
+                  toolCallId,
+                }) as AgentToolModelOutput;
+              },
+      }),
+    ]),
+  ) as AiSdkToolSetWithExecutionOutputs;
+  Object.defineProperty(toolSet, aiSdkToolExecutionOutputsSymbol, {
+    enumerable: true,
+    value: executionOutputs,
+  });
+  return toolSet;
 }

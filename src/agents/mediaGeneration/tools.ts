@@ -40,6 +40,13 @@ export type MediaGenerationToolOptions = {
     credential: { apiKey: string; baseURL?: string },
   ) => MediaGateway | undefined;
   modelRegistry: Pick<ModelRegistry, "assertCapabilities" | "get">;
+  onGenerationStart?: (input: {
+    channelId: string;
+    modelId: string;
+    prompt: string;
+    provider: string;
+    teamId: string;
+  }) => Promise<void> | void;
 };
 
 const generateImageInputSchema = z
@@ -83,6 +90,10 @@ export function createMediaGenerationAgentTools(
       outputSchema: mediaToolOutputSchema as z.ZodType<JsonValue>,
       parameters: z.toJSONSchema(generateImageInputSchema) as JsonValue,
       schema: generateImageInputSchema as z.ZodType<JsonValue>,
+      toModelOutput: async ({ output }) => ({
+        type: "json",
+        value: modelVisibleMediaToolOutput(mediaToolOutputSchema.parse(output)),
+      }),
     },
   ];
 }
@@ -134,6 +145,11 @@ async function generateImageTool(
       `Image generation is not supported for provider '${model.provider}'.`,
     );
   }
+  await notifyImageGenerationStart(options, {
+    modelId: model.id,
+    prompt: input.prompt,
+    provider: model.provider,
+  });
   const media = await gateway.generateImage({
     model,
     prompt: input.prompt,
@@ -220,6 +236,39 @@ function failure(code: string, message: string): MediaToolOutput {
     message,
     ok: false,
   };
+}
+
+function modelVisibleMediaToolOutput(output: MediaToolOutput): JsonValue {
+  if (output.media === undefined) {
+    return output;
+  }
+  return {
+    ...output,
+    media: {
+      kind: output.media.kind,
+      ...(output.media.mimeType === undefined ? {} : { mimeType: output.media.mimeType }),
+      modelId: output.media.modelId,
+      provider: output.media.provider,
+      status: output.media.status,
+    },
+  };
+}
+
+async function notifyImageGenerationStart(
+  options: MediaGenerationToolOptions,
+  input: { modelId: string; prompt: string; provider: string },
+): Promise<void> {
+  try {
+    await options.onGenerationStart?.({
+      channelId: options.context.channelId,
+      modelId: input.modelId,
+      prompt: input.prompt,
+      provider: input.provider,
+      teamId: options.context.teamId,
+    });
+  } catch {
+    // User-facing progress notifications must not block the actual generation request.
+  }
 }
 
 function isSlackDirectMessageChannel(channelId: string): boolean {
