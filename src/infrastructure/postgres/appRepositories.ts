@@ -235,6 +235,23 @@ export class PostgresAgentRoutingRepository {
     return this.channelSettings.find({ channel_id: channelId, team_id: teamId });
   }
 
+  async clearChannelModelOverride(input: {
+    channelId: string;
+    teamId: string;
+    updatedAt: Date;
+  }): Promise<void> {
+    await this.pool.query(
+      `
+        update channel_app_settings
+        set default_model_id = null,
+            payload = (payload::jsonb - 'default_model_id')::json,
+            updated_at = $3
+        where team_id = $1 and channel_id = $2
+      `,
+      [input.teamId, input.channelId, input.updatedAt],
+    );
+  }
+
   async isChannelEnabled(teamId: string, channelId: string): Promise<boolean> {
     const workspaceSettings = await this.findWorkspaceSettings(teamId);
     const enabledChannelIds = stringArrayField(workspaceSettings, "enabled_channel_ids");
@@ -267,6 +284,24 @@ export class PostgresAgentRoutingRepository {
     threadTs: string,
   ): Promise<JsonObject | undefined> {
     return this.threads.find({ channel_id: channelId, team_id: teamId, thread_ts: threadTs });
+  }
+
+  async clearThreadModelOverride(input: {
+    channelId: string;
+    teamId: string;
+    threadTs: string;
+    updatedAt: Date;
+  }): Promise<void> {
+    await this.pool.query(
+      `
+        update slack_threads
+        set model_id = null,
+            payload = (payload::jsonb - 'model_id' - 'model_scope')::json,
+            updated_at = $4
+        where team_id = $1 and channel_id = $2 and thread_ts = $3
+      `,
+      [input.teamId, input.channelId, input.threadTs, input.updatedAt],
+    );
   }
 
   async activateThreadAgent(input: {

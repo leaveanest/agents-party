@@ -478,6 +478,7 @@ export function createDefaultAgentRunner(
           context: {
             channelId: invocation.channelId,
             teamId: invocation.teamId,
+            viewerContextChannelIds: invocation.viewerContextChannelIds,
           },
           credentialResolver: options.credentialResolver,
           featureSettingsRepository: options.featureSettingsRepository,

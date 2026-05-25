@@ -91,6 +91,76 @@ describe("PostgresSlackInstallationRepository", () => {
     expect(pool.queries[0]?.values).toEqual(["C1", undefined, "T1"]);
   });
 
+  it("falls back to an enterprise workspace installation when Slack Assistant events omit team id", async () => {
+    const pool = new QueuedRecordingPool([
+      [],
+      [],
+      [],
+      [
+        {
+          ...installationRecord(),
+          enterprise_id: "E1",
+          team_id: "T1",
+          user_id: "UINSTALLER",
+        },
+      ],
+    ]);
+    const repository = new PostgresSlackInstallationRepository("C1", { pool: pool as never });
+
+    await expect(
+      repository.findInstallation({
+        enterpriseId: "E1",
+        isEnterpriseInstall: false,
+        teamId: undefined,
+        userId: "UASSISTANT",
+      }),
+    ).resolves.toMatchObject({
+      enterpriseId: "E1",
+      teamId: "T1",
+      userId: "UINSTALLER",
+    });
+
+    expect(pool.queries.map((query) => query.values)).toEqual([
+      ["C1", "E1", undefined, "UASSISTANT"],
+      ["C1", "E1", undefined, undefined],
+      ["C1", "E1", "UASSISTANT"],
+      ["C1", "E1", undefined],
+    ]);
+    expect(pool.queries[2]?.text).toContain("team_id is not null");
+  });
+
+  it("falls back to an enterprise workspace bot when Slack Assistant events omit team id", async () => {
+    const pool = new QueuedRecordingPool([
+      [],
+      [
+        {
+          ...botRecord(),
+          enterprise_id: "E1",
+          team_id: "T1",
+        },
+      ],
+    ]);
+    const repository = new PostgresSlackInstallationRepository("C1", { pool: pool as never });
+
+    await expect(
+      repository.findBot({
+        enterpriseId: "E1",
+        isEnterpriseInstall: false,
+        teamId: undefined,
+      }),
+    ).resolves.toMatchObject({
+      botId: "B1",
+      enterpriseId: "E1",
+      teamId: "T1",
+    });
+
+    expect(pool.queries.map((query) => query.values)).toEqual([
+      ["C1", "E1", undefined],
+      ["C1", "E1"],
+    ]);
+    expect(pool.queries[1]?.text).toContain("team_id is not null");
+  });
+
   it("does not run broad installation lookups without enterprise or team scope", async () => {
     const pool = new RecordingPool([installationRecord()]);
     const repository = new PostgresSlackInstallationRepository("C1", { pool: pool as never });
