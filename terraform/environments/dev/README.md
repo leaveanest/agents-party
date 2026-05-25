@@ -4,6 +4,11 @@ This Terraform environment creates the Heroku dev app, Heroku Postgres, Heroku R
 optional Bucketeer object storage, optional Heroku Scheduler, buildpack configuration, non-secret
 app config vars, and optional dyno formation.
 
+Defaults favor the smallest practical paid Heroku resources: Basic dynos when formation management
+is enabled, Heroku Postgres Essential-0, and Heroku Key-Value Store Mini. The Mini KVS plan does not
+persist data across service restarts or failures, so queued Slack agent jobs can be lost; override
+`heroku_redis_plan` with a Premium plan when queue durability matters.
+
 Secret values are intentionally not managed by Terraform. Set Slack, OAuth, encryption, Salesforce,
 and external API secrets with `heroku config:set` or CI secret injection after applying
 infrastructure.
