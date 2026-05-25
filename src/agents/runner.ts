@@ -859,6 +859,13 @@ function buildAgentHistory(input: {
   invocation: SlackAgentInvocation;
   toolResults: AgentToolResult[];
 }): ConversationHistory {
+  const threadId = slackThreadScopedId(
+    input.invocation.teamId,
+    input.invocation.channelId,
+    input.invocation.threadTs ??
+      input.invocation.threadHistory[0]?.messageTs ??
+      input.invocation.messageTs,
+  );
   const threadHistoryMessages =
     input.invocation.threadHistory.length > 0
       ? input.invocation.threadHistory.map(
@@ -870,7 +877,7 @@ function buildAgentHistory(input: {
                   provenance: {
                     externalMessageId: message.messageTs,
                     source: "slack",
-                    threadId: input.invocation.threadTs,
+                    threadId,
                   },
                   role: "assistant",
                 }
@@ -881,7 +888,7 @@ function buildAgentHistory(input: {
                   provenance: {
                     externalMessageId: message.messageTs,
                     source: "slack",
-                    threadId: input.invocation.threadTs,
+                    threadId,
                   },
                   role: "user",
                 },
@@ -891,6 +898,10 @@ function buildAgentHistory(input: {
             author: { id: slackScopedId(input.invocation.teamId, "thread"), kind: "user" },
             content: [{ text: message, type: "text" }],
             id: `thread-${index}`,
+            provenance: {
+              source: "slack",
+              threadId,
+            },
             role: "user",
           }),
         );
@@ -933,7 +944,7 @@ function buildAgentHistory(input: {
         provenance: {
           externalMessageId: input.invocation.messageTs,
           source: "slack",
-          threadId: input.invocation.threadTs,
+          threadId,
         },
         role: "user",
       },
@@ -969,6 +980,10 @@ function buildAgentHistory(input: {
 
 function slackScopedId(teamId: string, id: string): string {
   return `slack:${teamId}:${id}`;
+}
+
+function slackThreadScopedId(teamId: string, channelId: string, threadTs: string): string {
+  return `${teamId}:${channelId}:${threadTs}`;
 }
 
 function renderTransientAudioTranscript(attachment: {

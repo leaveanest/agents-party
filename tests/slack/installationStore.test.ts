@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  installationQueryToLookup,
   RepositorySlackInstallationStore,
   type SlackBotRow,
   type SlackInstallationLookup,
@@ -90,6 +91,22 @@ class InMemorySlackInstallationRepository implements SlackInstallationRepository
 }
 
 describe("RepositorySlackInstallationStore", () => {
+  it("preserves Enterprise Grid team scope in installation lookups", () => {
+    expect(
+      installationQueryToLookup({
+        enterpriseId: "E111",
+        isEnterpriseInstall: true,
+        teamId: "T111",
+        userId: "U111",
+      }),
+    ).toEqual({
+      enterpriseId: "E111",
+      isEnterpriseInstall: true,
+      teamId: "T111",
+      userId: "U111",
+    });
+  });
+
   it("stores and fetches Slack OAuth installations", async () => {
     const repository = new InMemorySlackInstallationRepository();
     const store = new RepositorySlackInstallationStore(repository);
