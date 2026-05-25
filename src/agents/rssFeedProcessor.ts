@@ -154,6 +154,19 @@ export class RssFeedProcessor {
       });
       return { failedArticles: candidates.length, postedArticles: 0, skipped: false };
     }
+    if (posts.length === 0) {
+      const failedSkippedArticles = await this.recordModelSkippedArticles(
+        subscription,
+        candidates,
+        resolvedModel,
+      );
+      await this.options.repository.updateSubscriptionCursor({
+        lastProcessedAt: this.now(),
+        lastSeenPublishedAt: newestPublishedAt(candidates.map((candidate) => candidate.article)),
+        subscriptionId: subscription.id,
+      });
+      return { failedArticles: failedSkippedArticles, postedArticles: 0, skipped: false };
+    }
 
     const reservedPosts: RssArticlePost[] = [];
     for (const post of posts) {
@@ -241,6 +254,37 @@ export class RssFeedProcessor {
       subscriptionId: subscription.id,
     });
     return { failedArticles, postedArticles: postedArticles.length, skipped: false };
+  }
+
+  private async recordModelSkippedArticles(
+    subscription: RssFeedSubscription,
+    candidates: ReadonlyArray<{ article: RssArticle; articleKey: string }>,
+    resolvedModel: { model: ModelInfo; source: "channel" | "workspace" },
+  ): Promise<number> {
+    let failedArticles = 0;
+    for (const candidate of candidates) {
+      try {
+        await this.options.repository.reserveProcessedArticle({
+          articleKey: candidate.articleKey,
+          articleUrl: candidate.article.articleUrl,
+          modelId: resolvedModel.model.id,
+          modelSource: resolvedModel.source,
+          payload: { status: "skipped_by_model" },
+          processedAt: this.now(),
+          publishedAt: candidate.article.publishedAt,
+          slackChannelId: subscription.channelId,
+          subscriptionId: subscription.id,
+        });
+      } catch (error) {
+        failedArticles += 1;
+        this.options.logger?.error?.("RSS skipped article recording failed.", {
+          articleKey: candidate.articleKey,
+          error,
+          subscriptionId: subscription.id,
+        });
+      }
+    }
+    return failedArticles;
   }
 
   private async selectCandidateArticles(
@@ -428,7 +472,7 @@ function parseDraftedFeedPosts(
       title: candidate.article.title,
     });
   }
-  if (drafted.length === 0) {
+  if (posts.length > 0 && drafted.length === 0) {
     throw new Error("RSS feed item drafting returned no usable posts.");
   }
   return drafted;

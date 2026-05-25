@@ -43,7 +43,7 @@ export class RssFeedFetchGateway {
     let response: Response;
     try {
       response = await fetchSafeRssUrl({
-        fetchFn: this.fetchFn(),
+        fetchFn: this.options.fetchFn,
         init: { headers },
         resolveHostname: this.options.resolveHostname,
         url: feedUrl,
@@ -112,10 +112,6 @@ export class RssFeedFetchGateway {
       lastModified: cache?.lastModified,
       status,
     });
-  }
-
-  private fetchFn(): typeof fetch {
-    return this.options.fetchFn ?? fetch;
   }
 
   private now(): Date {

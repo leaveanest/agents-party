@@ -225,9 +225,46 @@ describe("RssFeedProcessor", () => {
     expect(publisher.posts).toHaveLength(0);
   });
 
-  it("counts empty LLM draft selections as failed articles", async () => {
+  it("records empty LLM draft selections as model-skipped articles", async () => {
     const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
     const providerRouter = new FakeProviderRouter({ draftContent: JSON.stringify({ posts: [] }) });
+    const publisher = new RecordingPublisher();
+    const processor = new RssFeedProcessor({
+      articlePublisher: publisher,
+      feedFetcher: new CountingFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: channelModel.id };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter,
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 0,
+      postedArticles: 0,
+    });
+    expect(repository.reservationCount).toBe(1);
+    expect(repository.reservationsPayloads).toEqual([{ status: "skipped_by_model" }]);
+    expect(repository.cursorUpdates).toHaveLength(1);
+    expect(publisher.posts).toHaveLength(0);
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 0,
+      postedArticles: 0,
+    });
+    expect(providerRouter.requests).toHaveLength(1);
+  });
+
+  it("counts non-empty LLM draft output with no usable posts as failed articles", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const providerRouter = new FakeProviderRouter({
+      draftContent: JSON.stringify({ posts: [{ articleKey: "missing", text: "No match" }] }),
+    });
     const publisher = new RecordingPublisher();
     const processor = new RssFeedProcessor({
       articlePublisher: publisher,
@@ -466,6 +503,7 @@ class MemoryRssRepository {
   readonly completed: Array<{ modelSource: string }> = [];
   readonly cursorUpdates: Array<{ lastSeenPublishedAt?: Date }> = [];
   readonly releaseCalls: Array<{ articleKey: string; subscriptionId: string }> = [];
+  readonly reservationsPayloads: unknown[] = [];
   private readonly reservations = new Set<string>();
 
   constructor(
@@ -492,6 +530,10 @@ class MemoryRssRepository {
       return false;
     }
     this.reservations.add(reservationKey);
+    this.reservationsPayloads.push(article.payload);
+    if (article.payload.status === "skipped_by_model") {
+      this.processed.add(reservationKey);
+    }
     return true;
   }
 
