@@ -20,6 +20,7 @@ variable "heroku_buildpacks" {
   type        = list(string)
   default = [
     "heroku/nodejs",
+    "heroku-community/cli",
   ]
 }
 

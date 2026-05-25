@@ -32,3 +32,13 @@ output "heroku_rss_feed_scheduler_command" {
   description = "Command to register in Heroku Scheduler for RSS feed batch processing."
   value       = var.rss_feed_scheduler_command
 }
+
+output "heroku_daily_restart_scheduler_command" {
+  description = "Command to register in Heroku Scheduler for daily dyno restarts when HEROKU_API_KEY is configured."
+  value       = "heroku ps:restart -a ${heroku_app.app.name}"
+}
+
+output "heroku_daily_restart_one_off_command" {
+  description = "Command to run from an authenticated local shell or CI to pass a short-lived token into a Heroku one-off dyno."
+  value       = "heroku run \"HEROKU_API_KEY=$(heroku authorizations:create --expires-in 600 --short) heroku ps:restart -a ${heroku_app.app.name}\" -a ${heroku_app.app.name}"
+}

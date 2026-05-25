@@ -36,7 +36,9 @@ accepts storing add-on credentials in Terraform state.
 
 Set `enable_scheduler = true` to provision Heroku Scheduler. The Terraform provider can provision
 the add-on, but it does not expose Scheduler job definitions as Terraform resources. After the app
-is deployed, add a Scheduler job in the Heroku Dashboard using:
+is deployed, add Scheduler jobs in the Heroku Dashboard.
+
+For RSS feed processing, use:
 
 ```bash
 node dist/rssFeedWorker.mjs
@@ -44,6 +46,17 @@ node dist/rssFeedWorker.mjs
 
 Use the same cadence as AWS, normally every 10 minutes. Heroku Scheduler itself is free, but each
 run uses a one-off dyno and counts toward dyno usage.
+
+For controlled daily dyno restarts from Heroku Scheduler, configure a valid `HEROKU_API_KEY` app
+config var outside Terraform and use the `heroku_daily_restart_scheduler_command` Terraform output:
+
+```bash
+heroku ps:restart -a agents-party-dev
+```
+
+If a short-lived token is preferred, run the `heroku_daily_restart_one_off_command` Terraform output
+from an authenticated local shell or CI scheduler instead of registering it inside Heroku Scheduler.
+The Heroku CLI buildpack is included so one-off dynos can run `heroku ps:restart`.
 
 ## First Apply
 
