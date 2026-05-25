@@ -52,6 +52,25 @@ describe("AgentRunner", () => {
     });
   });
 
+  it("guides the model to use SORACOM discovery before asking for a generic SIM identifier", async () => {
+    const router = new FakeProviderRouter({ content: "ok" });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "ソラコムのSIM情報をくれ",
+      userId: "U1",
+    });
+
+    expect(router.requests[0]?.system).toContain("call soracom_find_resources");
+    expect(router.requests[0]?.system).toContain('query "sim"');
+  });
+
   it("detects image generation requests for focused tool selection", () => {
     expect(shouldUseFocusedImageGenerationTools("野良犬の画像を生成して")).toBe(true);
     expect(shouldUseFocusedImageGenerationTools("draw a picture of a city")).toBe(true);

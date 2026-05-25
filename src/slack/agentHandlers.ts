@@ -7140,6 +7140,7 @@ function logAgentRunnerSuccess(
     teamId: input.teamId,
     threadTs: input.threadTs,
     toolResultCount: input.result.toolResults.length,
+    toolResultNames: [...new Set(input.result.toolResults.map((tool) => tool.toolName))],
   });
 }
 

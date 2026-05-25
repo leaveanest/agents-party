@@ -43,7 +43,7 @@ describe("SORACOM agent tools", () => {
         iccid: "8981100000000000000",
         imsi: "440100000000000",
         sessionStatus: { lastUpdatedAt: 1770000000000, online: true },
-        simId: "sim-1",
+        simId: "sim-abcdef1234",
         status: "active",
         tags: { name: "Store A" },
       }),
@@ -64,25 +64,56 @@ describe("SORACOM agent tools", () => {
           lastModifiedTime: 1770000000000,
           sessionOnline: true,
           sessionStatus: "online",
-          simId: "sim-1",
+          simId: "sim-...1234",
           status: "active",
         },
       },
     });
     expect(JSON.stringify(result.output)).not.toContain("secret-1");
+    expect(JSON.stringify(result.output)).not.toContain("sim-abcdef1234");
+    expect(JSON.stringify(result.output)).not.toContain("440100000000000");
+    expect(JSON.stringify(result.output)).not.toContain("8981100000000000000");
   });
 
   it("finds SIM and SoraCam resources by tag or name", async () => {
     const fetch = new RecordingFetch([
       jsonResponse({ apiKey: "api-key", token: "token" }),
-      jsonResponse([{ simId: "sim-1", tags: { name: "Store A" } }]),
+      jsonResponse([{ simId: "sim-abcdef1234", tags: { name: "Store A" } }]),
       jsonResponse([{ connected: true, deviceId: "cam-1", name: "Store A camera" }]),
+    ]);
+    const registry = registryWith({ fetchFn: fetch.call });
+
+    const result = await registry.execute({
+      input: { query: "Store A" },
+      toolCallId: "call-1",
+      toolName: "soracom_find_resources",
+    });
+
+    expect(result).toMatchObject({
+      output: {
+        ok: true,
+        resources: [
+          expect.objectContaining({ id: "sim-...1234", resourceType: "sim" }),
+          expect.objectContaining({ id: "cam-1", resourceType: "soracam_device" }),
+        ],
+      },
+    });
+    expect(JSON.stringify(result.output)).not.toContain("sim-abcdef1234");
+  });
+
+  it("supports generic SIM discovery when no SIM identifier is provided", async () => {
+    const fetch = new RecordingFetch([
+      jsonResponse({ apiKey: "api-key", token: "token" }),
+      jsonResponse([
+        { imsi: "440100000000001", simId: "sim-abcdef0001", tags: { name: "Store A" } },
+        { imsi: "440100000000002", simId: "sim-abcdef0002", tags: { name: "Store B" } },
+      ]),
     ]);
     const registry = registryWith({ fetchFn: fetch.call });
 
     await expect(
       registry.execute({
-        input: { query: "Store A" },
+        input: { query: "sim", resourceTypes: ["sim"] },
         toolCallId: "call-1",
         toolName: "soracom_find_resources",
       }),
@@ -90,8 +121,8 @@ describe("SORACOM agent tools", () => {
       output: {
         ok: true,
         resources: [
-          expect.objectContaining({ id: "sim-1", resourceType: "sim" }),
-          expect.objectContaining({ id: "cam-1", resourceType: "soracam_device" }),
+          expect.objectContaining({ id: "sim-...0001", resourceType: "sim" }),
+          expect.objectContaining({ id: "sim-...0002", resourceType: "sim" }),
         ],
       },
     });
@@ -105,26 +136,27 @@ describe("SORACOM agent tools", () => {
           "x-soracom-next-key": `next-${index + 1}`,
         }),
       ),
-      jsonResponse([{ imsi: "440100000000999", simId: "sim-final-page" }]),
+      jsonResponse([{ imsi: "440100000000999", simId: "sim-final-page-9999" }]),
     ]);
     const registry = registryWith({ fetchFn: fetch.call });
 
-    await expect(
-      registry.execute({
-        input: { idType: "imsi", resourceId: "440100000000999" },
-        toolCallId: "call-1",
-        toolName: "soracom_get_sim_status",
-      }),
-    ).resolves.toMatchObject({
+    const result = await registry.execute({
+      input: { idType: "imsi", resourceId: "440100000000999" },
+      toolCallId: "call-1",
+      toolName: "soracom_get_sim_status",
+    });
+
+    expect(result).toMatchObject({
       output: {
         ok: true,
         sim: {
-          imsi: "440100000000999",
-          simId: "sim-final-page",
+          imsi: "...0999",
+          simId: "sim-...9999",
         },
       },
     });
     expect(fetch.calls.at(-1)?.url).toContain("last_evaluated_key=next-11");
+    expect(JSON.stringify(result.output)).not.toContain("sim-final-page-9999");
   });
 
   it("returns SORACOM API failures as tool output", async () => {

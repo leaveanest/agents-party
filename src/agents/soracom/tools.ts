@@ -101,7 +101,7 @@ export function createSoracomAgentTools(options: SoracomToolOptions): AgentToolD
             return failure("not_found", "No matching SORACOM SIM was found.");
           }
           return success("SORACOM SIM status retrieved.", {
-            sim: normalizeSim(resolved.body),
+            sim: normalizeSim(resolved.body, { maskIdentifiers: true }),
             rateLimit: soracomRateLimitToJson(resolved.rateLimit),
           });
         }),
@@ -112,7 +112,7 @@ export function createSoracomAgentTools(options: SoracomToolOptions): AgentToolD
     },
     {
       description:
-        "Find SORACOM SIMs or SoraCam devices by ID, name, or tag. Use this before a more specific tool when the user's wording is ambiguous.",
+        "Find SORACOM SIMs or SoraCam devices by ID, name, or tag. Use this before a more specific tool when the user's wording is ambiguous. For generic requests such as 'SORACOM SIM information' with no SIM ID, IMSI, ICCID, name, or tag, call this with query 'sim' and resourceTypes ['sim'] before asking which SIM the user means.",
       execute: async (input) =>
         withSoracomClient(options, async (client) => {
           const parsed = input as z.infer<typeof soracomFindResourcesInputSchema>;
@@ -123,7 +123,13 @@ export function createSoracomAgentTools(options: SoracomToolOptions): AgentToolD
             const sims = await listAllSims(client);
             resources.push(
               ...sims.items
-                .map((sim) => resourceCandidate("sim", normalizeSim(sim), parsed.query))
+                .map((sim) =>
+                  resourceCandidate(
+                    "sim",
+                    normalizeSim(sim, { maskIdentifiers: false }),
+                    parsed.query,
+                  ),
+                )
                 .filter((candidate): candidate is JsonValue => candidate !== undefined),
             );
           }
@@ -284,7 +290,7 @@ async function resolveSim(
   }
   const sims = await listAllSims(client);
   const match = sims.items.find((sim) => {
-    const normalized = normalizeSim(sim);
+    const normalized = normalizeSim(sim, { maskIdentifiers: false });
     if (idType === "imsi") {
       return normalized.imsi === value;
     }
@@ -317,7 +323,10 @@ async function listAllSims(
   return { items, rateLimit };
 }
 
-function normalizeSim(input: unknown): Record<string, JsonValue> {
+function normalizeSim(
+  input: unknown,
+  options: { maskIdentifiers: boolean },
+): Record<string, JsonValue> {
   const record = recordOrEmpty(input);
   const tags = recordField(record, "tags");
   const status = stringField(record, "status") ?? stringField(record, "subscriptionStatus");
@@ -331,15 +340,15 @@ function normalizeSim(input: unknown): Record<string, JsonValue> {
   return compactRecord({
     diagnosticHints: diagnosticHints(status, sessionStatus),
     groupId: stringField(record, "groupId") ?? stringField(record, "group_id"),
-    iccid: stringField(record, "iccid"),
-    imsi: stringField(record, "imsi"),
+    iccid: maskIfNeeded(stringField(record, "iccid"), options),
+    imsi: maskIfNeeded(stringField(record, "imsi"), options),
     lastModifiedTime:
       numberField(record, "lastModifiedTime") ??
       numberField(record, "last_modified_time") ??
       numberField(sessionStatusRecord ?? {}, "lastUpdatedAt"),
     sessionOnline: sessionOnlineValue,
     sessionStatus,
-    simId: stringField(record, "simId") ?? stringField(record, "sim_id"),
+    simId: maskIfNeeded(stringField(record, "simId") ?? stringField(record, "sim_id"), options),
     status,
     tags: normalizeJson(tags ?? {}),
   });
@@ -404,11 +413,11 @@ function resourceCandidate(
       typeof normalized.name === "string"
         ? normalized.name
         : typeof normalized.simId === "string"
-          ? normalized.simId
+          ? maskSoracomIdentifier(normalized.simId)
           : normalized.deviceId,
     id:
       typeof normalized.simId === "string"
-        ? normalized.simId
+        ? maskSoracomIdentifier(normalized.simId)
         : typeof normalized.deviceId === "string"
           ? normalized.deviceId
           : undefined,
@@ -440,6 +449,27 @@ function sessionOnline(
     return explicit;
   }
   return booleanField(sessionStatusRecord ?? {}, "online");
+}
+
+function maskIfNeeded(
+  value: string | undefined,
+  options: { maskIdentifiers: boolean },
+): string | undefined {
+  return options.maskIdentifiers ? maskSoracomIdentifier(value) : value;
+}
+
+function maskSoracomIdentifier(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (normalized.length <= 4) {
+    return "*".repeat(normalized.length);
+  }
+  if (normalized.startsWith("sim-")) {
+    return `sim-...${normalized.slice(-4)}`;
+  }
+  return `...${normalized.slice(-4)}`;
 }
 
 function success(
