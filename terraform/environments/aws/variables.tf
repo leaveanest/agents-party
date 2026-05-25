@@ -84,25 +84,25 @@ variable "worker_desired_count" {
 variable "web_cpu" {
   description = "Fargate CPU units for the web task."
   type        = number
-  default     = 2048
+  default     = 256
 }
 
 variable "web_memory" {
   description = "Fargate memory in MiB for the web task."
   type        = number
-  default     = 16384
+  default     = 512
 }
 
 variable "worker_cpu" {
   description = "Fargate CPU units for the worker task."
   type        = number
-  default     = 1024
+  default     = 256
 }
 
 variable "worker_memory" {
   description = "Fargate memory in MiB for the worker task."
   type        = number
-  default     = 2048
+  default     = 512
 }
 
 variable "enable_rss_feed_schedule" {
@@ -156,13 +156,13 @@ variable "database_username" {
 variable "database_instance_class" {
   description = "RDS PostgreSQL instance class."
   type        = string
-  default     = "db.r7g.large"
+  default     = "db.t4g.micro"
 }
 
 variable "database_allocated_storage" {
   description = "RDS PostgreSQL allocated storage in GB."
   type        = number
-  default     = 512
+  default     = 20
 }
 
 variable "database_multi_az" {

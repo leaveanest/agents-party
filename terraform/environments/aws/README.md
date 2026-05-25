@@ -77,13 +77,13 @@ the schedule disabled until database migrations and Slack/provider secrets are i
 
 ## Cost Notes
 
-The default shape is intended to approximate the current Heroku production resource tier while
-keeping AWS costs explicit:
+The default shape is intentionally minimal. Increase task, database, and cache sizes after load
+testing or production usage shows a concrete need:
 
-- Fargate web default: 2 vCPU / 16 GiB
-- Fargate worker default: 1 vCPU / 2 GiB
+- Fargate web default: 0.25 vCPU / 512 MiB
+- Fargate worker default: 0.25 vCPU / 512 MiB
 - Scheduled RSS task default: 0.5 vCPU / 1 GiB per run
-- RDS default: `db.r7g.large`, Single-AZ, gp3 512 GB
+- RDS default: `db.t4g.micro`, Single-AZ, gp3 20 GB
 - Redis default: `cache.t4g.micro`
 - SQS DLQ for Scheduler delivery failures: request-based, normally negligible
 - S3: charged by storage, requests, and data transfer

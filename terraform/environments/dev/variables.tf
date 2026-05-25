@@ -32,7 +32,7 @@ variable "heroku_postgres_plan" {
 variable "heroku_redis_plan" {
   description = "Heroku Key-Value Store/Redis plan for Slack agent job queues."
   type        = string
-  default     = "heroku-redis:premium-0"
+  default     = "heroku-redis:mini"
 }
 
 variable "enable_bucketeer" {
