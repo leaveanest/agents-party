@@ -67,7 +67,7 @@ describe("AgentRunner", () => {
       userId: "U1",
     });
 
-    expect(router.requests[0]?.system).toContain("call soracom_find_resources");
+    expect(router.requests[0]?.system).toContain("if soracom_find_resources is available, call it");
     expect(router.requests[0]?.system).toContain('query "sim"');
   });
 
@@ -198,8 +198,9 @@ describe("AgentRunner", () => {
     });
     expect(router.requests[0]?.context).toEqual({ workspaceId: "T1" });
     expect(router.requests[0]?.system).toContain(
-      "You are the general Agents party assistant. Reply directly and concisely for Slack.",
+      "You are the general Agents Party assistant running inside Slack.",
     );
+    expect(router.requests[0]?.system).toContain("Use only the tools that are available");
     expect(router.requests[0]?.system).toContain("slack_real_time_search");
     expect(router.requests[0]?.history.messages.map((message) => message.role)).not.toContain(
       "system",
