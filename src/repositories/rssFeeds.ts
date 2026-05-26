@@ -15,7 +15,16 @@ export type RssFeedRepository = {
     subscriptionId: string;
   }): Promise<void>;
   findFeedFetchCache(feedUrl: string): Promise<RssFeedFetchCacheEntry | undefined>;
-  listEnabledSubscriptions(input?: { limit?: number }): Promise<RssFeedSubscription[]>;
+  disableSubscription(input: {
+    subscriptionId: string;
+    teamId: string;
+    updatedAt: Date;
+  }): Promise<boolean>;
+  listEnabledSubscriptions(input?: {
+    limit?: number;
+    offset?: number;
+    teamId?: string;
+  }): Promise<RssFeedSubscription[]>;
   listProcessedArticleKeys(
     subscriptionId: string,
     articleKeys: readonly string[],

@@ -520,6 +520,10 @@ class MemoryRssRepository {
     return this.subscriptions;
   }
 
+  async disableSubscription() {
+    return false;
+  }
+
   async listProcessedArticleKeys(subscriptionId: string, articleKeys: readonly string[]) {
     return new Set(articleKeys.filter((key) => this.processed.has(`${subscriptionId}:${key}`)));
   }

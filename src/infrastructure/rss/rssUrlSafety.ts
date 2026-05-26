@@ -1,6 +1,6 @@
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { Agent, buildConnector } from "undici";
+import { Agent, buildConnector, fetch as undiciFetch } from "undici";
 
 export type RssUrlHostnameResolver = (hostname: string) => Promise<readonly string[]>;
 
@@ -21,7 +21,7 @@ export async function fetchSafeRssUrl(input: {
   resolveHostname?: RssUrlHostnameResolver;
   url: string;
 }): Promise<Response> {
-  const fetchFn = input.fetchFn ?? fetch;
+  const fetchFn = input.fetchFn ?? (undiciFetch as typeof fetch);
   const maxRedirects = input.maxRedirects ?? 5;
   const dispatcher =
     input.fetchFn === undefined ? safeDispatcher(input.resolveHostname) : undefined;
@@ -106,7 +106,7 @@ function safeDispatcher(resolveHostname: RssUrlHostnameResolver = defaultResolve
 }
 
 function createSafeDispatcher(resolveHostname: RssUrlHostnameResolver): Agent {
-  const connect = buildConnector();
+  const connect = buildConnector({});
   return new Agent({
     connect(options, callback) {
       const hostname = normalizeHostname(options.hostname);

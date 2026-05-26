@@ -19,6 +19,12 @@ import {
   MODEL_ROUTING_MODAL_CALLBACK_ID,
   MODEL_ROUTING_THREAD_CONFIGURE_ACTION_ID,
   RSS_FEED_CONFIGURE_ACTION_ID,
+  RSS_FEED_DELETE_ACTION_ID,
+  RSS_FEED_LIST_ACTION_ID,
+  RSS_FEED_LIST_MODAL_CALLBACK_ID,
+  RSS_FEED_LIST_NEXT_PAGE_ACTION_ID,
+  RSS_FEED_LIST_PREVIOUS_PAGE_ACTION_ID,
+  RSS_FEED_LIST_WORKSPACE_SELECT_ACTION_ID,
   RSS_FEED_MODAL_CALLBACK_ID,
   SALESFORCE_PDF_WORKFLOW_CONFIGURE_ACTION_ID,
   SALESFORCE_PDF_WORKFLOW_MODAL_CALLBACK_ID,
@@ -67,6 +73,11 @@ export type SlackEventFeatureHandlers = {
     args: SlackViewMiddlewareArgs & AllMiddlewareArgs,
   ): Promise<void>;
   handleRssFeedConfigureAction(args: SlackActionMiddlewareArgs & AllMiddlewareArgs): Promise<void>;
+  handleRssFeedDeleteAction(args: SlackActionMiddlewareArgs & AllMiddlewareArgs): Promise<void>;
+  handleRssFeedListAction(args: SlackActionMiddlewareArgs & AllMiddlewareArgs): Promise<void>;
+  handleRssFeedListModalSubmission(
+    args: SlackViewMiddlewareArgs & AllMiddlewareArgs,
+  ): Promise<void>;
   handleRssFeedModalSubmission(args: SlackViewMiddlewareArgs & AllMiddlewareArgs): Promise<void>;
 };
 
@@ -134,6 +145,17 @@ export function registerSlackEventHandlers(
   app.action(RSS_FEED_CONFIGURE_ACTION_ID, async (args) =>
     handlers.handleRssFeedConfigureAction(args),
   );
+  app.action(RSS_FEED_DELETE_ACTION_ID, async (args) => handlers.handleRssFeedDeleteAction(args));
+  app.action(RSS_FEED_LIST_ACTION_ID, async (args) => handlers.handleRssFeedListAction(args));
+  app.action(RSS_FEED_LIST_PREVIOUS_PAGE_ACTION_ID, async (args) =>
+    handlers.handleRssFeedListAction(args),
+  );
+  app.action(RSS_FEED_LIST_NEXT_PAGE_ACTION_ID, async (args) =>
+    handlers.handleRssFeedListAction(args),
+  );
+  app.action(RSS_FEED_LIST_WORKSPACE_SELECT_ACTION_ID, async (args) =>
+    handlers.handleRssFeedListAction(args),
+  );
   app.view(WORKSPACE_CREDENTIAL_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleWorkspaceCredentialModalSubmission(args),
   );
@@ -145,6 +167,9 @@ export function registerSlackEventHandlers(
   );
   app.view(FEATURE_SETTINGS_MODAL_CALLBACK_ID, async (args) =>
     handlers.handleFeatureSettingsModalSubmission(args),
+  );
+  app.view(RSS_FEED_LIST_MODAL_CALLBACK_ID, async (args) =>
+    handlers.handleRssFeedListModalSubmission(args),
   );
   app.view(RSS_FEED_MODAL_CALLBACK_ID, async (args) => handlers.handleRssFeedModalSubmission(args));
 }
@@ -245,6 +270,15 @@ export function createMigrationGapSlackHandlers(): SlackEventFeatureHandlers {
       await ack();
     },
     async handleRssFeedConfigureAction({ ack }) {
+      await ack();
+    },
+    async handleRssFeedDeleteAction({ ack }) {
+      await ack();
+    },
+    async handleRssFeedListAction({ ack }) {
+      await ack();
+    },
+    async handleRssFeedListModalSubmission({ ack }) {
       await ack();
     },
     async handleRssFeedModalSubmission({ ack }) {

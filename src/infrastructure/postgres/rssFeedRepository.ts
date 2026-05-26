@@ -43,19 +43,43 @@ export class PostgresRssFeedRepository implements RssFeedRepository {
     );
   }
 
-  async listEnabledSubscriptions(input: { limit?: number } = {}): Promise<RssFeedSubscription[]> {
+  async listEnabledSubscriptions(
+    input: { limit?: number; offset?: number; teamId?: string } = {},
+  ): Promise<RssFeedSubscription[]> {
     const result = await this.pool.query<RssFeedSubscriptionRow>(
       `
         select id, team_id, channel_id, feed_url, enabled, last_seen_published_at,
                last_processed_at, payload, created_at, updated_at
         from rss_feed_subscriptions
         where enabled = true
-        order by team_id, channel_id, feed_url
+          and ($2::text is null or team_id = $2)
+        order by updated_at desc, team_id, channel_id, feed_url
         limit $1
+        offset $3
       `,
-      [input.limit ?? 500],
+      [input.limit ?? 500, input.teamId ?? null, input.offset ?? 0],
     );
     return result.rows.map(mapSubscription);
+  }
+
+  async disableSubscription(input: {
+    subscriptionId: string;
+    teamId: string;
+    updatedAt: Date;
+  }): Promise<boolean> {
+    const result = await this.pool.query<{ id: string }>(
+      `
+        update rss_feed_subscriptions
+        set enabled = false,
+            updated_at = $3
+        where id = $1
+          and team_id = $2
+          and enabled = true
+        returning id
+      `,
+      [input.subscriptionId, input.teamId, input.updatedAt],
+    );
+    return result.rows.length === 1;
   }
 
   async findFeedFetchCache(feedUrl: string): Promise<RssFeedFetchCacheEntry | undefined> {

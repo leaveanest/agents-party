@@ -15,6 +15,10 @@ channel, feed URL, and RSS-specific posting prompt, verifies that the URL return
 feed items, attempts to join the selected channel with `conversations.join`, then saves the
 subscription. The prompt is stored in the subscription payload and applied when selecting items and
 drafting Slack posts. Private channels still require inviting the app in Slack before RSS delivery.
+Subscriptions are unique by Slack workspace, channel, and feed URL. Re-adding the same channel and
+feed URL re-enables the existing subscription and overwrites the stored payload, including the
+posting prompt. Deleting a subscription from App Home sets `enabled = false`; it does not remove the
+row immediately.
 Subscriptions can also be inserted through the repository or directly by operations tooling.
 
 ## Processing

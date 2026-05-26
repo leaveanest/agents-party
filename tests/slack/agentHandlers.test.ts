@@ -2785,8 +2785,569 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(JSON.stringify(publishedViews[0])).toContain("RSS subscriptions");
-    expect(JSON.stringify(publishedViews[0])).toContain("rss_feed_configure");
+    expect(JSON.stringify(publishedViews[0])).toContain("rss_feed_list");
+    expect(JSON.stringify(publishedViews[0])).not.toContain("No RSS subscriptions yet.");
     expect(JSON.stringify(publishedViews[0])).toContain('\\"selectedTeamId\\":\\"T1\\"');
+    expect(JSON.stringify(publishedViews[0])).toContain('\\"teamId\\":\\"T1\\"');
+  });
+
+  it("opens a paginated RSS subscription list modal with an add feed action", async () => {
+    const openedViews: unknown[] = [];
+    const longFeedUrl = `https://example.com/${"long-path/".repeat(40)}feed.xml`;
+    const repository = new MemoryRssFeedRepository([
+      rssFeedSubscription({
+        channelId: "C1",
+        feedUrl: "https://example.com/feed.xml",
+        prompt: "Only post Python packaging updates.",
+        teamId: "T1",
+      }),
+      rssFeedSubscription({
+        channelId: "C3",
+        feedUrl: longFeedUrl,
+        teamId: "T1",
+      }),
+      rssFeedSubscription({
+        channelId: "C4",
+        feedUrl: "https://example.com/four.xml",
+        teamId: "T1",
+      }),
+      rssFeedSubscription({
+        channelId: "C5",
+        feedUrl: "https://example.com/five.xml",
+        teamId: "T1",
+      }),
+      rssFeedSubscription({
+        channelId: "C6",
+        feedUrl: "https://example.com/six.xml",
+        teamId: "T1",
+      }),
+      rssFeedSubscription({
+        channelId: "C7",
+        feedUrl: "https://example.com/seven.xml",
+        teamId: "T1",
+      }),
+      rssFeedSubscription({
+        channelId: "C2",
+        feedUrl: "https://other.example/feed.xml",
+        teamId: "T2",
+      }),
+    ]);
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedListAction({
+      ack: async () => {},
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T1", source: "app_home" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER1",
+        user: { id: "U1" },
+        view: { id: "VH1", type: "home" },
+      },
+      client: {
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+          update: async () => {
+            throw new Error("App Home action must open a modal, not update the Home view.");
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const view = JSON.stringify(openedViews[0]);
+    expect(view).toContain("Current subscriptions:");
+    expect(view).toContain("<#C1>");
+    expect(view).toContain("https://example.com/feed.xml");
+    expect(view).toContain("Prompt");
+    expect(view).toContain("Only post Python packaging updates.");
+    expect(view).toContain("<#C3>");
+    expect(view).toContain("...");
+    expect(view).not.toContain(longFeedUrl);
+    expect(view).toContain('"submit":{"text":"Add feed"');
+    expect(view).toContain("rss_feed_delete");
+    expect(view).toContain('\\"subscriptionId\\":\\"rss-T1-C1\\"');
+    expect(view).not.toContain("rss_feed_configure");
+    expect(view).toContain("rss_feed_list_next_page");
+    expect(view).not.toContain("rss_feed_list_previous_page");
+    expect(view).not.toContain("https://example.com/seven.xml");
+    expect(view).not.toContain("https://other.example/feed.xml");
+  });
+
+  it("opens an empty RSS subscription list modal with add feed as the modal submit", async () => {
+    const openedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedHome: { repository: new MemoryRssFeedRepository() },
+    });
+
+    await handlers.handleRssFeedListAction({
+      ack: async () => {},
+      body: {
+        actions: [{ value: JSON.stringify({ selectedTeamId: "T1", source: "app_home" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER_EMPTY",
+        user: { id: "U1" },
+        view: { id: "VH1", type: "home" },
+      },
+      client: {
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const view = JSON.stringify(openedViews[0]);
+    expect(view).toContain("No RSS subscriptions yet.");
+    expect(view).toContain('"submit":{"text":"Add feed"');
+    expect(view).not.toContain("rss_feed_list_actions");
+    expect(view).not.toContain("rss_feed_delete");
+    expect(view).not.toContain("rss_feed_configure");
+  });
+
+  it("updates the RSS subscription list modal for pagination", async () => {
+    const updatedViews: unknown[] = [];
+    const repository = new MemoryRssFeedRepository(
+      Array.from({ length: 6 }, (_item, index) =>
+        rssFeedSubscription({
+          channelId: `C${index + 1}`,
+          feedUrl: `https://example.com/${index + 1}.xml`,
+          teamId: "T1",
+        }),
+      ),
+    );
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedListAction({
+      ack: async () => {},
+      body: {
+        actions: [{ value: JSON.stringify({ page: 1, selectedTeamId: "T1", source: "rss_list" }) }],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER2",
+        user: { id: "U1" },
+        view: { id: "V1", type: "modal" },
+      },
+      client: {
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const view = JSON.stringify(updatedViews[0]);
+    expect(view).toContain("Page 2");
+    expect(view).toContain("<#C6>");
+    expect(view).toContain("rss_feed_delete");
+    expect(view).toContain("rss_feed_list_previous_page");
+    expect(view).not.toContain("rss_feed_list_next_page");
+    expect(view).not.toContain("<#C1>");
+  });
+
+  it("deletes an RSS subscription and refreshes the list modal", async () => {
+    const updatedViews: unknown[] = [];
+    const repository = new MemoryRssFeedRepository([
+      rssFeedSubscription({
+        channelId: "C1",
+        feedUrl: "https://example.com/one.xml",
+        teamId: "T1",
+      }),
+      rssFeedSubscription({
+        channelId: "C2",
+        feedUrl: "https://example.com/two.xml",
+        teamId: "T1",
+      }),
+    ]);
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedDeleteAction({
+      ack: async () => {},
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              page: 0,
+              selectedTeamId: "T1",
+              source: "rss_list",
+              subscriptionId: "rss-T1-C1",
+              teamId: "T1",
+            }),
+          },
+        ],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER_DELETE",
+        user: { id: "UADMIN" },
+        view: { id: "V_DELETE", type: "modal" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_admin: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { info() {}, warn() {} },
+    } as never);
+
+    expect(repository.disabled).toEqual([{ subscriptionId: "rss-T1-C1", teamId: "T1" }]);
+    const view = JSON.stringify(updatedViews[0]);
+    expect(view).toContain("rss_feed_list_modal");
+    expect(view).toContain("https://example.com/two.xml");
+    expect(view).not.toContain("https://example.com/one.xml");
+  });
+
+  it("moves to the previous RSS list page when deleting the last item on a page", async () => {
+    const updatedViews: unknown[] = [];
+    const repository = new MemoryRssFeedRepository(
+      Array.from({ length: 6 }, (_item, index) =>
+        rssFeedSubscription({
+          channelId: `C${index + 1}`,
+          feedUrl: `https://example.com/${index + 1}.xml`,
+          teamId: "T1",
+        }),
+      ),
+    );
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedDeleteAction({
+      ack: async () => {},
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              page: 1,
+              selectedTeamId: "T1",
+              source: "rss_list",
+              subscriptionId: "rss-T1-C6",
+              teamId: "T1",
+            }),
+          },
+        ],
+        team: { id: "T1" },
+        trigger_id: "TRIGGER_DELETE_LAST",
+        user: { id: "UADMIN" },
+        view: { id: "V_DELETE_LAST", type: "modal" },
+      },
+      client: {
+        users: {
+          info: async () => ({ user: { is_owner: true } }),
+        },
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { info() {}, warn() {} },
+    } as never);
+
+    const view = JSON.stringify(updatedViews[0]);
+    expect(view).not.toContain("Page 2");
+    expect(view).toContain("<#C1>");
+    expect(view).not.toContain("<#C6>");
+  });
+
+  it("opens the Enterprise Grid RSS subscription list for the selected workspace", async () => {
+    const openedViews: unknown[] = [];
+    const repository = new MemoryRssFeedRepository([
+      rssFeedSubscription({
+        channelId: "C1",
+        feedUrl: "https://selected.example/feed.xml",
+        teamId: "T-selected",
+      }),
+      rssFeedSubscription({
+        channelId: "C2",
+        feedUrl: "https://body.example/feed.xml",
+        teamId: "T-body",
+      }),
+    ]);
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces(input) {
+          expect(input).toEqual({ enterpriseId: "E1" });
+          return [
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T-selected",
+              teamName: "Selected workspace",
+            },
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T-body",
+              teamName: "Body workspace",
+            },
+          ];
+        },
+      },
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedListAction({
+      ack: async () => {},
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              enterpriseId: "E1",
+              selectedTeamId: "T-selected",
+              source: "app_home",
+              teamId: "T-selected",
+            }),
+          },
+        ],
+        enterprise: { id: "E1" },
+        team: { id: "T-body" },
+        trigger_id: "TRIGGER_GRID",
+        user: { id: "U1" },
+        view: { id: "VH1", type: "home" },
+      },
+      client: {
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const view = JSON.stringify(openedViews[0]);
+    expect(view).toContain("rss_feed_list_workspace_select");
+    expect(view).toContain("Selected workspace");
+    expect(view).toContain("Body workspace");
+    expect(view).toContain("https://selected.example/feed.xml");
+    expect(view).not.toContain("https://body.example/feed.xml");
+    expect(view).toContain('\\"teamId\\":\\"T-selected\\"');
+  });
+
+  it("updates the Enterprise Grid RSS list when the workspace selector changes", async () => {
+    const updatedViews: unknown[] = [];
+    const repository = new MemoryRssFeedRepository([
+      rssFeedSubscription({
+        channelId: "C1",
+        feedUrl: "https://selected.example/feed.xml",
+        teamId: "T-selected",
+      }),
+      rssFeedSubscription({
+        channelId: "C2",
+        feedUrl: "https://body.example/feed.xml",
+        teamId: "T-body",
+      }),
+    ]);
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces(input) {
+          expect(input).toEqual({ enterpriseId: "E1" });
+          return [
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T-selected",
+              teamName: "Selected workspace",
+            },
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T-body",
+              teamName: "Body workspace",
+            },
+          ];
+        },
+      },
+      rssFeedHome: { repository },
+    });
+
+    await handlers.handleRssFeedListAction({
+      ack: async () => {},
+      body: {
+        actions: [
+          {
+            action_id: "rss_feed_list_workspace_select",
+            selected_option: { value: "T-selected" },
+          },
+        ],
+        enterprise: { id: "E1" },
+        team: { id: "T-body" },
+        trigger_id: "TRIGGER_GRID_SELECT",
+        user: { id: "U1" },
+        view: {
+          id: "V_GRID",
+          private_metadata: JSON.stringify({
+            enterpriseId: "E1",
+            page: 1,
+            source: "rss_list",
+            teamId: "T-body",
+          }),
+          type: "modal",
+        },
+      },
+      client: {
+        views: {
+          update: async (payload: unknown) => {
+            updatedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    const view = JSON.stringify(updatedViews[0]);
+    expect(view).toContain("rss_feed_list_workspace_select");
+    expect(view).toContain("https://selected.example/feed.xml");
+    expect(view).not.toContain("https://body.example/feed.xml");
+    expect(view).not.toContain("Page 2");
+    expect(view).toContain('\\"teamId\\":\\"T-selected\\"');
+  });
+
+  it("rejects Enterprise Grid RSS list actions for unverified workspaces before tenant reads", async () => {
+    const openedViews: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      installedWorkspaceDirectory: {
+        async listInstalledWorkspaces() {
+          return [
+            {
+              enterpriseId: "E1",
+              installedAt: new Date("2026-05-15T00:00:00Z"),
+              teamId: "T-authorized",
+              teamName: "Authorized workspace",
+            },
+          ];
+        },
+      },
+      rssFeedHome: {
+        repository: {
+          async disableSubscription() {
+            throw new Error("must not disable subscriptions for an unverified workspace");
+          },
+          async listEnabledSubscriptions() {
+            throw new Error("must not read subscriptions for an unverified workspace");
+          },
+          async saveSubscription() {},
+        },
+      },
+    });
+
+    await handlers.handleRssFeedListAction({
+      ack: async () => {},
+      body: {
+        actions: [
+          {
+            value: JSON.stringify({
+              enterpriseId: "E1",
+              selectedTeamId: "T-unauthorized",
+              source: "app_home",
+              teamId: "T-unauthorized",
+            }),
+          },
+        ],
+        enterprise: { id: "E1" },
+        team: { id: "T-body" },
+        trigger_id: "TRIGGER_GRID_REJECT",
+        user: { id: "U1" },
+        view: { id: "VH1", type: "home" },
+      },
+      client: {
+        views: {
+          open: async (payload: unknown) => {
+            openedViews.push(payload);
+            return {};
+          },
+        },
+      },
+      logger: { warn() {} },
+    } as never);
+
+    expect(JSON.stringify(openedViews[0])).toContain("Slack workspace context does not match.");
+  });
+
+  it("updates the RSS list modal to the add modal from the list modal submit", async () => {
+    const acks: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedHome: { repository: new MemoryRssFeedRepository() },
+    });
+
+    await handlers.handleRssFeedListModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { team: { id: "T1" }, user: { id: "UADMIN" } },
+      client: {},
+      logger: { warn() {} },
+      view: {
+        private_metadata: JSON.stringify({
+          source: "rss_list",
+          teamId: "T1",
+        }),
+      },
+    } as never);
+
+    const view = JSON.stringify(acks[0]);
+    expect(view).toContain('"response_action":"update"');
+    expect(view).toContain("rss_feed_modal");
+    expect(view).toContain("rss_feed_channel");
+    expect(view).toContain('\\"source\\":\\"rss_list\\"');
+  });
+
+  it("updates the RSS add modal for the workspace selected in the list modal", async () => {
+    const acks: unknown[] = [];
+    const handlers = createAgentSlackHandlers({} as never, {
+      rssFeedHome: { repository: new MemoryRssFeedRepository() },
+    });
+
+    await handlers.handleRssFeedListModalSubmission({
+      ack: async (payload?: unknown) => {
+        acks.push(payload);
+      },
+      body: { enterprise: { id: "E1" }, team: { id: "T-body" }, user: { id: "UADMIN" } },
+      client: {},
+      logger: { warn() {} },
+      view: {
+        private_metadata: JSON.stringify({
+          enterpriseId: "E1",
+          source: "rss_list",
+          teamId: "T-body",
+        }),
+        state: {
+          values: {
+            rss_feed_list_workspace_select: {
+              rss_feed_list_workspace_select: {
+                selected_option: { value: "T-selected" },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    const view = JSON.stringify(acks[0]);
+    expect(view).toContain('"response_action":"update"');
+    expect(view).toContain("rss_feed_modal");
+    expect(view).toContain('\\"teamId\\":\\"T-selected\\"');
   });
 
   it("opens and saves RSS subscriptions after joining the selected public channel", async () => {
@@ -2828,6 +3389,7 @@ describe("createAgentSlackHandlers", () => {
 
     const opened = JSON.stringify(openedViews[0]);
     expect(opened).toContain("rss_feed_modal");
+    expect(opened).toContain("updates the existing subscription");
     expect(opened).toContain("conversations_select");
     expect(opened).toContain('"include":["public"]');
     expect(opened).toContain("rss_feed_prompt");
@@ -2879,7 +3441,11 @@ describe("createAgentSlackHandlers", () => {
       },
       teamId: "T1",
     });
-    expect(JSON.stringify(updatedViews)).toContain("RSS subscription was saved.");
+    const finalView = JSON.stringify(updatedViews.at(-1));
+    expect(finalView).toContain("rss_feed_list_modal");
+    expect(finalView).toContain("Current subscriptions:");
+    expect(finalView).toContain("<#C1>");
+    expect(finalView).toContain("https://example.com/feed.xml");
   });
 
   it("does not save RSS subscriptions when channel join is missing scope", async () => {
@@ -2973,8 +3539,9 @@ describe("createAgentSlackHandlers", () => {
     expect(JSON.stringify(updatedViews)).toContain("did not contain readable RSS or Atom");
   });
 
-  it("rejects RSS subscription submissions when Enterprise metadata team differs from body team", async () => {
+  it("saves Enterprise Grid RSS subscriptions for the selected workspace", async () => {
     const acks: unknown[] = [];
+    const joinedChannels: string[] = [];
     const repository = new MemoryRssFeedRepository();
     const handlers = createAgentSlackHandlers({} as never, {
       rssFeedFetchFn: async () => validRssFeedResponse(),
@@ -2989,18 +3556,22 @@ describe("createAgentSlackHandlers", () => {
       body: { enterprise: { id: "E1" }, team: { id: "T-body" }, user: { id: "UADMIN" } },
       client: {
         conversations: {
-          join: async () => {
-            throw new Error("join should not be called");
+          join: async (payload: { channel: string }) => {
+            joinedChannels.push(payload.channel);
+            return {};
           },
         },
         users: {
-          info: async () => ({ user: { is_admin: true } }),
+          info: async (input: unknown) => {
+            expect(input).toMatchObject({ team_id: "T-metadata", user: "UADMIN" });
+            return { user: { is_admin: true } };
+          },
         },
         views: {
           update: async () => ({}),
         },
       },
-      logger: { warn() {} },
+      logger: { error() {}, warn() {} },
       view: validRssFeedView({
         channelId: "C1",
         enterpriseId: "E1",
@@ -3009,15 +3580,14 @@ describe("createAgentSlackHandlers", () => {
       }),
     } as never);
 
-    expect(repository.saved).toEqual([]);
     expect(acks).toEqual([
-      {
-        errors: {
-          rss_feed_channel: "Slack workspace context does not match.",
-        },
-        response_action: "errors",
-      },
+      { response_action: "update", view: expect.objectContaining({ type: "modal" }) },
     ]);
+    expect(joinedChannels).toEqual(["C1"]);
+    expect(repository.saved[0]).toMatchObject({
+      channelId: "C1",
+      teamId: "T-metadata",
+    });
   });
 
   it("publishes feature settings entry point when a supported image provider API key exists", async () => {
@@ -9453,11 +10023,63 @@ async function publicRssResolver() {
 }
 
 class MemoryRssFeedRepository {
+  readonly disabled: Array<{ subscriptionId: string; teamId: string }> = [];
   readonly saved: RssFeedSubscription[] = [];
+
+  constructor(private readonly subscriptions: RssFeedSubscription[] = []) {}
+
+  async listEnabledSubscriptions(input: { limit?: number; offset?: number; teamId?: string } = {}) {
+    return [...this.subscriptions, ...this.saved]
+      .filter((subscription) => subscription.enabled)
+      .filter((subscription) => input.teamId === undefined || subscription.teamId === input.teamId)
+      .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())
+      .slice(
+        input.offset ?? 0,
+        input.limit === undefined ? undefined : (input.offset ?? 0) + input.limit,
+      );
+  }
 
   async saveSubscription(subscription: RssFeedSubscription): Promise<void> {
     this.saved.push(subscription);
   }
+
+  async disableSubscription(input: {
+    subscriptionId: string;
+    teamId: string;
+    updatedAt: Date;
+  }): Promise<boolean> {
+    this.disabled.push({
+      subscriptionId: input.subscriptionId,
+      teamId: input.teamId,
+    });
+    const subscription = [...this.subscriptions, ...this.saved].find(
+      (item) => item.id === input.subscriptionId && item.teamId === input.teamId,
+    );
+    if (subscription === undefined || !subscription.enabled) {
+      return false;
+    }
+    subscription.enabled = false;
+    subscription.updatedAt = input.updatedAt;
+    return true;
+  }
+}
+
+function rssFeedSubscription(input: {
+  channelId: string;
+  feedUrl: string;
+  prompt?: string;
+  teamId: string;
+}): RssFeedSubscription {
+  return {
+    channelId: input.channelId,
+    createdAt: new Date("2026-05-12T00:00:00.000Z"),
+    enabled: true,
+    feedUrl: input.feedUrl,
+    id: `rss-${input.teamId}-${input.channelId}`,
+    payload: input.prompt === undefined ? {} : { prompt: input.prompt },
+    teamId: input.teamId,
+    updatedAt: new Date("2026-05-12T00:00:00.000Z"),
+  };
 }
 
 class MemoryFeatureSettingsRepository implements WorkspaceFeatureSettingsRepository {

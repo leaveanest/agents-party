@@ -28,6 +28,35 @@ describe("PostgresRssFeedRepository", () => {
     ]);
   });
 
+  it("lists enabled subscriptions scoped to a Slack workspace", async () => {
+    const pool = new RecordingPool([]);
+    const repository = new PostgresRssFeedRepository(pool as never);
+
+    await repository.listEnabledSubscriptions({ limit: 10, teamId: "T1" });
+
+    expect(pool.queries[0]?.text).toContain("team_id = $2");
+    expect(pool.queries[0]?.text).toContain("order by updated_at desc");
+    expect(pool.queries[0]?.text).toContain("offset $3");
+    expect(pool.queries[0]?.values).toEqual([10, "T1", 0]);
+  });
+
+  it("disables subscriptions by Slack workspace and subscription id", async () => {
+    const pool = new RecordingPool([{ id: "rss-1" }]);
+    const repository = new PostgresRssFeedRepository(pool as never);
+
+    await expect(
+      repository.disableSubscription({
+        subscriptionId: "rss-1",
+        teamId: "T1",
+        updatedAt: new Date("2026-05-12T01:00:00.000Z"),
+      }),
+    ).resolves.toBe(true);
+
+    expect(pool.queries[0]?.text).toContain("set enabled = false");
+    expect(pool.queries[0]?.text).toContain("team_id = $2");
+    expect(pool.queries[0]?.values).toEqual(["rss-1", "T1", new Date("2026-05-12T01:00:00.000Z")]);
+  });
+
   it("reserves processed articles with subscription/article uniqueness", async () => {
     const pool = new RecordingPool([{ id: "reservation-id" }]);
     const repository = new PostgresRssFeedRepository(pool as never);

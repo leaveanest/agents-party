@@ -49,6 +49,12 @@ export const FEATURE_SETTINGS_TTS_CHANNELS_BLOCK_ID = "feature_settings_text_to_
 export const FEATURE_SETTINGS_TTS_CHANNELS_ACTION_ID = "text_to_speech_channels";
 
 export const RSS_FEED_CONFIGURE_ACTION_ID = "rss_feed_configure";
+export const RSS_FEED_LIST_ACTION_ID = "rss_feed_list";
+export const RSS_FEED_DELETE_ACTION_ID = "rss_feed_delete";
+export const RSS_FEED_LIST_PREVIOUS_PAGE_ACTION_ID = "rss_feed_list_previous_page";
+export const RSS_FEED_LIST_NEXT_PAGE_ACTION_ID = "rss_feed_list_next_page";
+export const RSS_FEED_LIST_WORKSPACE_SELECT_ACTION_ID = "rss_feed_list_workspace_select";
+export const RSS_FEED_LIST_MODAL_CALLBACK_ID = "rss_feed_list_modal";
 export const RSS_FEED_MODAL_CALLBACK_ID = "rss_feed_modal";
 export const RSS_FEED_URL_BLOCK_ID = "rss_feed_url";
 export const RSS_FEED_URL_ACTION_ID = "feed_url";

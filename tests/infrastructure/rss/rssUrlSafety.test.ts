@@ -12,5 +12,7 @@ describe("fetchSafeRssUrl", () => {
         url: "http://rebind.test/feed.xml",
       }),
     ).rejects.toThrow();
+
+    expect(resolvedAddresses).toEqual([]);
   });
 });
