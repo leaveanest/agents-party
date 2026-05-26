@@ -51,6 +51,8 @@ Batch behavior:
 - skips already processed `(subscription_id, article_key)` pairs
 - resolves model as channel `default_model_id`, then workspace `default_model_id`
 - asks the LLM once per subscription to choose feed items and draft Slack updates as JSON
+- posts one parent Slack message per subscription/feed batch, then posts selected articles as replies
+  in that thread
 - fails closed when no channel/workspace model is configured
 - invokes the existing `ProviderRouter`
 - posts through `src/slack/rssFeedPosts.ts`

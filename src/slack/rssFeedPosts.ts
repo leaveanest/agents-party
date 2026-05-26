@@ -1,6 +1,10 @@
 import type { WebClient } from "@slack/web-api";
 
-import type { RssArticlePublisher, RssArticlePost } from "../agents/rssFeedProcessor.js";
+import type {
+  RssArticlePublisher,
+  RssArticlePublishResult,
+  RssArticlePost,
+} from "../agents/rssFeedProcessor.js";
 import { FALLBACK_LOCALE, createTranslator, type Locale } from "../i18n/index.js";
 import type { SlackWebClientProvider } from "./webClient.js";
 
@@ -9,9 +13,9 @@ export function createSlackRssArticlePublisher(input: {
   defaultLocale?: Locale;
 }): RssArticlePublisher {
   return {
-    async publishFeedArticle(payload) {
+    async publishFeedArticles(payload) {
       const client = await input.clientProvider.forTeam({ teamId: payload.teamId });
-      return publishFeedArticle(client, {
+      return publishFeedArticles(client, {
         ...payload,
         locale: input.defaultLocale ?? FALLBACK_LOCALE,
       });
@@ -19,16 +23,16 @@ export function createSlackRssArticlePublisher(input: {
   };
 }
 
-async function publishFeedArticle(
+async function publishFeedArticles(
   client: Pick<WebClient, "chat">,
   input: {
-    article: RssArticlePost;
+    articles: readonly RssArticlePost[];
     channelId: string;
     feedUrl: string;
     locale: Locale;
     teamId: string;
   },
-): Promise<string> {
+): Promise<RssArticlePublishResult[]> {
   const translator = createTranslator(input.locale);
   const parent = await client.chat.postMessage({
     channel: input.channelId,
@@ -39,16 +43,32 @@ async function publishFeedArticle(
     throw new Error("Slack did not return a timestamp for the RSS parent message.");
   }
 
-  const response = await client.chat.postMessage({
-    channel: input.channelId,
-    text: renderArticlePost(input.article),
-    thread_ts: threadTs,
-  });
-  const ts = stringField(response, "ts");
-  if (ts === undefined) {
-    throw new Error("Slack did not return a timestamp for the RSS article message.");
+  const results: RssArticlePublishResult[] = [];
+  for (const article of input.articles) {
+    try {
+      const response = await client.chat.postMessage({
+        channel: input.channelId,
+        text: renderArticlePost(article),
+        thread_ts: threadTs,
+      });
+      const ts = stringField(response, "ts");
+      if (ts === undefined) {
+        throw new Error("Slack did not return a timestamp for the RSS article message.");
+      }
+      results.push({
+        articleKey: article.articleKey,
+        slackMessageTs: ts,
+        status: "posted",
+      });
+    } catch (error) {
+      results.push({
+        articleKey: article.articleKey,
+        error,
+        status: "failed",
+      });
+    }
   }
-  return ts;
+  return results;
 }
 
 function renderArticlePost(article: RssArticlePost): string {

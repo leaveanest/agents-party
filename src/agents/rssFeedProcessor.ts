@@ -25,13 +25,25 @@ export type RssArticlePost = {
   title: string;
 };
 
+export type RssArticlePublishResult =
+  | {
+      articleKey: string;
+      slackMessageTs: string;
+      status: "posted";
+    }
+  | {
+      articleKey: string;
+      error: unknown;
+      status: "failed";
+    };
+
 export type RssArticlePublisher = {
-  publishFeedArticle(input: {
-    article: RssArticlePost;
+  publishFeedArticles(input: {
+    articles: readonly RssArticlePost[];
     channelId: string;
     feedUrl: string;
     teamId: string;
-  }): Promise<string>;
+  }): Promise<RssArticlePublishResult[]>;
 };
 
 export type RssFeedProcessorOptions = {
@@ -202,16 +214,41 @@ export class RssFeedProcessor {
       return { failedArticles, postedArticles: 0, skipped: false };
     }
     const postedArticles: Array<{ article: RssArticle; articleKey: string }> = [];
-    for (const post of reservedPosts) {
-      let slackMessageTs: string;
-      try {
-        slackMessageTs = await this.options.articlePublisher.publishFeedArticle({
-          article: post,
-          channelId: subscription.channelId,
-          feedUrl: subscription.feedUrl,
-          teamId: subscription.teamId,
+    let publishResultsByArticleKey: Map<string, RssArticlePublishResult>;
+    try {
+      const publishResults = await this.options.articlePublisher.publishFeedArticles({
+        articles: reservedPosts,
+        channelId: subscription.channelId,
+        feedUrl: subscription.feedUrl,
+        teamId: subscription.teamId,
+      });
+      publishResultsByArticleKey = new Map(
+        publishResults.map((publishResult) => [publishResult.articleKey, publishResult]),
+      );
+    } catch (error) {
+      failedArticles += reservedPosts.length;
+      for (const post of reservedPosts) {
+        await this.options.repository.releaseProcessedArticleReservation({
+          articleKey: post.articleKey,
+          subscriptionId: subscription.id,
         });
-      } catch (error) {
+      }
+      this.options.logger?.error?.("RSS Slack feed thread posting failed.", {
+        articleKeys: reservedPosts.map((post) => post.articleKey),
+        error,
+        subscriptionId: subscription.id,
+      });
+      await this.options.repository.updateSubscriptionCursor({
+        lastProcessedAt: this.now(),
+        subscriptionId: subscription.id,
+      });
+      return { failedArticles, postedArticles: 0, skipped: false };
+    }
+    for (const post of reservedPosts) {
+      const publishResult = publishResultsByArticleKey.get(post.articleKey);
+      if (publishResult === undefined || publishResult.status === "failed") {
+        const error =
+          publishResult?.error ?? new Error("RSS Slack posting returned no result for article.");
         failedArticles += 1;
         await this.options.repository.releaseProcessedArticleReservation({
           articleKey: post.articleKey,
@@ -231,7 +268,7 @@ export class RssFeedProcessor {
           modelId: resolvedModel.model.id,
           modelSource: resolvedModel.source,
           processedAt: this.now(),
-          slackMessageTs,
+          slackMessageTs: publishResult.slackMessageTs,
           subscriptionId: subscription.id,
         });
         const candidate = candidates.find((item) => item.articleKey === post.articleKey);
@@ -243,7 +280,7 @@ export class RssFeedProcessor {
         this.options.logger?.error?.("RSS processed article completion failed after Slack post.", {
           articleKey: post.articleKey,
           error,
-          slackMessageTs,
+          slackMessageTs: publishResult.slackMessageTs,
           subscriptionId: subscription.id,
         });
       }

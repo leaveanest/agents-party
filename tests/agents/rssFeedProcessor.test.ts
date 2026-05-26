@@ -88,7 +88,44 @@ describe("RssFeedProcessor", () => {
       type: "text",
     });
     expect(publisher.posts).toHaveLength(2);
+    expect(publisher.batches).toHaveLength(2);
+    expect(publisher.batches.map((batch) => batch.articles)).toEqual([
+      [expect.objectContaining({ articleKey: expect.any(String) })],
+      [expect.objectContaining({ articleKey: expect.any(String) })],
+    ]);
     expect(repository.completed.map((item) => item.modelSource)).toEqual(["channel", "workspace"]);
+  });
+
+  it("publishes multiple selected articles for one subscription as one Slack feed batch", async () => {
+    const repository = new MemoryRssRepository([subscription({ id: "S1" })]);
+    const publisher = new RecordingPublisher();
+    const processor = new RssFeedProcessor({
+      articlePublisher: publisher,
+      feedFetcher: new MultiItemFeedFetcher(),
+      modelSettingsRepository: {
+        async findChannelSettings() {
+          return { default_model_id: channelModel.id };
+        },
+        async findWorkspaceSettings() {
+          return undefined;
+        },
+      },
+      providerRouter: new FakeProviderRouter(),
+      repository,
+    });
+
+    await expect(processor.processDueRssFeeds()).resolves.toMatchObject({
+      failedArticles: 0,
+      postedArticles: 2,
+    });
+    expect(publisher.batches).toHaveLength(1);
+    expect(publisher.batches[0]).toMatchObject({
+      channelId: "C1",
+      feedUrl: "https://example.com/feed.xml",
+      teamId: "T1",
+    });
+    expect(publisher.batches[0]?.articles).toHaveLength(2);
+    expect(publisher.posts).toHaveLength(2);
   });
 
   it("skips processed articles before LLM and Slack posting", async () => {
@@ -486,16 +523,38 @@ class FakeProviderRouter {
 }
 
 class RecordingPublisher {
+  readonly batches: Array<{
+    articles: ReadonlyArray<{ articleKey: string }>;
+    channelId: string;
+    feedUrl: string;
+    teamId: string;
+  }> = [];
   readonly posts: unknown[] = [];
 
   constructor(private readonly options: { failArticleKeys?: Set<string> } = {}) {}
 
-  async publishFeedArticle(input: { article: { articleKey: string }; channelId: string }) {
-    if (this.options.failArticleKeys?.has(input.article.articleKey) === true) {
-      throw new Error("Slack failed.");
-    }
-    this.posts.push(input);
-    return `${this.posts.length}.0`;
+  async publishFeedArticles(input: {
+    articles: ReadonlyArray<{ articleKey: string }>;
+    channelId: string;
+    feedUrl: string;
+    teamId: string;
+  }) {
+    this.batches.push(input);
+    return input.articles.map((article) => {
+      if (this.options.failArticleKeys?.has(article.articleKey) === true) {
+        return {
+          articleKey: article.articleKey,
+          error: new Error("Slack failed."),
+          status: "failed" as const,
+        };
+      }
+      this.posts.push({ article, channelId: input.channelId });
+      return {
+        articleKey: article.articleKey,
+        slackMessageTs: `${this.posts.length}.0`,
+        status: "posted" as const,
+      };
+    });
   }
 }
 
