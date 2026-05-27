@@ -211,7 +211,7 @@ export const englishTranslations = {
   "salesforcePdf.result.saved": "{{action}} is {{status}} for this Salesforce org.",
   "salesforcePdf.result.saving": "Saving workflow settings...",
   "salesforcePdf.title": "Salesforce PDF",
-  "slack.canvas.created": "Canvas created: {{canvasId}}",
+  "slack.canvas.created": "Canvas created: [{{canvasId}}]({{canvasUrl}})",
   "slack.canvas.error.generic":
     "I couldn't create the Canvas. Check Slack permissions or workspace settings.",
   "slack.canvas.error.missingScope":
@@ -221,7 +221,7 @@ export const englishTranslations = {
   "slack.canvas.error.rateLimited":
     "Slack Canvas API rate limits were reached. Please try again in a little while.",
   "slack.canvas.shareWarning":
-    "Canvas created: {{canvasId}}\nI couldn't share it to this channel automatically. Check Canvas access settings in Slack.",
+    "Canvas created: [{{canvasId}}]({{canvasUrl}})\nI couldn't share it to this channel automatically. Check Canvas access settings in Slack.",
   "slack.canvas.error.unavailable":
     "Canvas API is not available for this Slack workspace. Check that Canvas is enabled on a paid Slack plan.",
   "slack.error.genericRequest": "I couldn't complete that request. Please try again in a moment.",
@@ -454,7 +454,7 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "salesforcePdf.result.saved": "{{action}} はこのSalesforce組織で{{status}}です。",
   "salesforcePdf.result.saving": "ワークフロー設定を保存しています...",
   "salesforcePdf.title": "Salesforce PDF",
-  "slack.canvas.created": "Canvasを作成しました: {{canvasId}}",
+  "slack.canvas.created": "Canvasを作成しました: [{{canvasId}}]({{canvasUrl}})",
   "slack.canvas.error.generic":
     "Canvasを作成できませんでした。Slackの権限またはワークスペース設定を確認してください。",
   "slack.canvas.error.missingScope":
@@ -464,7 +464,7 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
   "slack.canvas.error.rateLimited":
     "Slack Canvas APIのレート制限に達しました。少し時間をおいて再試行してください。",
   "slack.canvas.shareWarning":
-    "Canvasを作成しました: {{canvasId}}\nこのチャンネルへ自動共有できませんでした。SlackのCanvasアクセス設定を確認してください。",
+    "Canvasを作成しました: [{{canvasId}}]({{canvasUrl}})\nこのチャンネルへ自動共有できませんでした。SlackのCanvasアクセス設定を確認してください。",
   "slack.canvas.error.unavailable":
     "このSlackワークスペースではCanvas APIを利用できません。Canvasが有効な有料プランか確認してください。",
   "slack.error.genericRequest":

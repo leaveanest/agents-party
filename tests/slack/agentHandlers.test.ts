@@ -6685,7 +6685,7 @@ describe("createAgentSlackHandlers", () => {
     expect(posts).toEqual([
       expect.objectContaining({
         channel: "C1",
-        text: "Canvas generated.\nCanvas created: F123",
+        text: "Canvas generated.\nCanvas created: [F123](https://app.slack.com/docs/T1/F123)",
         thread_ts: "1712345678.000100",
       }),
     ]);
@@ -6836,7 +6836,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(posts).toEqual([
       expect.objectContaining({
-        text: expect.stringContaining("F123"),
+        text: expect.stringContaining("https://app.slack.com/docs/T1/F123"),
       }),
     ]);
   });

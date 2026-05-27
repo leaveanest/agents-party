@@ -8042,7 +8042,7 @@ async function postGeneratedCanvasResult(input: {
       await postFormattedAgentMessage({
         channel: input.channel,
         client: input.client,
-        text: publishedCanvasMessage(input.text, published, input.translator),
+        text: publishedCanvasMessage(input.text, published, input.teamId, input.translator),
         thread_ts: input.threadTs,
       });
     } catch (postError) {
@@ -8095,18 +8095,34 @@ function isRetryableCanvasPublishError(error: unknown): boolean {
 function publishedCanvasMessage(
   text: string,
   canvas: { access: { ok: boolean }; canvasId: string },
+  teamId: string,
   translator: Translator,
 ): string {
   if (!canvas.access.ok) {
-    return translator.t("slack.canvas.shareWarning", { canvasId: canvas.canvasId });
+    return translator.t("slack.canvas.shareWarning", {
+      canvasId: canvas.canvasId,
+      canvasUrl: slackCanvasUrl(teamId, canvas.canvasId),
+    });
   }
-  return canvasPublishedMessage(text, canvas.canvasId, translator);
+  return canvasPublishedMessage(text, teamId, canvas.canvasId, translator);
 }
 
-function canvasPublishedMessage(text: string, canvasId: string, translator: Translator): string {
+function canvasPublishedMessage(
+  text: string,
+  teamId: string,
+  canvasId: string,
+  translator: Translator,
+): string {
   const trimmed = text.trim();
-  const suffix = translator.t("slack.canvas.created", { canvasId });
+  const suffix = translator.t("slack.canvas.created", {
+    canvasId,
+    canvasUrl: slackCanvasUrl(teamId, canvasId),
+  });
   return trimmed.length === 0 ? suffix : `${trimmed}\n${suffix}`;
+}
+
+function slackCanvasUrl(teamId: string, canvasId: string): string {
+  return `https://app.slack.com/docs/${encodeURIComponent(teamId)}/${encodeURIComponent(canvasId)}`;
 }
 
 function canvasPublishFailureMessage(error: unknown, translator: Translator): string {
