@@ -6,6 +6,10 @@ const QUEUE_NAME = "slack-agent-jobs";
 const JOB_NAME = "slack-agent-invocation";
 const JOB_ATTEMPTS = 3;
 const DEDUPE_TTL_MILLIS = 10 * 60 * 1000;
+const COMPLETED_JOB_RETENTION_SECONDS = 60 * 60;
+const COMPLETED_JOB_RETENTION_COUNT = 500;
+const FAILED_JOB_RETENTION_SECONDS = 24 * 60 * 60;
+const FAILED_JOB_RETENTION_COUNT = 1_000;
 
 export const slackAgentJobSchema = z.object({
   apiAppId: z.string().optional(),
@@ -128,8 +132,14 @@ function slackAgentJobOptions(jobId: string): JobsOptions {
     attempts: JOB_ATTEMPTS,
     backoff: { delay: 5_000, type: "exponential" },
     jobId,
-    removeOnComplete: { age: 24 * 60 * 60, count: 5_000 },
-    removeOnFail: { age: 7 * 24 * 60 * 60 },
+    removeOnComplete: {
+      age: COMPLETED_JOB_RETENTION_SECONDS,
+      count: COMPLETED_JOB_RETENTION_COUNT,
+    },
+    removeOnFail: {
+      age: FAILED_JOB_RETENTION_SECONDS,
+      count: FAILED_JOB_RETENTION_COUNT,
+    },
   };
 }
 
