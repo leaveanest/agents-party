@@ -666,6 +666,56 @@ describe("AgentRunner", () => {
     expect(result.toolResults).toHaveLength(1);
   });
 
+  it("uses AI SDK-executed tool results for generated Canvas outputs", async () => {
+    const router = new FakeProviderRouter({
+      content: "",
+      toolResults: [
+        {
+          input: { markdown: "# Summary", title: "Summary" },
+          output: {
+            canvas: {
+              kind: "canvas",
+              markdown: "# Summary",
+              status: "generated",
+              target: {
+                channelId: "C1",
+                teamId: "T1",
+                threadTs: "1.0",
+              },
+              title: "Summary",
+            },
+            message: "Canvas generated.",
+            ok: true,
+          },
+          toolCallId: "call-1",
+          toolName: "generate_canvas",
+        },
+      ],
+    });
+    const runner = new AgentRunner({
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "このスレッドをCanvasにまとめて",
+      userId: "U1",
+    });
+
+    expect(result.message).toBe("Canvas generated.");
+    expect(result.structuredResult).toMatchObject({
+      canvas: {
+        kind: "canvas",
+        markdown: "# Summary",
+        title: "Summary",
+      },
+    });
+    expect(result.toolResults).toHaveLength(1);
+  });
+
   it("allows multiple tool rounds before the final provider response", async () => {
     const registry = new AgentToolRegistry([
       {

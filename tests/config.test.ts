@@ -51,6 +51,7 @@ describe("loadSettings", () => {
       slackScopes: [
         "app_mentions:read",
         "assistant:write",
+        "canvases:write",
         "channels:history",
         "channels:join",
         "channels:read",

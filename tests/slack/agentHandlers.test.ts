@@ -1,3 +1,4 @@
+import { ErrorCode } from "@slack/web-api";
 import { describe, expect, it } from "vite-plus/test";
 
 import { AgentRunnerExecutionError } from "../../src/agents/runner.js";
@@ -6535,6 +6536,122 @@ describe("createAgentSlackHandlers", () => {
     expect(uploads).toEqual([
       expect.objectContaining({
         filename: "generated-image.webp",
+      }),
+    ]);
+  });
+
+  it("creates a Slack Canvas from generated Canvas results", async () => {
+    const canvasCreates: unknown[] = [];
+    const posts: unknown[] = [];
+
+    await postAgentResult({
+      channel: "C1",
+      client: {
+        canvases: {
+          create: async (payload: unknown) => {
+            canvasCreates.push(payload);
+            return { canvas_id: "F123", ok: true };
+          },
+        },
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return { ok: true };
+          },
+        },
+      } as never,
+      logger: { info() {} },
+      result: {
+        decision: { action: "respond", reason: "test" },
+        message: "Canvas generated.",
+        structuredResult: {
+          canvas: {
+            kind: "canvas",
+            markdown: "# Summary\n\n- Decision",
+            status: "generated",
+            target: {
+              channelId: "C1",
+              teamId: "T1",
+              threadTs: "1712345678.000100",
+            },
+            title: "Summary",
+          },
+          message: "Canvas generated.",
+          ok: true,
+        },
+        toolResults: [],
+      },
+      teamId: "T1",
+      text: "Canvas generated.",
+      threadTs: "1712345678.000100",
+    });
+
+    expect(canvasCreates).toEqual([
+      {
+        channel_id: "C1",
+        document_content: {
+          markdown: "# Summary\n\n- Decision",
+          type: "markdown",
+        },
+        title: "Summary",
+      },
+    ]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "Canvas generated.\nCanvas created: F123",
+        thread_ts: "1712345678.000100",
+      }),
+    ]);
+  });
+
+  it("posts a user-facing message when Slack Canvas publishing fails", async () => {
+    const posts: unknown[] = [];
+
+    await postAgentResult({
+      channel: "C1",
+      client: {
+        canvases: {
+          create: async () => {
+            throw {
+              code: ErrorCode.PlatformError,
+              data: { error: "missing_scope" },
+            };
+          },
+        },
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return { ok: true };
+          },
+        },
+      } as never,
+      logger: { warn() {} },
+      result: {
+        decision: { action: "respond", reason: "test" },
+        message: "Canvas generated.",
+        structuredResult: {
+          canvas: {
+            kind: "canvas",
+            markdown: "# Summary",
+            status: "generated",
+            title: "Summary",
+          },
+          message: "Canvas generated.",
+          ok: true,
+        },
+        toolResults: [],
+      },
+      teamId: "T1",
+      text: "Canvas generated.",
+      threadTs: "1712345678.000100",
+    });
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: expect.stringContaining("canvases:write"),
+        thread_ts: "1712345678.000100",
       }),
     ]);
   });

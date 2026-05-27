@@ -20,6 +20,7 @@ import { createNativeProviderAdapters } from "../providers/nativeProviderAdapter
 import { ProviderRouter } from "../providers/providerRouter.js";
 import { normalizeReasoningEffort } from "../providers/reasoningOptions.js";
 import type { WorkspaceFeatureSettingsRepository } from "../repositories/workspaceFeatureSettings.js";
+import { createCanvasGenerationAgentTools } from "./canvasGeneration/tools.js";
 import {
   createMediaGenerationAgentTools,
   defaultImageGenerationFallbackModelIds,
@@ -149,6 +150,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "If a request is ambiguous but low risk, make a reasonable assumption and state it briefly. Ask a clarifying question before irreversible, privileged, or high-impact actions.",
   "When Slack workspace search is needed and slack_real_time_search is available, prefer it. If it is unavailable and slack_search_public is available, use slack_search_public as a fallback.",
   "Use slack_read_channel or slack_read_thread when those tools are available and you only need context from the current channel or thread.",
+  "When the user asks to create, generate, or summarize content into a Slack Canvas, use the generate_canvas tool when it is available.",
   "Summarize tool results instead of dumping raw data or internal identifiers.",
   "Do not expose credentials, tokens, or sensitive identifiers in Slack replies.",
   "When SORACOM tools are available and the user asks for SORACOM SIM, SoraCam, or device information, use the relevant SORACOM discovery or status tools before asking for details.",
@@ -679,6 +681,15 @@ function createDefaultAgentTools(input: {
     }),
     ...(toolSelection.kind !== "all"
       ? []
+      : createCanvasGenerationAgentTools({
+          context: {
+            channelId: invocation.channelId,
+            teamId: invocation.teamId,
+            threadTs: invocation.threadTs ?? invocation.messageTs,
+          },
+        })),
+    ...(toolSelection.kind !== "all"
+      ? []
       : createSpeechGenerationAgentTools({
           context: {
             channelId: invocation.channelId,
@@ -1016,7 +1027,7 @@ function normalizeRunnerResult(
   toolResults: AgentToolResult[],
 ): AgentRunnerResult {
   const modelSummary = modelTrace(model);
-  const structuredResult = generatedMediaToolOutput(toolResults);
+  const structuredResult = generatedArtifactToolOutput(toolResults);
   return {
     decision,
     message: agentTextResultSchema.parse({
@@ -1050,10 +1061,14 @@ function redactGeneratedMedia(value: Record<string, JsonValue>): JsonValue {
   };
 }
 
-function generatedMediaToolOutput(toolResults: AgentToolResult[]): JsonValue | undefined {
+function generatedArtifactToolOutput(toolResults: AgentToolResult[]): JsonValue | undefined {
   for (const result of [...toolResults].reverse()) {
     if (!isJsonObject(result.output) || result.output.ok !== true) {
       continue;
+    }
+    const canvas = result.output.canvas;
+    if (isJsonObject(canvas) && canvas.kind === "canvas") {
+      return result.output;
     }
     const media = result.output.media;
     if (

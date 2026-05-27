@@ -69,6 +69,7 @@ import {
   hasSlackAudioFiles,
   resolveSlackAudioAttachments,
 } from "./audioTranscription.js";
+import { SlackCanvasPublishError, publishGeneratedCanvas } from "./canvasPublisher.js";
 import {
   SlackImageProcessingError,
   hasSlackImageFiles,
@@ -269,7 +270,7 @@ const TRANSLATION_RESULT_RESPONSE_FORMAT: Extract<LlmResponseFormat, { type: "js
 };
 export type SlackAgentClient = Pick<
   SlackClient,
-  "chat" | "conversations" | "filesUploadV2" | "token" | "users"
+  "canvases" | "chat" | "conversations" | "filesUploadV2" | "token" | "users"
 > &
   Partial<Pick<SlackClient, "chatStream">> & {
     assistant?: {
@@ -5716,6 +5717,7 @@ async function handleMention(
             runner,
             runtimeOptions,
             startStream: () => sayStream({ buffer_size: SLACK_AGENT_STREAM_BUFFER_SIZE }),
+            teamId,
             threadTs,
             translator,
           });
@@ -5788,8 +5790,10 @@ async function handleMention(
     logger,
     result: runnerResult,
     sayStream,
+    teamId,
     text,
     threadTs,
+    translator,
   });
 }
 
@@ -6007,6 +6011,7 @@ async function handleMessage(
             runner,
             runtimeOptions,
             startStream: () => sayStream({ buffer_size: SLACK_AGENT_STREAM_BUFFER_SIZE }),
+            teamId,
             threadTs,
             translator,
           });
@@ -6083,8 +6088,10 @@ async function handleMessage(
     logger,
     result: runnerResult,
     sayStream,
+    teamId,
     text,
     threadTs,
+    translator,
   });
 }
 
@@ -6280,6 +6287,7 @@ async function processAppMentionJob(
         threadTs: job.threadTs,
         userId: job.userId,
       }),
+      teamId: job.teamId,
       threadTs: job.threadTs,
       translator,
     });
@@ -6354,8 +6362,10 @@ async function processAppMentionJob(
     client: input.client,
     logger: input.logger,
     result: runnerResult,
+    teamId: job.teamId,
     text,
     threadTs: job.threadTs,
+    translator,
   });
 }
 
@@ -6538,6 +6548,7 @@ async function processFollowUpMessageJob(
         threadTs: job.threadTs,
         userId: job.userId,
       }),
+      teamId: job.teamId,
       threadTs: job.threadTs,
       translator,
     });
@@ -6620,8 +6631,10 @@ async function processFollowUpMessageJob(
     client: input.client,
     logger: input.logger,
     result: runnerResult,
+    teamId: job.teamId,
     text,
     threadTs: job.threadTs,
+    translator,
   });
 }
 
@@ -7923,9 +7936,26 @@ export async function postAgentResult(input: {
   logger: unknown;
   result: AgentRunnerResult | undefined;
   sayStream?: SayStreamFn;
+  teamId?: string;
   text: string;
   threadTs: string;
+  translator?: Translator;
 }): Promise<void> {
+  const canvas = readGeneratedCanvas(input.result?.structuredResult);
+  if (canvas !== undefined && input.teamId !== undefined) {
+    await postGeneratedCanvasResult({
+      canvas,
+      channel: input.channel,
+      client: input.client,
+      logger: input.logger,
+      teamId: input.teamId,
+      text: input.text,
+      threadTs: input.threadTs,
+      translator: input.translator ?? defaultTranslator,
+    });
+    return;
+  }
+
   const media = readGeneratedMedia(input.result?.structuredResult);
   if (media?.dataBase64 !== undefined) {
     await input.client.filesUploadV2({
@@ -7975,6 +8005,90 @@ export async function postAgentResult(input: {
   }
 }
 
+async function postGeneratedCanvasResult(input: {
+  canvas: GeneratedSlackCanvas;
+  channel: string;
+  client: SlackAgentClient;
+  logger: unknown;
+  teamId: string;
+  text: string;
+  threadTs: string;
+  translator: Translator;
+}): Promise<boolean> {
+  try {
+    const published = await publishGeneratedCanvas({
+      canvas: {
+        markdown: input.canvas.markdown,
+        title: input.canvas.title,
+      },
+      channelId: input.channel,
+      client: input.client,
+      teamId: input.teamId,
+      threadTs: input.threadTs,
+    });
+    await postFormattedAgentMessage({
+      channel: input.channel,
+      client: input.client,
+      text: canvasPublishedMessage(input.text, published.canvasId, input.translator),
+      thread_ts: input.threadTs,
+    });
+    logInfo(input.logger, "Delivered generated Canvas to Slack.", {
+      canvasId: published.canvasId,
+      channelId: input.channel,
+      delivery: "canvas",
+      teamId: input.teamId,
+      threadTs: input.threadTs,
+    });
+    return true;
+  } catch (error) {
+    logWarn(input.logger, "Failed to deliver generated Canvas to Slack.", {
+      channelId: input.channel,
+      error,
+      teamId: input.teamId,
+      threadTs: input.threadTs,
+    });
+    await postFormattedAgentMessage({
+      channel: input.channel,
+      client: input.client,
+      text: canvasPublishFailureMessage(error, input.translator),
+      thread_ts: input.threadTs,
+    });
+    return true;
+  }
+}
+
+function canvasPublishedMessage(text: string, canvasId: string, translator: Translator): string {
+  const trimmed = text.trim();
+  const suffix = translator.t("slack.canvas.created", { canvasId });
+  return trimmed.length === 0 ? suffix : `${trimmed}\n${suffix}`;
+}
+
+function canvasPublishFailureMessage(error: unknown, translator: Translator): string {
+  if (error instanceof SlackCanvasPublishError) {
+    return canvasPublishFailureMessageForCode(error.code, translator);
+  }
+  return translator.t("slack.canvas.error.generic");
+}
+
+function canvasPublishFailureMessageForCode(code: string, translator: Translator): string {
+  switch (code) {
+    case "missing_scope":
+      return translator.t("slack.canvas.error.missingScope");
+    case "no_permission":
+    case "not_in_channel":
+    case "restricted_action":
+      return translator.t("slack.canvas.error.permission");
+    case "canvas_disabled_user_team":
+    case "free_teams_cannot_edit_standalone_canvases":
+    case "team_tier_cannot_create_channel_canvases":
+      return translator.t("slack.canvas.error.unavailable");
+    case "rate_limited":
+      return translator.t("slack.canvas.error.rateLimited");
+    default:
+      return translator.t("slack.canvas.error.generic");
+  }
+}
+
 type StreamingAgentRunOutcome =
   | {
       result: AgentRunnerResult;
@@ -7995,6 +8109,7 @@ async function tryPostStreamingAgentRun(input: {
   runner: AgentRunner;
   runtimeOptions: AgentRunnerRuntimeOptions;
   startStream(): SlackAgentMessageStream | undefined;
+  teamId: string;
   threadTs: string;
   translator: Translator;
 }): Promise<StreamingAgentRunOutcome> {
@@ -8037,13 +8152,17 @@ async function tryPostStreamingAgentRun(input: {
       channel: input.channel,
       client: input.client,
       ensureStream,
+      logger: input.logger,
       result: finalResult,
       streamedText,
+      teamId: input.teamId,
       threadTs: input.threadTs,
+      translator: input.translator,
     });
     if (
       streamedText.length === 0 &&
-      readGeneratedMedia(finalResult.structuredResult) === undefined
+      readGeneratedMedia(finalResult.structuredResult) === undefined &&
+      readGeneratedCanvas(finalResult.structuredResult) === undefined
     ) {
       await ensureStream().append({ markdown_text: finalResult.message });
     }
@@ -8095,10 +8214,30 @@ async function appendStreamingResultHandoff(input: {
   channel: string;
   client: SlackAgentClient;
   ensureStream(): SlackAgentMessageStream;
+  logger: unknown;
   result: AgentRunnerResult;
   streamedText: string;
+  teamId: string;
   threadTs: string;
+  translator: Translator;
 }): Promise<void> {
+  const canvas = readGeneratedCanvas(input.result.structuredResult);
+  if (canvas !== undefined) {
+    const published = await postGeneratedCanvasResult({
+      canvas,
+      channel: input.channel,
+      client: input.client,
+      logger: input.logger,
+      teamId: input.teamId,
+      text: input.streamedText.trim().length === 0 ? input.result.message : "",
+      threadTs: input.threadTs,
+      translator: input.translator,
+    });
+    if (published) {
+      return;
+    }
+  }
+
   const media = readGeneratedMedia(input.result.structuredResult);
   if (media?.dataBase64 !== undefined) {
     await input.client.filesUploadV2({
@@ -8450,12 +8589,36 @@ function readGeneratedMedia(value: JsonValue | undefined): GeneratedSlackMedia |
   };
 }
 
+function readGeneratedCanvas(value: JsonValue | undefined): GeneratedSlackCanvas | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const canvas = value.canvas;
+  if (!isRecord(canvas) || canvas.kind !== "canvas") {
+    return undefined;
+  }
+  const markdown = readOptionalString(canvas.markdown);
+  const title = readOptionalString(canvas.title);
+  if (markdown === undefined || title === undefined) {
+    return undefined;
+  }
+  return {
+    markdown,
+    title,
+  };
+}
+
 type GeneratedSlackMedia = {
   dataBase64?: string;
   kind: "audio" | "image" | "video";
   mimeType?: string;
   operationName?: string;
   uri?: string;
+};
+
+type GeneratedSlackCanvas = {
+  markdown: string;
+  title: string;
 };
 
 function mediaFilename(media: GeneratedSlackMedia): string {

@@ -69,6 +69,7 @@ const APP_ENVS_REQUIRING_AGENT_MODEL = new Set(["heroku", "prod", "production", 
 const DEFAULT_SLACK_SCOPES = [
   "app_mentions:read",
   "assistant:write",
+  "canvases:write",
   "channels:history",
   "channels:join",
   "channels:read",
