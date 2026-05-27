@@ -220,6 +220,8 @@ export const englishTranslations = {
     "I can't create a Canvas in this channel. Check that the app is in the channel and has the required Slack permissions.",
   "slack.canvas.error.rateLimited":
     "Slack Canvas API rate limits were reached. Please try again in a little while.",
+  "slack.canvas.shareWarning":
+    "Canvas created: {{canvasId}}\nI couldn't share it to this channel automatically. Check Canvas access settings in Slack.",
   "slack.canvas.error.unavailable":
     "Canvas API is not available for this Slack workspace. Check that Canvas is enabled on a paid Slack plan.",
   "slack.error.genericRequest": "I couldn't complete that request. Please try again in a moment.",
@@ -461,6 +463,8 @@ export const japaneseTranslations: Record<keyof typeof englishTranslations, stri
     "このチャンネルではCanvasを作成できません。アプリのチャンネル参加状況とSlack権限を確認してください。",
   "slack.canvas.error.rateLimited":
     "Slack Canvas APIのレート制限に達しました。少し時間をおいて再試行してください。",
+  "slack.canvas.shareWarning":
+    "Canvasを作成しました: {{canvasId}}\nこのチャンネルへ自動共有できませんでした。SlackのCanvasアクセス設定を確認してください。",
   "slack.canvas.error.unavailable":
     "このSlackワークスペースではCanvas APIを利用できません。Canvasが有効な有料プランか確認してください。",
   "slack.error.genericRequest":

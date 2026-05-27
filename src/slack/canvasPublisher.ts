@@ -9,6 +9,14 @@ export type GeneratedCanvas = {
 };
 
 export type PublishedCanvas = {
+  access:
+    | {
+        ok: true;
+      }
+    | {
+        code: string;
+        ok: false;
+      };
   canvasId: string;
 };
 
@@ -30,23 +38,23 @@ export async function publishGeneratedCanvas(input: {
   teamId: string;
   threadTs: string;
 }): Promise<PublishedCanvas> {
+  let canvasId: string;
   try {
     const response = await input.client.canvases.create({
-      channel_id: input.channelId,
       document_content: {
         markdown: input.canvas.markdown,
         type: "markdown",
       },
       title: input.canvas.title,
     });
-    const canvasId = readCanvasId(response);
-    if (canvasId === undefined) {
+    const resolvedCanvasId = readCanvasId(response);
+    if (resolvedCanvasId === undefined) {
       throw new SlackCanvasPublishError(
         "missing_canvas_id",
         "Slack created the Canvas but did not return a Canvas id.",
       );
     }
-    return { canvasId };
+    canvasId = resolvedCanvasId;
   } catch (error) {
     if (error instanceof SlackCanvasPublishError) {
       throw error;
@@ -55,6 +63,24 @@ export async function publishGeneratedCanvas(input: {
     throw new SlackCanvasPublishError(code, "Slack Canvas publish failed.", {
       cause: error,
     });
+  }
+
+  try {
+    await input.client.canvases.access.set({
+      access_level: "read",
+      canvas_id: canvasId,
+      channel_ids: [input.channelId],
+    });
+    return {
+      access: { ok: true },
+      canvasId,
+    };
+  } catch (error) {
+    const code = slackWebApiErrorCode(error) ?? "canvas_access_set_failed";
+    return {
+      access: { code, ok: false },
+      canvasId,
+    };
   }
 }
 

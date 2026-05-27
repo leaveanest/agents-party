@@ -5760,6 +5760,9 @@ async function handleMention(
       }
     }
   } catch (error) {
+    if (isRetryableCanvasPublishError(error)) {
+      throw error;
+    }
     logger.error("TypeScript AgentRunner failed while handling app_mention.", {
       error,
       ...runnerFailureLogFields(error),
@@ -6058,6 +6061,9 @@ async function handleMessage(
       });
     }
   } catch (error) {
+    if (isRetryableCanvasPublishError(error)) {
+      throw error;
+    }
     logger.error("TypeScript AgentRunner failed while handling message follow-up.", {
       error,
       ...runnerFailureLogFields(error),
@@ -6330,6 +6336,9 @@ async function processAppMentionJob(
       }
     }
   } catch (error) {
+    if (isRetryableCanvasPublishError(error)) {
+      throw error;
+    }
     logError(input.logger, "TypeScript AgentRunner failed while handling app_mention.", {
       error,
       ...runnerFailureLogFields(error),
@@ -6599,6 +6608,9 @@ async function processFollowUpMessageJob(
       );
     }
   } catch (error) {
+    if (isRetryableCanvasPublishError(error)) {
+      throw error;
+    }
     logError(input.logger, "TypeScript AgentRunner failed while handling message follow-up.", {
       error,
       ...runnerFailureLogFields(error),
@@ -8026,13 +8038,24 @@ async function postGeneratedCanvasResult(input: {
       teamId: input.teamId,
       threadTs: input.threadTs,
     });
-    await postFormattedAgentMessage({
-      channel: input.channel,
-      client: input.client,
-      text: canvasPublishedMessage(input.text, published.canvasId, input.translator),
-      thread_ts: input.threadTs,
-    });
+    try {
+      await postFormattedAgentMessage({
+        channel: input.channel,
+        client: input.client,
+        text: publishedCanvasMessage(input.text, published, input.translator),
+        thread_ts: input.threadTs,
+      });
+    } catch (postError) {
+      logWarn(input.logger, "Failed to post generated Canvas confirmation to Slack.", {
+        canvasId: published.canvasId,
+        channelId: input.channel,
+        error: postError,
+        teamId: input.teamId,
+        threadTs: input.threadTs,
+      });
+    }
     logInfo(input.logger, "Delivered generated Canvas to Slack.", {
+      accessGranted: published.access.ok,
       canvasId: published.canvasId,
       channelId: input.channel,
       delivery: "canvas",
@@ -8041,6 +8064,9 @@ async function postGeneratedCanvasResult(input: {
     });
     return true;
   } catch (error) {
+    if (!(error instanceof SlackCanvasPublishError) || isRetryableCanvasPublishError(error)) {
+      throw error;
+    }
     logWarn(input.logger, "Failed to deliver generated Canvas to Slack.", {
       channelId: input.channel,
       error,
@@ -8055,6 +8081,26 @@ async function postGeneratedCanvasResult(input: {
     });
     return true;
   }
+}
+
+function isRetryableCanvasPublishError(error: unknown): boolean {
+  if (!(error instanceof SlackCanvasPublishError)) {
+    return false;
+  }
+  return new Set(["internal_error", "rate_limited", "request_timeout", "service_unavailable"]).has(
+    error.code,
+  );
+}
+
+function publishedCanvasMessage(
+  text: string,
+  canvas: { access: { ok: boolean }; canvasId: string },
+  translator: Translator,
+): string {
+  if (!canvas.access.ok) {
+    return translator.t("slack.canvas.shareWarning", { canvasId: canvas.canvasId });
+  }
+  return canvasPublishedMessage(text, canvas.canvasId, translator);
 }
 
 function canvasPublishedMessage(text: string, canvasId: string, translator: Translator): string {
@@ -8179,6 +8225,10 @@ async function tryPostStreamingAgentRun(input: {
       error,
       threadTs: input.threadTs,
     });
+    if (isRetryableCanvasPublishError(error)) {
+      await stopStreamAfterRetryableFailure(stream, input);
+      throw error;
+    }
     if (stream === undefined) {
       throw error;
     }
@@ -8252,6 +8302,28 @@ async function appendStreamingResultHandoff(input: {
   const suffix = media?.uri ?? media?.operationName;
   if (suffix !== undefined) {
     await input.ensureStream().append({ markdown_text: `\n${suffix}` });
+  }
+}
+
+async function stopStreamAfterRetryableFailure(
+  stream: SlackAgentMessageStream | undefined,
+  input: {
+    channel: string;
+    logger: unknown;
+    threadTs: string;
+  },
+): Promise<void> {
+  if (stream === undefined) {
+    return;
+  }
+  try {
+    await stream.stop();
+  } catch (stopError) {
+    logWarn(input.logger, "Failed to stop Slack agent live stream before retry.", {
+      channelId: input.channel,
+      error: stopError,
+      threadTs: input.threadTs,
+    });
   }
 }
 
