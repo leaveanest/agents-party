@@ -42,11 +42,16 @@ const baseSettings: AppSettings = {
   slackClientId: undefined,
   slackClientSecret: undefined,
   slackEnabled: false,
-  slackEventsPath: "/slack/events",
+  slackEventsPath: "/agents/slack/events",
   slackInstallationStoreEnabled: false,
-  slackInstallPath: "/slack/install",
+  slackInstallPath: "/agents/slack/install",
   slackOAuthInstallEnabled: false,
-  slackOAuthRedirectPath: "/slack/oauth_redirect",
+  slackOAuthRedirectPath: "/agents/slack/oauth_redirect",
+  slackRoutes: {
+    eventsPath: "/agents/slack/events",
+    installPath: "/agents/slack/install",
+    oauthRedirectPath: "/agents/slack/oauth_redirect",
+  },
   slackScopes: [],
   slackSigningSecret: undefined,
   slackStateSecret: undefined,
@@ -121,7 +126,7 @@ describe("createSlackApp", () => {
       await listen(server);
       const address = server.address() as AddressInfo;
 
-      const response = await fetch(`http://127.0.0.1:${address.port}/slack/install`);
+      const response = await fetch(`http://127.0.0.1:${address.port}/agents/slack/install`);
       const body = await response.text();
 
       expect(response.status).toBe(200);

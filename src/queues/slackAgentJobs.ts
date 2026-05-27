@@ -19,6 +19,7 @@ export const slackAgentJobSchema = z.object({
   messageTs: z.string().min(1),
   retryNum: z.string().optional(),
   retryReason: z.string().optional(),
+  slackAppKey: z.string().optional(),
   teamId: z.string().min(1),
   targetLanguage: z.string().optional(),
   text: z.string(),
@@ -116,7 +117,9 @@ export function createBullMqSlackAgentJobWorker(
 }
 
 export function slackAgentJobId(job: SlackAgentJob): string {
-  return job.eventId ?? `${job.teamId}:${job.eventType}:${job.channelId}:${job.messageTs}`;
+  const identity =
+    job.eventId ?? `${job.teamId}:${job.eventType}:${job.channelId}:${job.messageTs}`;
+  return job.slackAppKey === undefined ? identity : `${job.slackAppKey}:${identity}`;
 }
 
 function slackAgentJobDedupeKey(jobId: string): string {

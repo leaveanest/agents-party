@@ -60,7 +60,7 @@ async function handleRequest(
 
   if (isSlackRoute(url.pathname, settings)) {
     logSlackIngress(request, url.pathname);
-    if (url.pathname === settings.slackEventsPath && method !== "POST") {
+    if (url.pathname === settings.slackRoutes.eventsPath && method !== "POST") {
       sendJson(response, 405, {
         error: "method_not_allowed",
         message: "Slack events endpoint only accepts POST requests.",
@@ -95,10 +95,11 @@ function isOAuthRoute(pathname: string, settings: AppSettings): boolean {
 }
 
 function isSlackRoute(pathname: string, settings: AppSettings): boolean {
+  const { slackRoutes } = settings;
   return (
-    pathname === settings.slackEventsPath ||
-    pathname === settings.slackInstallPath ||
-    pathname === settings.slackOAuthRedirectPath
+    pathname === slackRoutes.eventsPath ||
+    pathname === slackRoutes.installPath ||
+    pathname === slackRoutes.oauthRedirectPath
   );
 }
 

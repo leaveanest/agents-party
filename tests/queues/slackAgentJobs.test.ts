@@ -18,6 +18,22 @@ describe("slackAgentJobs", () => {
     expect(slackAgentJobId(job)).toBe("Ev1");
   });
 
+  it("scopes Slack event_id queue identity by app key when present", () => {
+    const job = slackAgentJobSchema.parse({
+      channelId: "C1",
+      eventId: "Ev1",
+      eventType: "app_mention",
+      messageTs: "1712345678.000100",
+      slackAppKey: "agents",
+      teamId: "T1",
+      text: "hello",
+      threadTs: "1712345678.000100",
+      userId: "U1",
+    });
+
+    expect(slackAgentJobId(job)).toBe("agents:Ev1");
+  });
+
   it("falls back to a stable Slack event identity when event_id is unavailable", () => {
     const job = slackAgentJobSchema.parse({
       channelId: "C1",
@@ -30,6 +46,23 @@ describe("slackAgentJobs", () => {
     });
 
     expect(slackAgentJobId(job)).toBe("T1:message_follow_up:C1:1712345678.000200");
+  });
+
+  it("scopes fallback queue identity by app key when event_id is unavailable", () => {
+    const job = slackAgentJobSchema.parse({
+      apiAppId: "A1",
+      botUserId: "UBOT",
+      channelId: "C1",
+      eventType: "message_follow_up",
+      messageTs: "1712345678.000200",
+      slackAppKey: "agents",
+      teamId: "T1",
+      text: "follow-up",
+      threadTs: "1712345678.000100",
+      userId: "U1",
+    });
+
+    expect(slackAgentJobId(job)).toBe("agents:T1:message_follow_up:C1:1712345678.000200");
   });
 
   it("does not retain audio bytes or transcripts in queued job data", () => {

@@ -44,6 +44,7 @@ export type AppSettings = {
   slackInstallPath: string;
   slackOAuthInstallEnabled: boolean;
   slackOAuthRedirectPath: string;
+  slackRoutes: SlackRouteBundle;
   slackScopes: string[];
   slackSigningSecret: string | undefined;
   slackStateSecret: string | undefined;
@@ -56,6 +57,12 @@ export type AppSettings = {
   salesforceOAuthRedirectBaseUrl: string | undefined;
   salesforceOAuthStartPath: string;
   salesforceTokenEncryptionKey: string | undefined;
+};
+
+export type SlackRouteBundle = {
+  eventsPath: string;
+  installPath: string;
+  oauthRedirectPath: string;
 };
 
 const DEFAULT_PORT = 8000;
@@ -98,6 +105,11 @@ const DEFAULT_SLACK_USER_SCOPES = [
   "users:read",
   "users:read.email",
 ];
+const DEFAULT_SLACK_ROUTES: SlackRouteBundle = {
+  eventsPath: "/agents/slack/events",
+  installPath: "/agents/slack/install",
+  oauthRedirectPath: "/agents/slack/oauth_redirect",
+};
 
 /**
  * Read application settings from environment variables.
@@ -194,6 +206,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     salesforceOAuthContextSigningSecret !== undefined &&
     salesforceOAuthRedirectBaseUrl !== undefined &&
     salesforceTokenEncryptionKey !== undefined;
+  const slackRoutes = readSlackRoutes(env);
 
   return {
     agentModelId,
@@ -240,11 +253,12 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     slackClientSecret,
     slackAgentQueueEnabled: parseBoolean(env.SLACK_AGENT_QUEUE_ENABLED, false),
     slackEnabled,
-    slackEventsPath: readPath(env.SLACK_EVENTS_PATH, "/slack/events"),
+    slackEventsPath: slackRoutes.eventsPath,
     slackInstallationStoreEnabled,
-    slackInstallPath: readPath(env.SLACK_INSTALL_PATH, "/slack/install"),
+    slackInstallPath: slackRoutes.installPath,
     slackOAuthInstallEnabled,
-    slackOAuthRedirectPath: readPath(env.SLACK_OAUTH_REDIRECT_PATH, "/slack/oauth_redirect"),
+    slackOAuthRedirectPath: slackRoutes.oauthRedirectPath,
+    slackRoutes,
     slackScopes: parseList(env.SLACK_SCOPES, DEFAULT_SLACK_SCOPES),
     slackSigningSecret,
     slackStateSecret,
@@ -383,6 +397,17 @@ function readText(value: string | undefined): string | undefined {
 
 function readPath(value: string | undefined, fallback: string): string {
   return readRoutePath(value, fallback, "Slack route paths");
+}
+
+function readSlackRoutes(env: NodeJS.ProcessEnv): SlackRouteBundle {
+  return {
+    eventsPath: readPath(env.SLACK_EVENTS_PATH, DEFAULT_SLACK_ROUTES.eventsPath),
+    installPath: readPath(env.SLACK_INSTALL_PATH, DEFAULT_SLACK_ROUTES.installPath),
+    oauthRedirectPath: readPath(
+      env.SLACK_OAUTH_REDIRECT_PATH,
+      DEFAULT_SLACK_ROUTES.oauthRedirectPath,
+    ),
+  };
 }
 
 function readRoutePath(value: string | undefined, fallback: string, label = "Route paths"): string {

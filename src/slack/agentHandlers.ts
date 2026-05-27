@@ -234,6 +234,7 @@ const DEFAULT_AGENT_OPTION = {
 } as const;
 const REASONING_EFFORT_FIELD = "reasoning_effort";
 const AGENTS_PARTY_CONTROL_EVENT_TYPE = "agents_party_control";
+const AGENTS_SLACK_APP_KEY = "agents";
 const SLACK_SECTION_TEXT_LIMIT = 3000;
 const RSS_FEED_LIST_PAGE_SIZE = 5;
 const RSS_FEED_APP_HOME_FEED_URL_TEXT_LIMIT = 240;
@@ -5576,6 +5577,7 @@ async function handleMention(
         messageTs: event.ts,
         retryNum: readOptionalContextValue(context.retryNum),
         retryReason: readOptionalContextValue(context.retryReason),
+        slackAppKey: AGENTS_SLACK_APP_KEY,
         teamId,
         text: mentionText,
         threadTs,
@@ -5889,6 +5891,7 @@ async function handleMessage(
         messageTs: event.ts,
         retryNum: readOptionalContextValue(context.retryNum),
         retryReason: readOptionalContextValue(context.retryReason),
+        slackAppKey: AGENTS_SLACK_APP_KEY,
         teamId,
         text: messageText,
         threadTs,
@@ -7346,6 +7349,7 @@ async function handleReactionAdded(
         eventType: "reaction_added",
         isEnterpriseInstall: readSlackEnterpriseInstall(body),
         messageTs,
+        slackAppKey: AGENTS_SLACK_APP_KEY,
         teamId,
         targetLanguage,
         text: "",

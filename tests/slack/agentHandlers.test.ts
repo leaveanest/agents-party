@@ -5032,6 +5032,7 @@ describe("createAgentSlackHandlers", () => {
         isEnterpriseInstall: true,
         retryNum: "1",
         retryReason: "http_timeout",
+        slackAppKey: "agents",
         text: "assign this to <@U123>",
         threadTs: "1712345678.000100",
       }),

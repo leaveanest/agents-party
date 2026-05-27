@@ -42,11 +42,16 @@ const settings: AppSettings = {
   slackClientId: undefined,
   slackClientSecret: undefined,
   slackEnabled: false,
-  slackEventsPath: "/slack/events",
+  slackEventsPath: "/agents/slack/events",
   slackInstallationStoreEnabled: false,
-  slackInstallPath: "/slack/install",
+  slackInstallPath: "/agents/slack/install",
   slackOAuthInstallEnabled: false,
-  slackOAuthRedirectPath: "/slack/oauth_redirect",
+  slackOAuthRedirectPath: "/agents/slack/oauth_redirect",
+  slackRoutes: {
+    eventsPath: "/agents/slack/events",
+    installPath: "/agents/slack/install",
+    oauthRedirectPath: "/agents/slack/oauth_redirect",
+  },
   slackScopes: [],
   slackSigningSecret: undefined,
   slackStateSecret: undefined,
@@ -175,13 +180,13 @@ describe("createAppServer", () => {
       });
 
     const address = server.address() as AddressInfo;
-    const response = await fetch(`http://127.0.0.1:${address.port}/slack/events`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}/agents/slack/events`, {
       method: "POST",
     });
 
     expect(response.status).toBe(200);
     expect(await response.text()).toBe("ok");
-    expect(delegatedPath).toBe("/slack/events");
+    expect(delegatedPath).toBe("/agents/slack/events");
   });
 
   it("does not delegate non-POST Slack event requests", async () => {
@@ -209,7 +214,7 @@ describe("createAppServer", () => {
       });
 
     const address = server.address() as AddressInfo;
-    const response = await fetch(`http://127.0.0.1:${address.port}/slack/events`);
+    const response = await fetch(`http://127.0.0.1:${address.port}/agents/slack/events`);
 
     expect(response.status).toBe(405);
     await expect(response.json()).resolves.toMatchObject({
@@ -235,12 +240,81 @@ describe("createAppServer", () => {
       });
 
     const address = server.address() as AddressInfo;
-    const response = await fetch(`http://127.0.0.1:${address.port}/slack/install`);
+    const response = await fetch(`http://127.0.0.1:${address.port}/agents/slack/install`);
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toMatchObject({
       error: "slack_not_configured",
     });
+  });
+
+  it("delegates Slack install and OAuth redirect routes to the configured Slack gateway", async () => {
+    const delegatedPaths: string[] = [];
+    const server = createAppServer(settings, {
+      slackGateway: {
+        async close() {},
+        handle(request, response) {
+          delegatedPaths.push(request.url ?? "");
+          response.writeHead(200, { "content-type": "text/plain" });
+          response.end("ok");
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const installResponse = await fetch(`http://127.0.0.1:${address.port}/agents/slack/install`);
+    const redirectResponse = await fetch(
+      `http://127.0.0.1:${address.port}/agents/slack/oauth_redirect`,
+    );
+
+    expect(installResponse.status).toBe(200);
+    expect(redirectResponse.status).toBe(200);
+    expect(delegatedPaths).toEqual(["/agents/slack/install", "/agents/slack/oauth_redirect"]);
+  });
+
+  it("does not match legacy Slack route defaults without explicit overrides", async () => {
+    const server = createAppServer(settings, {
+      slackGateway: {
+        async close() {},
+        handle(_request, response) {
+          response.writeHead(200, { "content-type": "text/plain" });
+          response.end("ok");
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/slack/events`, {
+      method: "POST",
+    });
+
+    expect(response.status).toBe(404);
   });
 
   it("delegates OAuth routes to the configured OAuth gateway", async () => {

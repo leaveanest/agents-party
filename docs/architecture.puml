@@ -21,7 +21,7 @@ package "Heroku" {
   rectangle "Heroku App\nNode.js buildpack + Procfile" as heroku_app {
     package "agents-party Application" {
       component "Node HTTP Server" as node_app
-      component "Slack Bolt Gateway\nPOST /slack/events" as slack_gateway
+      component "Slack Bolt Gateway\nPOST /agents/slack/events" as slack_gateway
       component "Slack Agent Job Queue\nBullMQ producer" as slack_job_producer
       component "Slack Agent Worker\nBullMQ consumer" as slack_agent_worker
       component "Google OAuth Router\nGET /oauth/google/start\nGET /oauth/google/callback" as google_oauth_router
@@ -57,7 +57,7 @@ package "Heroku" {
 slack_user --> slack : use app
 slack --> heroku_app : HTTPS events and interactions
 heroku_app --> node_app
-node_app --> slack_gateway : /slack/events
+node_app --> slack_gateway : /agents/slack/events
 node_app --> google_oauth_router : /oauth/google/*
 node_app --> salesforce_oauth_router : /oauth/salesforce/*
 node_app --> migration_runner : vp run migrate

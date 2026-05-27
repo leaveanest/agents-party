@@ -4,9 +4,9 @@ The Slack ingress is implemented with Bolt for JavaScript/TypeScript. There is n
 
 ## Endpoints
 
-- `POST /slack/events`: Slack Events API, handled by Bolt `HTTPReceiver`.
-- `GET /slack/install`: Slack OAuth install entrypoint when OAuth install settings are present.
-- `GET /slack/oauth_redirect`: Slack OAuth redirect endpoint when OAuth install settings are present.
+- `POST /agents/slack/events`: Slack Events API, handled by Bolt `HTTPReceiver`.
+- `GET /agents/slack/install`: Slack OAuth install entrypoint when OAuth install settings are present.
+- `GET /agents/slack/oauth_redirect`: Slack OAuth redirect endpoint when OAuth install settings are present.
 
 The route paths are configurable with `SLACK_EVENTS_PATH`, `SLACK_INSTALL_PATH`, and `SLACK_OAUTH_REDIRECT_PATH`.
 

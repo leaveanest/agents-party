@@ -108,9 +108,10 @@ function buildAppOptions(settings: AppSettings, installationStore: InstallationS
   if (settings.slackSigningSecret === undefined) {
     throw new Error("SLACK_SIGNING_SECRET is required for Slack app setup.");
   }
+  const { slackRoutes } = settings;
 
   const options: AppOptions = {
-    endpoints: settings.slackEventsPath,
+    endpoints: slackRoutes.eventsPath,
     ignoreSelf: true,
     processBeforeResponse: false,
     signingSecret: settings.slackSigningSecret,
@@ -122,8 +123,8 @@ function buildAppOptions(settings: AppSettings, installationStore: InstallationS
     options.installationStore = installationStore;
     options.installerOptions = {
       authVersion: "v2",
-      installPath: settings.slackInstallPath,
-      redirectUriPath: settings.slackOAuthRedirectPath,
+      installPath: slackRoutes.installPath,
+      redirectUriPath: slackRoutes.oauthRedirectPath,
       userScopes: settings.slackUserScopes,
     };
     options.scopes = settings.slackScopes;

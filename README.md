@@ -231,9 +231,9 @@ SLACK_CLIENT_SECRET=...
 SLACK_STATE_SECRET=...
 SLACK_SCOPES=app_mentions:read,assistant:write,channels:history,channels:join,channels:read,chat:write,files:read,files:write,groups:history,groups:read,im:history,im:read,mpim:history,mpim:read,reactions:read,users:read
 SLACK_USER_SCOPES=channels:history,groups:history,im:history,mpim:history,search:read.files,search:read.im,search:read.mpim,search:read.private,search:read.public,search:read.users,users:read,users:read.email
-SLACK_EVENTS_PATH=/slack/events
-SLACK_INSTALL_PATH=/slack/install
-SLACK_OAUTH_REDIRECT_PATH=/slack/oauth_redirect
+SLACK_EVENTS_PATH=/agents/slack/events
+SLACK_INSTALL_PATH=/agents/slack/install
+SLACK_OAUTH_REDIRECT_PATH=/agents/slack/oauth_redirect
 ```
 
 Model and specialist selection:

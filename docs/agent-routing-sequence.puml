@@ -12,7 +12,7 @@ participant "Slack" as slack
 participant "Slack Conversations API" as slack_api
 
 box "Heroku"
-  participant "Slack Events Endpoint\nPOST /slack/events" as slack_events_endpoint
+  participant "Slack Events Endpoint\nPOST /agents/slack/events" as slack_events_endpoint
   participant "Mention Handler" as mention_handler
   participant "Message Handler" as message_handler
   participant "Routing Resolver" as routing_resolver

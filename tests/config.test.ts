@@ -43,11 +43,16 @@ describe("loadSettings", () => {
       slackClientSecret: undefined,
       slackAgentQueueEnabled: false,
       slackEnabled: false,
-      slackEventsPath: "/slack/events",
+      slackEventsPath: "/agents/slack/events",
       slackInstallationStoreEnabled: false,
-      slackInstallPath: "/slack/install",
+      slackInstallPath: "/agents/slack/install",
       slackOAuthInstallEnabled: false,
-      slackOAuthRedirectPath: "/slack/oauth_redirect",
+      slackOAuthRedirectPath: "/agents/slack/oauth_redirect",
+      slackRoutes: {
+        eventsPath: "/agents/slack/events",
+        installPath: "/agents/slack/install",
+        oauthRedirectPath: "/agents/slack/oauth_redirect",
+      },
       slackScopes: [
         "app_mentions:read",
         "assistant:write",
@@ -243,6 +248,23 @@ describe("loadSettings", () => {
 
     expect(settings.slackOAuthInstallEnabled).toBe(true);
     expect(settings.slackUserScopes).toEqual(["chat:write", "users:read"]);
+  });
+
+  it("allows Slack route paths to be overridden for migration windows", () => {
+    const settings = loadSettings({
+      SLACK_EVENTS_PATH: "/slack/events",
+      SLACK_INSTALL_PATH: "/slack/install",
+      SLACK_OAUTH_REDIRECT_PATH: "/slack/oauth_redirect",
+    });
+
+    expect(settings.slackRoutes).toEqual({
+      eventsPath: "/slack/events",
+      installPath: "/slack/install",
+      oauthRedirectPath: "/slack/oauth_redirect",
+    });
+    expect(settings.slackEventsPath).toBe("/slack/events");
+    expect(settings.slackInstallPath).toBe("/slack/install");
+    expect(settings.slackOAuthRedirectPath).toBe("/slack/oauth_redirect");
   });
 
   it("enables Google OAuth routes when all required secrets and database are configured", () => {
