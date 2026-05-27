@@ -69,6 +69,7 @@ describe("PostgresRssFeedRepository", () => {
         processedAt: new Date("2026-05-12T00:00:00.000Z"),
         slackChannelId: "C1",
         subscriptionId: "00000000-0000-4000-8000-000000000001",
+        teamId: "T1",
       }),
     ).resolves.toBe(true);
 
@@ -76,6 +77,7 @@ describe("PostgresRssFeedRepository", () => {
       "on conflict (subscription_id, article_key) do nothing",
     );
     expect(pool.queries[0]?.values).toContain("url:abc");
+    expect(pool.queries[0]?.values).toContain("T1");
   });
 
   it("releases only unposted reserved articles", async () => {

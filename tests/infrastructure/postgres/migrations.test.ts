@@ -41,6 +41,7 @@ describe("PostgresMigrationRunner", () => {
       "20260515_0009",
       "20260519_0010",
       "20260525_0011",
+      "20260526_0012",
     ]);
     expect(postgresMigrations[0]?.upSql).toContain(
       "create table if not exists slack_installations",
@@ -84,6 +85,8 @@ describe("PostgresMigrationRunner", () => {
     expect(postgresMigrations[10]?.upSql).toContain(
       "drop table if exists rss_article_content_cache",
     );
+    expect(postgresMigrations[11]?.upSql).toContain("add column if not exists team_id");
+    expect(postgresMigrations[11]?.upSql).toContain("alter column team_id set not null");
   });
 
   it("requires explicit Alembic baseline when legacy metadata is present", async () => {

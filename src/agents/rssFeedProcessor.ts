@@ -195,6 +195,7 @@ export class RssFeedProcessor {
           publishedAt: candidate.article.publishedAt,
           slackChannelId: subscription.channelId,
           subscriptionId: subscription.id,
+          teamId: subscription.teamId,
         });
         if (!reserved) {
           continue;
@@ -311,6 +312,7 @@ export class RssFeedProcessor {
           publishedAt: candidate.article.publishedAt,
           slackChannelId: subscription.channelId,
           subscriptionId: subscription.id,
+          teamId: subscription.teamId,
         });
       } catch (error) {
         failedArticles += 1;

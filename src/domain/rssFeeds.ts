@@ -38,6 +38,7 @@ export type RssProcessedArticle = {
   slackChannelId: string;
   slackMessageTs?: string;
   subscriptionId: string;
+  teamId: string;
 };
 
 export type RssFeedFetchCacheEntry = {

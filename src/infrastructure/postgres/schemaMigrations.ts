@@ -414,4 +414,24 @@ export const postgresMigrations: readonly PostgresMigration[] = [
       drop table if exists rss_article_content_cache;
     `,
   },
+  {
+    id: "20260526_0012",
+    name: "rss_processed_articles_team_id",
+    upSql: `
+      alter table rss_processed_articles
+        add column if not exists team_id text;
+
+      update rss_processed_articles processed
+      set team_id = subscriptions.team_id
+      from rss_feed_subscriptions subscriptions
+      where processed.subscription_id = subscriptions.id
+        and processed.team_id is null;
+
+      alter table rss_processed_articles
+        alter column team_id set not null;
+
+      create index if not exists ix_rss_processed_articles_team_subscription
+        on rss_processed_articles (team_id, subscription_id, processed_at desc);
+    `,
+  },
 ];

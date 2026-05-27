@@ -150,15 +150,17 @@ export class PostgresRssFeedRepository implements RssFeedRepository {
     const result = await this.pool.query<{ id: string }>(
       `
         insert into rss_processed_articles
-          (id, subscription_id, article_key, article_url, published_at,
+          (id, subscription_id, team_id, article_key, article_url, published_at,
            model_id, model_source, llm_output, slack_channel_id,
            slack_message_ts, processed_at, payload)
-        values ($12, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         on conflict (subscription_id, article_key) do nothing
         returning id
       `,
       [
+        randomUUID(),
         article.subscriptionId,
+        article.teamId,
         article.articleKey,
         article.articleUrl,
         article.publishedAt ?? null,
@@ -169,7 +171,6 @@ export class PostgresRssFeedRepository implements RssFeedRepository {
         article.slackMessageTs ?? null,
         article.processedAt,
         JSON.stringify(article.payload),
-        randomUUID(),
       ],
     );
     return result.rows.length === 1;
