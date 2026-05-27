@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AppSettings } from "./config.js";
 import { buildHealthPayload } from "./http/health.js";
 import type { OAuthHttpGateway } from "./integrations/oauth/http.js";
-import type { SlackGateway } from "./slack/runtime/gateway.js";
+import type { SlackGateway } from "./slack/app.js";
 
 export type AppServerDependencies = {
   oauthGateway?: OAuthHttpGateway;

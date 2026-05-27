@@ -10,15 +10,15 @@ import {
 } from "@slack/bolt";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import type { AppSettings } from "../../config.js";
+import type { AppSettings } from "../config.js";
+import { PostgresSlackInstallationRepository } from "../infrastructure/postgres/slackInstallationRepository.js";
+import { InMemorySlackEventDeduplicator, type SlackEventDeduplicator } from "./idempotency.js";
 import {
   createMigrationGapSlackHandlers,
   registerSlackEventHandlers,
   type SlackEventFeatureHandlers,
-} from "../apps/agents/events.js";
-import { PostgresSlackInstallationRepository } from "../../infrastructure/postgres/slackInstallationRepository.js";
-import { InMemorySlackEventDeduplicator, type SlackEventDeduplicator } from "../idempotency.js";
-import { RepositorySlackInstallationStore } from "../installationStore.js";
+} from "./events.js";
+import { RepositorySlackInstallationStore } from "./installationStore.js";
 
 export type SlackGateway = {
   close(): Promise<void>;

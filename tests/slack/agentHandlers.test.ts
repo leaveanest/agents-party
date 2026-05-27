@@ -13,7 +13,7 @@ import {
   createAgentSlackHandlers,
   postAgentResult,
   processSlackAgentJob,
-} from "../../src/slack/apps/agents/handlers.js";
+} from "../../src/slack/agentHandlers.js";
 
 const SMALL_PNG_BYTES = Uint8Array.from(
   Buffer.from(

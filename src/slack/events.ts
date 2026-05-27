@@ -8,8 +8,8 @@ import type {
   StringIndexed,
 } from "@slack/bolt";
 
-import type { SlackEventDeduplicator } from "../../idempotency.js";
-import { readSlackEventId } from "../../idempotency.js";
+import type { SlackEventDeduplicator } from "./idempotency.js";
+import { readSlackEventId } from "./idempotency.js";
 import {
   FEATURE_SETTINGS_CONFIGURE_ACTION_ID,
   FEATURE_SETTINGS_MODAL_CALLBACK_ID,
