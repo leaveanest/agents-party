@@ -11,7 +11,9 @@ describe("createSlackMcpToolSet", () => {
     const handle = await createSlackMcpToolSet({
       clientFactory: fakeClientFactory({
         extra_slack_tool: fakeTool(),
+        slack_create_canvas: fakeTool(),
         slack_read_channel: fakeTool(),
+        slack_read_canvas: fakeTool(),
         slack_read_thread: fakeTool(),
         slack_read_user_profile: fakeTool(),
         slack_search_public: fakeTool(),
@@ -21,6 +23,8 @@ describe("createSlackMcpToolSet", () => {
     });
 
     expect(Object.keys(handle?.tools ?? {})).toEqual([
+      "slack_create_canvas",
+      "slack_read_canvas",
       "slack_search_public",
       "slack_read_channel",
       "slack_read_thread",

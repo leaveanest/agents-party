@@ -45,6 +45,8 @@ export type SlackMcpToolSetOptions = {
 const DEFAULT_SLACK_MCP_TOOLS_LIST_TIMEOUT_MS = 2500;
 
 const allowedSlackMcpToolNames = [
+  "slack_create_canvas",
+  "slack_read_canvas",
   "slack_search_public",
   "slack_read_channel",
   "slack_read_thread",

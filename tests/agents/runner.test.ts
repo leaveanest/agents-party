@@ -666,56 +666,6 @@ describe("AgentRunner", () => {
     expect(result.toolResults).toHaveLength(1);
   });
 
-  it("uses AI SDK-executed tool results for generated Canvas outputs", async () => {
-    const router = new FakeProviderRouter({
-      content: "",
-      toolResults: [
-        {
-          input: { markdown: "# Summary", title: "Summary" },
-          output: {
-            canvas: {
-              kind: "canvas",
-              markdown: "# Summary",
-              status: "generated",
-              target: {
-                channelId: "C1",
-                teamId: "T1",
-                threadTs: "1.0",
-              },
-              title: "Summary",
-            },
-            message: "Canvas generated.",
-            ok: true,
-          },
-          toolCallId: "call-1",
-          toolName: "generate_canvas",
-        },
-      ],
-    });
-    const runner = new AgentRunner({
-      defaultModelId: model.id,
-      providerRouter: router,
-    });
-
-    const result = await runner.run({
-      channelId: "C1",
-      messageTs: "1.0",
-      teamId: "T1",
-      text: "このスレッドをCanvasにまとめて",
-      userId: "U1",
-    });
-
-    expect(result.message).toBe("Canvas generated.");
-    expect(result.structuredResult).toMatchObject({
-      canvas: {
-        kind: "canvas",
-        markdown: "# Summary",
-        title: "Summary",
-      },
-    });
-    expect(result.toolResults).toHaveLength(1);
-  });
-
   it("allows multiple tool rounds before the final provider response", async () => {
     const registry = new AgentToolRegistry([
       {
@@ -837,6 +787,77 @@ describe("AgentRunner", () => {
 
     expect(router.requests[0]?.aiSdkTools?.slack_search_public).toBe(mcpTools.slack_search_public);
     expect(closed).toEqual(["closed"]);
+  });
+
+  it("uses Slack MCP canvas tools when they are available and preserves the Canvas link", async () => {
+    const router = new FakeProviderRouter({
+      content: "Canvasを作成しました。",
+      toolResults: [
+        {
+          input: { markdown: "# Summary", title: "Summary" },
+          output: {
+            content: [{ text: "Canvas created: https://app.slack.com/docs/T1/F123", type: "text" }],
+          },
+          toolCallId: "call-1",
+          toolName: "slack_create_canvas",
+        },
+      ],
+    });
+    const mcpTools: ToolSet = {
+      slack_create_canvas: {
+        description: "Create a Slack Canvas through MCP.",
+        execute: async () => ({
+          content: [{ text: "Canvas created: https://app.slack.com/docs/T1/F123", type: "text" }],
+        }),
+        inputSchema: jsonSchema({ type: "object" }),
+        type: "dynamic",
+      } as ToolSet[string],
+    };
+    const runner = new AgentRunner({
+      aiSdkToolSetFactory: () => ({
+        close: async () => {},
+        tools: mcpTools,
+      }),
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "このスレッドをCanvasにして",
+      userId: "U1",
+    });
+
+    expect(result.message).toContain("https://app.slack.com/docs/T1/F123");
+    expect(router.requests[0]?.aiSdkTools?.slack_create_canvas).toBe(mcpTools.slack_create_canvas);
+  });
+
+  it("returns a user-facing authorization message for Canvas requests without MCP canvas tools", async () => {
+    const router = new FakeProviderRouter({
+      content: "should not run",
+    });
+    const runner = new AgentRunner({
+      aiSdkToolSetFactory: () => ({
+        close: async () => {},
+        tools: {},
+      }),
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "このスレッドをCanvasにして",
+      userId: "U1",
+    });
+
+    expect(result.message).toContain("Slack MCPのユーザー認可");
+    expect(result.message).toContain("canvases:read / canvases:write");
+    expect(router.requests).toEqual([]);
   });
 
   it("continues without AI SDK toolsets when preparing them fails", async () => {

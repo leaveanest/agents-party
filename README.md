@@ -229,15 +229,16 @@ SLACK_SIGNING_SECRET=...
 SLACK_CLIENT_ID=...
 SLACK_CLIENT_SECRET=...
 SLACK_STATE_SECRET=...
-SLACK_SCOPES=app_mentions:read,assistant:write,canvases:write,channels:history,channels:join,channels:read,chat:write,files:read,files:write,groups:history,groups:read,im:history,im:read,mpim:history,mpim:read,reactions:read,users:read
-SLACK_USER_SCOPES=channels:history,groups:history,im:history,mpim:history,search:read.files,search:read.im,search:read.mpim,search:read.private,search:read.public,search:read.users,users:read,users:read.email
+SLACK_SCOPES=app_mentions:read,assistant:write,channels:history,channels:join,channels:read,chat:write,files:read,files:write,groups:history,groups:read,im:history,im:read,mpim:history,mpim:read,reactions:read,users:read
+SLACK_USER_SCOPES=canvases:read,canvases:write,channels:history,groups:history,im:history,mpim:history,search:read.files,search:read.im,search:read.mpim,search:read.private,search:read.public,search:read.users,users:read,users:read.email
 SLACK_EVENTS_PATH=/slack/events
 SLACK_INSTALL_PATH=/slack/install
 SLACK_OAUTH_REDIRECT_PATH=/slack/oauth_redirect
 ```
 
-Adding or changing Slack bot scopes, such as `canvases:write` for Canvas generation, requires
-reinstalling the Slack app so existing workspace installations receive the new grant.
+Adding or changing Slack user scopes, such as `canvases:read` and `canvases:write` for Slack MCP
+Canvas tools, requires reinstalling the Slack app so existing workspace installations receive the
+new grants.
 
 Model and specialist selection:
 

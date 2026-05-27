@@ -51,7 +51,6 @@ describe("loadSettings", () => {
       slackScopes: [
         "app_mentions:read",
         "assistant:write",
-        "canvases:write",
         "channels:history",
         "channels:join",
         "channels:read",
@@ -70,6 +69,8 @@ describe("loadSettings", () => {
       slackSigningSecret: undefined,
       slackStateSecret: undefined,
       slackUserScopes: [
+        "canvases:read",
+        "canvases:write",
         "channels:history",
         "groups:history",
         "im:history",

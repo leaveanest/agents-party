@@ -1,4 +1,3 @@
-import { ErrorCode } from "@slack/web-api";
 import { describe, expect, it } from "vite-plus/test";
 
 import { AgentRunnerExecutionError } from "../../src/agents/runner.js";
@@ -4982,27 +4981,17 @@ describe("createAgentSlackHandlers", () => {
     expect(stops).toEqual([undefined]);
   });
 
-  it("rethrows retryable Canvas publish failures after Bolt streaming starts", async () => {
+  it("appends final streamed message suffixes such as MCP Canvas links", async () => {
     const runner = {
       async run() {
         throw new Error("run should not be called when live streaming is available.");
       },
       async *runStream() {
-        yield { text: "drafting ", type: "text-delta" };
+        yield { text: "Canvasを作成しました。", type: "text-delta" };
         yield {
           result: {
             decision: { action: "respond", reason: "test" },
-            message: "Canvas generated.",
-            structuredResult: {
-              canvas: {
-                kind: "canvas",
-                markdown: "# Summary",
-                status: "generated",
-                title: "Summary",
-              },
-              message: "Canvas generated.",
-              ok: true,
-            },
+            message: "こちらです:\nCanvasを作成しました。\nhttps://app.slack.com/docs/T1/F123",
             toolResults: [],
           },
           type: "result",
@@ -5010,49 +4999,38 @@ describe("createAgentSlackHandlers", () => {
       },
     };
     const appends: unknown[] = [];
-    const stops: unknown[] = [];
     const handlers = createAgentSlackHandlers(runner as never);
 
-    await expect(
-      handlers.handleAppMention({
-        body: { team_id: "T1" },
-        client: {
-          canvases: {
-            create: async () => {
-              throw { code: ErrorCode.RateLimitedError };
-            },
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async () => ({}),
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> canvas",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+      sayStream() {
+        return {
+          append: async (payload: unknown) => {
+            appends.push(payload);
+            return null;
           },
-          chat: {
-            postMessage: async () => ({}),
-          },
-        },
-        context: { botUserId: "B1" },
-        event: {
-          channel: "C1",
-          text: "<@B1> Canvasにして",
-          ts: "1712345678.000100",
-          user: "U1",
-        },
-        logger: { info() {}, warn() {} },
-        sayStream() {
-          return {
-            append: async (payload: unknown) => {
-              appends.push(payload);
-              return null;
-            },
-            stop: async (payload?: unknown) => {
-              stops.push(payload);
-              return { ok: true };
-            },
-          };
-        },
-      } as never),
-    ).rejects.toMatchObject({
-      code: "rate_limited",
-    });
+          stop: async () => ({ ok: true }),
+        };
+      },
+    } as never);
 
-    expect(appends).toEqual([{ markdown_text: "drafting " }]);
-    expect(stops).toEqual([undefined]);
+    expect(appends).toEqual([
+      { markdown_text: "Canvasを作成しました。" },
+      { markdown_text: "\nhttps://app.slack.com/docs/T1/F123" },
+    ]);
   });
 
   it("queues app mentions instead of running the AgentRunner when a job queue is configured", async () => {
@@ -6610,290 +6588,6 @@ describe("createAgentSlackHandlers", () => {
       expect.objectContaining({
         filename: "generated-image.webp",
       }),
-    ]);
-  });
-
-  it("creates a Slack Canvas from generated Canvas results", async () => {
-    const canvasCreates: unknown[] = [];
-    const canvasAccessSets: unknown[] = [];
-    const posts: unknown[] = [];
-
-    await postAgentResult({
-      channel: "C1",
-      client: {
-        canvases: {
-          create: async (payload: unknown) => {
-            canvasCreates.push(payload);
-            return { canvas_id: "F123", ok: true };
-          },
-          access: {
-            set: async (payload: unknown) => {
-              canvasAccessSets.push(payload);
-              return { ok: true };
-            },
-          },
-        },
-        chat: {
-          postMessage: async (payload: unknown) => {
-            posts.push(payload);
-            return { ok: true };
-          },
-        },
-      } as never,
-      logger: { info() {} },
-      result: {
-        decision: { action: "respond", reason: "test" },
-        message: "Canvas generated.",
-        structuredResult: {
-          canvas: {
-            kind: "canvas",
-            markdown: "# Summary\n\n- Decision",
-            status: "generated",
-            target: {
-              channelId: "C1",
-              teamId: "T1",
-              threadTs: "1712345678.000100",
-            },
-            title: "Summary",
-          },
-          message: "Canvas generated.",
-          ok: true,
-        },
-        toolResults: [],
-      },
-      teamId: "T1",
-      text: "Canvas generated.",
-      threadTs: "1712345678.000100",
-    });
-
-    expect(canvasCreates).toEqual([
-      {
-        document_content: {
-          markdown: "# Summary\n\n- Decision",
-          type: "markdown",
-        },
-        title: "Summary",
-      },
-    ]);
-    expect(canvasAccessSets).toEqual([
-      {
-        access_level: "read",
-        canvas_id: "F123",
-        channel_ids: ["C1"],
-      },
-    ]);
-    expect(posts).toEqual([
-      expect.objectContaining({
-        channel: "C1",
-        text: "Canvas generated.\nCanvas created: [F123](https://app.slack.com/docs/T1/F123)",
-        thread_ts: "1712345678.000100",
-      }),
-    ]);
-  });
-
-  it("posts a user-facing message when Slack Canvas publishing fails", async () => {
-    const posts: unknown[] = [];
-
-    await postAgentResult({
-      channel: "C1",
-      client: {
-        canvases: {
-          create: async () => {
-            throw {
-              code: ErrorCode.PlatformError,
-              data: { error: "missing_scope" },
-            };
-          },
-        },
-        chat: {
-          postMessage: async (payload: unknown) => {
-            posts.push(payload);
-            return { ok: true };
-          },
-        },
-      } as never,
-      logger: { warn() {} },
-      result: {
-        decision: { action: "respond", reason: "test" },
-        message: "Canvas generated.",
-        structuredResult: {
-          canvas: {
-            kind: "canvas",
-            markdown: "# Summary",
-            status: "generated",
-            title: "Summary",
-          },
-          message: "Canvas generated.",
-          ok: true,
-        },
-        toolResults: [],
-      },
-      teamId: "T1",
-      text: "Canvas generated.",
-      threadTs: "1712345678.000100",
-    });
-
-    expect(posts).toEqual([
-      expect.objectContaining({
-        channel: "C1",
-        text: expect.stringContaining("canvases:write"),
-        thread_ts: "1712345678.000100",
-      }),
-    ]);
-  });
-
-  it("rethrows retryable Slack Canvas publishing failures", async () => {
-    const posts: unknown[] = [];
-
-    await expect(
-      postAgentResult({
-        channel: "C1",
-        client: {
-          canvases: {
-            create: async () => {
-              throw {
-                code: ErrorCode.RateLimitedError,
-              };
-            },
-          },
-          chat: {
-            postMessage: async (payload: unknown) => {
-              posts.push(payload);
-              return { ok: true };
-            },
-          },
-        } as never,
-        logger: { warn() {} },
-        result: {
-          decision: { action: "respond", reason: "test" },
-          message: "Canvas generated.",
-          structuredResult: {
-            canvas: {
-              kind: "canvas",
-              markdown: "# Summary",
-              status: "generated",
-              title: "Summary",
-            },
-            message: "Canvas generated.",
-            ok: true,
-          },
-          toolResults: [],
-        },
-        teamId: "T1",
-        text: "Canvas generated.",
-        threadTs: "1712345678.000100",
-      }),
-    ).rejects.toMatchObject({
-      code: "rate_limited",
-    });
-    expect(posts).toEqual([]);
-  });
-
-  it("does not retry when Slack Canvas sharing fails after creation", async () => {
-    const posts: unknown[] = [];
-
-    await postAgentResult({
-      channel: "C1",
-      client: {
-        canvases: {
-          create: async () => ({ canvas_id: "F123", ok: true }),
-          access: {
-            set: async () => {
-              throw {
-                code: ErrorCode.PlatformError,
-                data: { error: "no_permission" },
-              };
-            },
-          },
-        },
-        chat: {
-          postMessage: async (payload: unknown) => {
-            posts.push(payload);
-            return { ok: true };
-          },
-        },
-      } as never,
-      logger: { info() {}, warn() {} },
-      result: {
-        decision: { action: "respond", reason: "test" },
-        message: "Canvas generated.",
-        structuredResult: {
-          canvas: {
-            kind: "canvas",
-            markdown: "# Summary",
-            status: "generated",
-            title: "Summary",
-          },
-          message: "Canvas generated.",
-          ok: true,
-        },
-        toolResults: [],
-      },
-      teamId: "T1",
-      text: "Canvas generated.",
-      threadTs: "1712345678.000100",
-    });
-
-    expect(posts).toEqual([
-      expect.objectContaining({
-        text: expect.stringContaining("https://app.slack.com/docs/T1/F123"),
-      }),
-    ]);
-  });
-
-  it("does not retry when Slack Canvas confirmation posting fails after creation", async () => {
-    const warnings: unknown[] = [];
-
-    await expect(
-      postAgentResult({
-        channel: "C1",
-        client: {
-          canvases: {
-            create: async () => ({ canvas_id: "F123", ok: true }),
-            access: {
-              set: async () => ({ ok: true }),
-            },
-          },
-          chat: {
-            postMessage: async () => {
-              throw { code: ErrorCode.RateLimitedError };
-            },
-          },
-        } as never,
-        logger: {
-          info() {},
-          warn(message: string, metadata: unknown) {
-            warnings.push([message, metadata]);
-          },
-        },
-        result: {
-          decision: { action: "respond", reason: "test" },
-          message: "Canvas generated.",
-          structuredResult: {
-            canvas: {
-              kind: "canvas",
-              markdown: "# Summary",
-              status: "generated",
-              title: "Summary",
-            },
-            message: "Canvas generated.",
-            ok: true,
-          },
-          toolResults: [],
-        },
-        teamId: "T1",
-        text: "Canvas generated.",
-        threadTs: "1712345678.000100",
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(warnings).toEqual([
-      [
-        "Failed to post generated Canvas confirmation to Slack.",
-        expect.objectContaining({
-          canvasId: "F123",
-        }),
-      ],
     ]);
   });
 
@@ -8475,82 +8169,6 @@ describe("createAgentSlackHandlers", () => {
       },
     ]);
     expect(appends).toEqual([{ markdown_text: "worker " }, { markdown_text: "stream" }]);
-    expect(stops).toEqual([undefined]);
-  });
-
-  it("rethrows retryable Canvas publish failures after queued streaming starts", async () => {
-    const runner = {
-      async run() {
-        throw new Error("run should not be called when worker streaming is available.");
-      },
-      async *runStream() {
-        yield { text: "worker ", type: "text-delta" };
-        yield {
-          result: {
-            decision: { action: "respond", reason: "test" },
-            message: "Canvas generated.",
-            structuredResult: {
-              canvas: {
-                kind: "canvas",
-                markdown: "# Summary",
-                status: "generated",
-                title: "Summary",
-              },
-              message: "Canvas generated.",
-              ok: true,
-            },
-            toolResults: [],
-          },
-          type: "result",
-        };
-      },
-    };
-    const appends: unknown[] = [];
-    const stops: unknown[] = [];
-
-    await expect(
-      processSlackAgentJob(
-        {
-          channelId: "C1",
-          eventType: "app_mention",
-          messageTs: "1712345678.000100",
-          teamId: "T1",
-          text: "hello",
-          threadTs: "1712345678.000100",
-          userId: "U1",
-        },
-        {
-          client: {
-            canvases: {
-              create: async () => {
-                throw { code: ErrorCode.RateLimitedError };
-              },
-            },
-            chat: {
-              postMessage: async () => ({}),
-            },
-            chatStream: () => ({
-              append: async (payload: unknown) => {
-                appends.push(payload);
-                return null;
-              },
-              stop: async (payload?: unknown) => {
-                stops.push(payload);
-                return { ok: true };
-              },
-            }),
-            conversations: { replies: async () => ({ messages: [] }) },
-            filesUploadV2: async () => ({}),
-          } as never,
-          logger: { error() {}, info() {}, warn() {} },
-          runner: runner as never,
-        },
-      ),
-    ).rejects.toMatchObject({
-      code: "rate_limited",
-    });
-
-    expect(appends).toEqual([{ markdown_text: "worker " }]);
     expect(stops).toEqual([undefined]);
   });
 

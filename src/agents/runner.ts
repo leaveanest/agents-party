@@ -20,7 +20,6 @@ import { createNativeProviderAdapters } from "../providers/nativeProviderAdapter
 import { ProviderRouter } from "../providers/providerRouter.js";
 import { normalizeReasoningEffort } from "../providers/reasoningOptions.js";
 import type { WorkspaceFeatureSettingsRepository } from "../repositories/workspaceFeatureSettings.js";
-import { createCanvasGenerationAgentTools } from "./canvasGeneration/tools.js";
 import {
   createMediaGenerationAgentTools,
   defaultImageGenerationFallbackModelIds,
@@ -150,7 +149,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "If a request is ambiguous but low risk, make a reasonable assumption and state it briefly. Ask a clarifying question before irreversible, privileged, or high-impact actions.",
   "When Slack workspace search is needed and slack_real_time_search is available, prefer it. If it is unavailable and slack_search_public is available, use slack_search_public as a fallback.",
   "Use slack_read_channel or slack_read_thread when those tools are available and you only need context from the current channel or thread.",
-  "When the user asks to create, generate, or summarize content into a Slack Canvas, use the generate_canvas tool when it is available.",
+  "When the user asks to create, generate, read, or summarize content into a Slack Canvas, use the Slack MCP canvas tools when they are available.",
   "Summarize tool results instead of dumping raw data or internal identifiers.",
   "Do not expose credentials, tokens, or sensitive identifiers in Slack replies.",
   "When SORACOM tools are available and the user asks for SORACOM SIM, SoraCam, or device information, use the relevant SORACOM discovery or status tools before asking for details.",
@@ -280,6 +279,16 @@ export class AgentRunner {
       this.options.toolRegistryFactory?.(invocation, model) ?? this.options.toolRegistry;
     const toolResults: AgentToolResult[] = [];
     try {
+      const unavailableCanvasMessage = slackCanvasUnavailableMessage(invocation, aiSdkTools);
+      if (unavailableCanvasMessage !== undefined) {
+        return {
+          model,
+          result: {
+            content: unavailableCanvasMessage,
+          },
+          toolResults,
+        };
+      }
       let history = buildAgentHistory({
         invocation,
         toolResults,
@@ -353,6 +362,15 @@ export class AgentRunner {
       this.options.toolRegistryFactory?.(invocation, model) ?? this.options.toolRegistry;
     const toolResults: AgentToolResult[] = [];
     try {
+      const unavailableCanvasMessage = slackCanvasUnavailableMessage(invocation, aiSdkTools);
+      if (unavailableCanvasMessage !== undefined) {
+        return {
+          result: {
+            content: unavailableCanvasMessage,
+          },
+          toolResults,
+        };
+      }
       let history = buildAgentHistory({
         invocation,
         toolResults,
@@ -679,15 +697,6 @@ function createDefaultAgentTools(input: {
       modelRegistry,
       onGenerationStart: runtimeOptions.onImageGenerationStart,
     }),
-    ...(toolSelection.kind !== "all"
-      ? []
-      : createCanvasGenerationAgentTools({
-          context: {
-            channelId: invocation.channelId,
-            teamId: invocation.teamId,
-            threadTs: invocation.threadTs ?? invocation.messageTs,
-          },
-        })),
     ...(toolSelection.kind !== "all"
       ? []
       : createSpeechGenerationAgentTools({
@@ -1028,10 +1037,11 @@ function normalizeRunnerResult(
 ): AgentRunnerResult {
   const modelSummary = modelTrace(model);
   const structuredResult = generatedArtifactToolOutput(toolResults);
+  const slackCanvasUrl = slackCreateCanvasUrlFromToolResults(toolResults);
   return {
     decision,
     message: agentTextResultSchema.parse({
-      message: nonEmptyAgentMessage(result, structuredResult),
+      message: nonEmptyAgentMessage(result, structuredResult, slackCanvasUrl),
     }).message,
     model: modelSummary,
     raw: result.raw,
@@ -1066,10 +1076,6 @@ function generatedArtifactToolOutput(toolResults: AgentToolResult[]): JsonValue 
     if (!isJsonObject(result.output) || result.output.ok !== true) {
       continue;
     }
-    const canvas = result.output.canvas;
-    if (isJsonObject(canvas) && canvas.kind === "canvas") {
-      return result.output;
-    }
     const media = result.output.media;
     if (
       isJsonObject(media) &&
@@ -1079,6 +1085,39 @@ function generatedArtifactToolOutput(toolResults: AgentToolResult[]): JsonValue 
     }
   }
   return undefined;
+}
+
+function slackCanvasUnavailableMessage(
+  invocation: SlackAgentInvocation,
+  aiSdkTools: ToolSet | undefined,
+): string | undefined {
+  if (!looksLikeSlackCanvasCreationRequest(invocation.text)) {
+    return undefined;
+  }
+  if (aiSdkTools?.slack_create_canvas !== undefined) {
+    return undefined;
+  }
+  if (containsJapanese(invocation.text)) {
+    return "Slack Canvasを作成するには、Slack MCPのユーザー認可が必要です。アプリを canvases:read / canvases:write のユーザースコープ付きで再インストールしてから、もう一度試してください。";
+  }
+  return "Creating a Slack Canvas requires Slack MCP user authorization. Reinstall the app with the canvases:read and canvases:write user scopes, then try again.";
+}
+
+function looksLikeSlackCanvasCreationRequest(text: string): boolean {
+  if (!/(canvas|キャンバス)/i.test(text)) {
+    return false;
+  }
+  if (/(create|generate|make|turn|作成|生成|作|して)/i.test(text)) {
+    return true;
+  }
+  return (
+    /summari[sz]e.+\b(into|to|as)\b.+canvas/i.test(text) ||
+    /(canvas|キャンバス).*(に|へ).*(まとめ|要約)/i.test(text)
+  );
+}
+
+function containsJapanese(text: string): boolean {
+  return /[\u3040-\u30ff\u3400-\u9fff]/.test(text);
 }
 
 function mergeStreamToolCalls(
@@ -1096,12 +1135,67 @@ function isJsonObject(value: JsonValue | undefined): value is Record<string, Jso
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function nonEmptyAgentMessage(result: LlmResult, structuredResult?: JsonValue): string {
+function slackCreateCanvasUrlFromToolResults(
+  toolResults: readonly AgentToolResult[],
+): string | undefined {
+  for (const result of [...toolResults].reverse()) {
+    if (result.toolName !== "slack_create_canvas") {
+      continue;
+    }
+    const url = firstSlackCanvasUrl(result.output);
+    if (url !== undefined) {
+      return url;
+    }
+  }
+  return undefined;
+}
+
+function firstSlackCanvasUrl(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return slackCanvasUrlFromText(value);
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const url = firstSlackCanvasUrl(item);
+      if (url !== undefined) {
+        return url;
+      }
+    }
+    return undefined;
+  }
+  if (value === null || typeof value !== "object") {
+    return undefined;
+  }
+  for (const item of Object.values(value)) {
+    const url = firstSlackCanvasUrl(item);
+    if (url !== undefined) {
+      return url;
+    }
+  }
+  return undefined;
+}
+
+function slackCanvasUrlFromText(text: string): string | undefined {
+  return text.match(/https:\/\/app\.slack\.com\/docs\/[A-Z0-9]+\/[A-Z0-9]+/)?.[0];
+}
+
+function withSlackCanvasUrl(message: string, slackCanvasUrl: string | undefined): string {
+  if (slackCanvasUrl === undefined || message.includes(slackCanvasUrl)) {
+    return message;
+  }
+  return `${message.trim()}\n${slackCanvasUrl}`;
+}
+
+function nonEmptyAgentMessage(
+  result: LlmResult,
+  structuredResult?: JsonValue,
+  slackCanvasUrl?: string,
+): string {
   if (result.content.trim().length > 0) {
-    return result.content;
+    return withSlackCanvasUrl(result.content, slackCanvasUrl);
   }
   if (isJsonObject(structuredResult) && typeof structuredResult.message === "string") {
-    return structuredResult.message;
+    return withSlackCanvasUrl(structuredResult.message, slackCanvasUrl);
   }
   if ((result.sources?.length ?? 0) > 0) {
     return "検索は実行されましたが、回答本文が返されませんでした。もう一度お試しください。";
