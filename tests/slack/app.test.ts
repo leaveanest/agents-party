@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 import type { AppSettings } from "../../src/config.js";
-import { createSlackApp } from "../../src/slack/app.js";
+import { createSlackApp } from "../../src/slack/runtime/gateway.js";
 
 const baseSettings: AppSettings = {
   agentModelId: "google:gemini-2.5-flash",

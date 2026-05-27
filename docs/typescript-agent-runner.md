@@ -7,7 +7,7 @@ The runtime is repository-owned:
 - `schemas.ts` defines Zod-validated Slack invocation, agent execution decisions, and structured result contracts.
 - `runner.ts` executes the resolved agent, builds repository domain message history, invokes the `ProviderRouter`, and runs typed model-selected tools.
 - `toolContracts.ts` defines typed tool declarations and execution for model tool calls without depending on external agent-framework tool contracts.
-- `src/slack/agentHandlers.ts` connects `app_mention` events to the TypeScript `AgentRunner` and replies in the Slack thread.
+- `src/slack/apps/agents/handlers.ts` connects `app_mention` events to the TypeScript `AgentRunner` and replies in the Slack thread.
 
 ## Routing Direction
 

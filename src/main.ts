@@ -19,8 +19,8 @@ import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres
 import { PostgresWorkspaceFeatureSettingsRepository } from "./infrastructure/postgres/workspaceFeatureSettingsRepository.js";
 import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
-import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
-import { createSlackGateway } from "./slack/app.js";
+import { createAgentSlackHandlers } from "./slack/apps/agents/handlers.js";
+import { createSlackGateway } from "./slack/runtime/gateway.js";
 import { createSlackInstallationMcpTokenResolver } from "./slack/mcpTokenResolver.js";
 import { createSlackWebClientProvider } from "./slack/webClient.js";
 

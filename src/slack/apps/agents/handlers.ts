@@ -17,9 +17,9 @@ import {
   type AgentRunnerRuntimeOptions,
   type AgentRunnerStreamEvent,
   type AgentRunnerStructuredResult,
-} from "../agents/runner.js";
-import type { JsonValue } from "../domain/messageHistory.js";
-import { normalizeRssFeedUrl, type RssFeedSubscription } from "../domain/rssFeeds.js";
+} from "../../../agents/runner.js";
+import type { JsonValue } from "../../../domain/messageHistory.js";
+import { normalizeRssFeedUrl, type RssFeedSubscription } from "../../../domain/rssFeeds.js";
 import {
   FALLBACK_LOCALE,
   createTranslator,
@@ -27,8 +27,8 @@ import {
   normalizeLocale,
   type Locale,
   type Translator,
-} from "../i18n/index.js";
-import type { CredentialProviderKind } from "../providers/credentials.js";
+} from "../../../i18n/index.js";
+import type { CredentialProviderKind } from "../../../providers/credentials.js";
 import {
   LlmReasoningEffortId,
   llmProviders,
@@ -36,16 +36,16 @@ import {
   type LlmResponseFormat,
   type LlmProvider,
   type LlmReasoningEffort,
-} from "../providers/contracts.js";
+} from "../../../providers/contracts.js";
 import {
   modelDefaultReasoningEffort,
   normalizeReasoningEffort,
   supportedReasoningEffortsForModel,
-} from "../providers/reasoningOptions.js";
+} from "../../../providers/reasoningOptions.js";
 import {
   salesforceAuthConfigSchema,
   salesforceConnectionSchema,
-} from "../integrations/oauth/domain.js";
+} from "../../../integrations/oauth/domain.js";
 import {
   salesforcePdfAttachTargetSchema,
   salesforcePdfWorkflowActionLabel,
@@ -54,36 +54,36 @@ import {
   type SalesforcePdfAttachTarget,
   type SalesforcePdfWorkflowAction,
   type SalesforcePdfWorkflowSettings,
-} from "../domain/salesforcePdfWorkflows.js";
-import type { JsonObject } from "../infrastructure/postgres/jsonDocumentRepository.js";
-import { validateRssFeedUrl } from "../infrastructure/rss/rssFeedValidator.js";
-import type { RssUrlHostnameResolver } from "../infrastructure/rss/rssUrlSafety.js";
-import type { TranscriptionGateway } from "../providers/transcriptionGateway.js";
-import { createDefaultModelRegistry } from "../providers/modelRegistry.js";
-import type { SlackAgentJob, SlackAgentJobQueue } from "../queues/slackAgentJobs.js";
-import type { UserSettingsRepository } from "../repositories/userSettings.js";
-import type { RssFeedRepository } from "../repositories/rssFeeds.js";
-import type { WorkspaceFeatureSettingsRepository } from "../repositories/workspaceFeatureSettings.js";
+} from "../../../domain/salesforcePdfWorkflows.js";
+import type { JsonObject } from "../../../infrastructure/postgres/jsonDocumentRepository.js";
+import { validateRssFeedUrl } from "../../../infrastructure/rss/rssFeedValidator.js";
+import type { RssUrlHostnameResolver } from "../../../infrastructure/rss/rssUrlSafety.js";
+import { createDefaultModelRegistry } from "../../../providers/modelRegistry.js";
+import type { TranscriptionGateway } from "../../../providers/transcriptionGateway.js";
+import type { SlackAgentJob, SlackAgentJobQueue } from "../../../queues/slackAgentJobs.js";
+import type { RssFeedRepository } from "../../../repositories/rssFeeds.js";
+import type { UserSettingsRepository } from "../../../repositories/userSettings.js";
+import type { WorkspaceFeatureSettingsRepository } from "../../../repositories/workspaceFeatureSettings.js";
 import {
   SlackAudioProcessingError,
   hasSlackAudioFiles,
   resolveSlackAudioAttachments,
-} from "./audioTranscription.js";
+} from "../../audioTranscription.js";
 import {
   SlackImageProcessingError,
   hasSlackImageFiles,
   resolveSlackImageAttachments,
   validateSlackImageAttachments,
-} from "./imageInput.js";
+} from "../../imageInput.js";
 import {
   readSlackEnterpriseId,
   readSlackEnterpriseInstall,
   readTeamId,
   resolveSlackAppHomeContext,
   type SlackAppHomeContext,
-} from "./appHomeContext.js";
+} from "../../appHomeContext.js";
 import type { SlackEventFeatureHandlers } from "./events.js";
-import { readSlackEventId } from "./idempotency.js";
+import { readSlackEventId } from "../../idempotency.js";
 import {
   FEATURE_SETTINGS_CONFIGURE_ACTION_ID,
   FEATURE_SETTINGS_IMAGE_CHANNELS_ACTION_ID,
@@ -166,8 +166,8 @@ import {
   WORKSPACE_CREDENTIAL_SECRET_ACTION_ID,
   WORKSPACE_CREDENTIAL_SECRET_BLOCK_ID,
 } from "./interactiveIds.js";
-import type { SlackInstalledWorkspace } from "./installationStore.js";
-import { resolveUserSettingsTranslator } from "./userLocale.js";
+import type { SlackInstalledWorkspace } from "../../installationStore.js";
+import { resolveUserSettingsTranslator } from "../../userLocale.js";
 
 type SlackEventArgs<TEvent extends string> = SlackEventMiddlewareArgs<TEvent> & AllMiddlewareArgs;
 type SlackActionArgs = SlackActionMiddlewareArgs & AllMiddlewareArgs;

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   registerSlackEventHandlers,
   type SlackEventFeatureHandlers,
-} from "../../src/slack/events.js";
+} from "../../src/slack/apps/agents/events.js";
 import type { SlackEventDeduplicator } from "../../src/slack/idempotency.js";
 
 type RegisteredListener = (args: Record<string, unknown>) => Promise<void>;
