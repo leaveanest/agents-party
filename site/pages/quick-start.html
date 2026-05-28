@@ -36,24 +36,66 @@
         <div class="section-inner">
           <div class="section-heading">
             <p class="eyebrow">Quick Start</p>
-            <h1>Slackなしでも、まずはヘルスチェックまで起動する。</h1>
+            <h1>まずはSlackなしで起動し、次にワークスペースへ接続する。</h1>
             <p>
-              本番運用にはSlack
-              App、PostgreSQL、プロバイダーキーが必要です。最初はHTTPサーバーの起動から確認します。
+              agents-partyはSlackアプリ、PostgreSQL、モデルプロバイダー、必要に応じてRedisを組み合わせて動きます。
+              いきなり全部を接続せず、HTTP health check、DB migration、Slack OAuth、workspace
+              routeの順に確認します。
             </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag">Required</span>
+              <h3>ローカル前提</h3>
+              <p>
+                Node.js 22.x、<code>vp</code>、Docker
+                Compose、Slackアプリを作成できるワークスペースを用意します。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Do not switch</span>
+              <h3>パッケージ操作</h3>
+              <p>
+                このリポジトリでは <code>npm</code> / <code>pnpm</code> /
+                <code>yarn</code> を直接使わず、通常操作は <code>vp</code> で行います。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Secrets</span>
+              <h3>秘密情報</h3>
+              <p>
+                Slack token、OAuth secret、provider API key、database
+                URLを公開Issue、PR、ログ、スクリーンショットに載せないでください。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>最短の確認順</h2>
+            <p>Slack接続まで一気に進める前に、失敗箇所を切り分けられる順番で確認します。</p>
           </div>
           <div class="steps">
             <div class="step">
               <div>
-                <h3>依存関係を同期</h3>
-                <p>このリポジトリではJavaScript/TypeScriptの通常操作に `vp` を使います。</p>
+                <h3>依存関係を同期する</h3>
+                <p>
+                  <code>vp</code> が見つからない場合は、別のパッケージマネージャーへ切り替えず、先に
+                  <code>vp</code> を直します。
+                </p>
                 <pre class="code">vp install</pre>
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>サーバーを起動</h3>
-                <p>Slack設定なしでも `GET /healthz` を確認できます。</p>
+                <h3>SlackなしでHTTPサーバーを起動する</h3>
+                <p>
+                  Slack環境変数がなくてもサーバーは起動し、<code>GET /healthz</code>
+                  で最小の疎通を確認できます。
+                </p>
                 <pre class="code">
 vp run dev
 curl http://localhost:8000/healthz</pre
@@ -62,10 +104,10 @@ curl http://localhost:8000/healthz</pre
             </div>
             <div class="step">
               <div>
-                <h3>PostgreSQLを追加</h3>
+                <h3>PostgreSQLを起動してmigrationを流す</h3>
                 <p>
-                  Slack installation、OAuth state、workspace routing、credential
-                  storageにはPostgreSQLが必要です。
+                  Slack installation、OAuth state、workspace routing、暗号化されたworkspace
+                  credentialsはPostgreSQLに保存します。
                 </p>
                 <pre class="code">
 docker compose up -d postgres
@@ -76,13 +118,81 @@ vp run migrate</pre
             </div>
             <div class="step">
               <div>
-                <h3>Slack App Manifestを設定</h3>
+                <h3>Slack App Manifestをワークスペースに入れる</h3>
                 <p>
-                  `slack-app-manifest.yaml`
-                  のURLを公開HTTPSトンネルに置き換え、Slackワークスペースにインストールします。
+                  <code>slack-app-manifest.yaml</code> の <code>agents-party.example.com</code> を、
+                  <code>http://localhost:8000</code>
+                  へ転送する公開HTTPSトンネルURLに置き換えてからSlackへimportします。
                 </p>
+                <pre class="code">
+export SLACK_SIGNING_SECRET=...
+export SLACK_CLIENT_ID=...
+export SLACK_CLIENT_SECRET=...
+export SLACK_STATE_SECRET=...
+export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
+vp run migrate
+vp run dev</pre
+                >
               </div>
             </div>
+            <div class="step">
+              <div>
+                <h3>最初のworkspace routeをseedする</h3>
+                <p>
+                  app mentionがagent/modelへ解決できるように、Slack workspaceのteam
+                  idを使ってbootstrap routeを作ります。 ローカルの初期modelは例として
+                  <code>google:gemini-2.5-flash</code> を使っています。
+                </p>
+                <pre class="code">
+DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
+AGENT_MODEL=google:gemini-2.5-flash \
+AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
+vp run seed:bootstrap</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>必要ならRedis workerを分ける</h3>
+                <p>
+                  Slack ackとprovider実行を分離したい場合は、Redis queueを有効にしてweb
+                  processとworkerを別々に起動します。
+                </p>
+                <pre class="code">
+docker compose up -d redis
+SLACK_AGENT_QUEUE_ENABLED=true REDIS_URL=redis://localhost:6379 vp run dev
+REDIS_URL=redis://localhost:6379 \
+DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
+vp run worker</pre
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-inner">
+          <div class="grid-2">
+            <article class="card">
+              <h3>モデルとAPIキー</h3>
+              <p>
+                <code>AGENT_MODEL</code> はSlack
+                routingがまだmodelを返さないときのbootstrap/fallbackです。
+                本番相当のmulti-workspace運用では、process-level provider
+                keyではなく、暗号化したworkspace credentialsを使います。
+              </p>
+            </article>
+            <article class="card">
+              <h3>PR前の検証</h3>
+              <p>通常の変更では、format/lint、型チェック、テスト、packを通してからPRにします。</p>
+              <pre class="code">
+vp check
+vp run typecheck
+vp test
+vp pack</pre
+              >
+            </article>
           </div>
         </div>
       </section>

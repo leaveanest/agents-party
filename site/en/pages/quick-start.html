@@ -39,25 +39,68 @@
         <div class="section-inner">
           <div class="section-heading">
             <p class="eyebrow">Quick Start</p>
-            <h1>Start with a local health check before connecting Slack.</h1>
+            <h1>Start without Slack, then connect a real workspace.</h1>
             <p>
-              Production use requires a Slack app, PostgreSQL, and provider credentials. The first
-              local path starts with the HTTP server.
+              agents-party combines a Slack app, PostgreSQL, model providers, and optionally Redis.
+              Bring those pieces online in order: HTTP health check, database migrations, Slack
+              OAuth, then the first workspace route.
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag">Required</span>
+              <h3>Local prerequisites</h3>
+              <p>
+                Use Node.js 22.x, <code>vp</code>, Docker Compose, and a Slack workspace where you
+                can create or install an app.
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Do not switch</span>
+              <h3>Package workflow</h3>
+              <p>
+                Use <code>vp</code> for normal JavaScript and TypeScript workflows. Do not switch to
+                direct <code>npm</code>, <code>pnpm</code>, or <code>yarn</code> commands.
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Secrets</span>
+              <h3>Keep secrets out</h3>
+              <p>
+                Do not put Slack tokens, OAuth secrets, provider API keys, database URLs, or copied
+                Slack transcripts in public issues, PRs, logs, or screenshots.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>Recommended setup order</h2>
+            <p>
+              Check each layer separately so failures are easy to isolate before real Slack traffic
+              is involved.
             </p>
           </div>
           <div class="steps">
             <div class="step">
               <div>
                 <h3>Install dependencies</h3>
-                <p>This repository uses `vp` for JavaScript and TypeScript workflows.</p>
+                <p>
+                  If <code>vp</code> is missing, fix that first instead of changing package
+                  managers.
+                </p>
                 <pre class="code">vp install</pre>
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>Run the server</h3>
+                <h3>Run the HTTP server without Slack</h3>
                 <p>
-                  The server exposes `GET /healthz` even before Slack credentials are configured.
+                  The server can start without Slack environment variables and exposes
+                  <code>GET /healthz</code>.
                 </p>
                 <pre class="code">
 vp run dev
@@ -67,10 +110,10 @@ curl http://localhost:8000/healthz</pre
             </div>
             <div class="step">
               <div>
-                <h3>Add PostgreSQL</h3>
+                <h3>Run PostgreSQL and migrations</h3>
                 <p>
-                  Slack installations, OAuth state, workspace routing, and encrypted credentials
-                  require PostgreSQL.
+                  Slack installations, OAuth state, workspace routing, and encrypted workspace
+                  credentials are stored in PostgreSQL.
                 </p>
                 <pre class="code">
 docker compose up -d postgres
@@ -83,11 +126,79 @@ vp run migrate</pre
               <div>
                 <h3>Configure the Slack App Manifest</h3>
                 <p>
-                  Update `slack-app-manifest.yaml` with your public HTTPS tunnel and install it into
-                  a Slack workspace.
+                  Replace <code>agents-party.example.com</code> in
+                  <code>slack-app-manifest.yaml</code> with a public HTTPS tunnel that forwards to
+                  <code>http://localhost:8000</code>, then import it into Slack.
                 </p>
+                <pre class="code">
+export SLACK_SIGNING_SECRET=...
+export SLACK_CLIENT_ID=...
+export SLACK_CLIENT_SECRET=...
+export SLACK_STATE_SECRET=...
+export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
+vp run migrate
+vp run dev</pre
+                >
               </div>
             </div>
+            <div class="step">
+              <div>
+                <h3>Seed the first workspace route</h3>
+                <p>
+                  App mentions need an enabled agent and model route. Use the Slack workspace team
+                  id for <code>AGENTS_PARTY_BOOTSTRAP_TEAM_ID</code>. The model below is only a
+                  local bootstrap example.
+                </p>
+                <pre class="code">
+DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
+AGENT_MODEL=google:gemini-2.5-flash \
+AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
+vp run seed:bootstrap</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>Split Redis-backed work when needed</h3>
+                <p>
+                  Enable the Redis queue when Slack acknowledgements should be separated from
+                  provider execution.
+                </p>
+                <pre class="code">
+docker compose up -d redis
+SLACK_AGENT_QUEUE_ENABLED=true REDIS_URL=redis://localhost:6379 vp run dev
+REDIS_URL=redis://localhost:6379 \
+DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
+vp run worker</pre
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-inner">
+          <div class="grid-2">
+            <article class="card">
+              <h3>Models and API keys</h3>
+              <p>
+                <code>AGENT_MODEL</code> is the bootstrap or fallback model when Slack routing has
+                not resolved a workspace, channel, or thread model. For production-like
+                multi-workspace traffic, prefer encrypted workspace credentials over process-level
+                provider keys.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Validation before a PR</h3>
+              <p>Run the normal repository validation set before opening a pull request.</p>
+              <pre class="code">
+vp check
+vp run typecheck
+vp test
+vp pack</pre
+              >
+            </article>
           </div>
         </div>
       </section>
