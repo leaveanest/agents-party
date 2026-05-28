@@ -36,7 +36,11 @@ import {
   type SalesforcePdfToolOptions,
 } from "./salesforcePdf/index.js";
 import { createSpeechGenerationAgentTools } from "./speechGeneration/index.js";
-import { createSlackMcpToolSet, type SlackMcpTokenResolver } from "./slackMcp/index.js";
+import {
+  createSlackMcpToolSet,
+  type SlackMcpCanvasAccessSetter,
+  type SlackMcpTokenResolver,
+} from "./slackMcp/index.js";
 import { createSlackRealTimeSearchAgentTools } from "./slackSearch/index.js";
 import { createSoracomAgentTools } from "./soracom/index.js";
 import {
@@ -153,7 +157,7 @@ const DEFAULT_SYSTEM_PROMPT = [
   "If a request is ambiguous but low risk, make a reasonable assumption and state it briefly. Ask a clarifying question before irreversible, privileged, or high-impact actions.",
   "When Slack workspace search is needed and slack_real_time_search is available, prefer it. If it is unavailable and slack_search_public is available, use slack_search_public as a fallback.",
   "Use slack_read_channel or slack_read_thread when those tools are available and you only need context from the current channel or thread.",
-  "When the user asks to create, generate, read, or summarize content into a Slack Canvas, use the Slack MCP canvas tools when they are available. When creating a Canvas for a Slack request, share or attach it to the current Slack channel if the canvas tool supports a channel input. Use slack_update_canvas only when the user explicitly names the target Canvas id or Slack Canvas URL in the request.",
+  "When the user asks to create, generate, read, or summarize content into a Slack Canvas, use the Slack MCP canvas tools when they are available. New Slack MCP-created Canvases are shared to the current Slack channel by the runtime when possible; do not invent unsupported sharing parameters. Use slack_update_canvas only when the user explicitly names the target Canvas id or Slack Canvas URL in the request.",
   "Summarize tool results instead of dumping raw data or internal identifiers.",
   "Do not expose credentials, tokens, or sensitive identifiers in Slack replies.",
   "When SORACOM tools are available and the user asks for SORACOM SIM, SoraCam, or device information, use the relevant SORACOM discovery or status tools before asking for details.",
@@ -529,6 +533,7 @@ export function createDefaultAgentRunner(
     featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
     logger?: unknown;
     salesforcePdfTools?: Omit<SalesforcePdfToolOptions, "context">;
+    slackMcpCanvasAccessSetter?: SlackMcpCanvasAccessSetter;
     slackMcpTokenResolver?: SlackMcpTokenResolver;
   } = {},
 ): AgentRunner {
@@ -577,6 +582,7 @@ export function createDefaultAgentRunner(
       if (toolSelection.kind === "all" && options.slackMcpTokenResolver !== undefined) {
         try {
           const slackMcpToolSet = await createSlackMcpToolSet({
+            canvasAccessSetter: options.slackMcpCanvasAccessSetter,
             context: {
               enterpriseId: invocation.enterpriseId,
               isEnterpriseInstall: invocation.isEnterpriseInstall,
@@ -585,6 +591,7 @@ export function createDefaultAgentRunner(
               userId: invocation.userId,
               viewerContextChannelIds: invocation.viewerContextChannelIds,
             },
+            logger: options.logger,
             tokenResolver: options.slackMcpTokenResolver,
           });
           if (slackMcpToolSet !== undefined) {
@@ -662,6 +669,7 @@ function createDefaultAgentTools(input: {
     featureSettingsRepository?: WorkspaceFeatureSettingsRepository;
     logger?: unknown;
     salesforcePdfTools?: Omit<SalesforcePdfToolOptions, "context">;
+    slackMcpCanvasAccessSetter?: SlackMcpCanvasAccessSetter;
     slackMcpTokenResolver?: SlackMcpTokenResolver;
   };
   runtimeOptions: AgentRunnerRuntimeOptions;

@@ -16,6 +16,7 @@ import { createDefaultTranscriptionGateway } from "./providers/transcriptionGate
 import { createBullMqSlackAgentJobWorker } from "./queues/slackAgentJobs.js";
 import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
 import { processSlackAgentJob } from "./slack/agentHandlers.js";
+import { createSlackCanvasAccessSetter } from "./slack/canvasAccess.js";
 import { createSlackInstallationMcpTokenResolver } from "./slack/mcpTokenResolver.js";
 import { createSlackWebClientProvider } from "./slack/webClient.js";
 import { PostgresSlackInstallationRepository } from "./infrastructure/postgres/slackInstallationRepository.js";
@@ -62,6 +63,7 @@ const runner = createDefaultAgentRunner(settings, {
   featureSettingsRepository,
   logger: console,
   salesforcePdfTools,
+  slackMcpCanvasAccessSetter: createSlackCanvasAccessSetter(),
   slackMcpTokenResolver:
     slackMcpInstallationRepository === undefined
       ? undefined

@@ -25,6 +25,17 @@ export type SlackMcpToolContext = SlackMcpTokenLookup & {
   viewerContextChannelIds: string[];
 };
 
+export type SlackMcpCanvasAccessSetter = {
+  setCanvasAccess(input: SlackMcpCanvasAccessSetInput): Promise<void>;
+};
+
+export type SlackMcpCanvasAccessSetInput = SlackMcpTokenLookup & {
+  accessLevel: "read" | "write";
+  canvasId: string;
+  channelIds: string[];
+  token: string;
+};
+
 export type SlackMcpToolSetHandle = {
   close(): Promise<void>;
   tools: ToolSet;
@@ -36,11 +47,19 @@ export type SlackMcpToolSetClient = {
 };
 
 export type SlackMcpToolSetOptions = {
+  canvasAccessSetter?: SlackMcpCanvasAccessSetter;
   clientFactory?: (input: { token: string }) => Promise<SlackMcpToolSetClient>;
   context: SlackMcpToolContext;
+  logger?: unknown;
   serverUrl?: string;
   tokenResolver: SlackMcpTokenResolver;
   toolsListTimeoutMs?: number;
+};
+
+type SlackMcpToolWrapOptions = {
+  canvasAccessSetter?: SlackMcpCanvasAccessSetter;
+  logger?: unknown;
+  token: string;
 };
 
 const DEFAULT_SLACK_MCP_TOOLS_LIST_TIMEOUT_MS = 2500;
@@ -74,6 +93,11 @@ export async function createSlackMcpToolSet(
         "Slack MCP tools list",
       ),
       options.context,
+      {
+        canvasAccessSetter: options.canvasAccessSetter,
+        logger: options.logger,
+        token: resolution.token,
+      },
     );
     return {
       close: () => client.close(),
@@ -106,7 +130,11 @@ function defaultSlackMcpClientFactory(options: SlackMcpToolSetOptions) {
   };
 }
 
-function filterAndWrapSlackMcpTools(tools: ToolSet, context: SlackMcpToolContext): ToolSet {
+function filterAndWrapSlackMcpTools(
+  tools: ToolSet,
+  context: SlackMcpToolContext,
+  options: SlackMcpToolWrapOptions,
+): ToolSet {
   const filtered: ToolSet = {};
   for (const toolName of allowedSlackMcpToolNames) {
     const mcpTool = tools[toolName];
@@ -126,11 +154,165 @@ function filterAndWrapSlackMcpTools(tools: ToolSet, context: SlackMcpToolContext
         if (accessFailure !== undefined) {
           return accessFailure;
         }
-        return execute(toolInput, executionOptions);
+        const result = await execute(toolInput, executionOptions);
+        return shareCreatedCanvasIfPossible(context, toolName, result, options);
       },
     };
   }
   return filtered;
+}
+
+async function shareCreatedCanvasIfPossible(
+  context: SlackMcpToolContext,
+  toolName: string,
+  result: unknown,
+  options: SlackMcpToolWrapOptions,
+): Promise<unknown> {
+  if (toolName !== "slack_create_canvas" || options.canvasAccessSetter === undefined) {
+    return result;
+  }
+  const canvasId = extractCanvasId(result, context.teamId);
+  if (canvasId === undefined) {
+    logWarn(options.logger, "Slack MCP Canvas creation result did not include a Canvas id.", {
+      teamId: context.teamId,
+      userId: context.userId,
+    });
+    return appendCanvasShareStatus(
+      result,
+      "Canvas was created, but Agents Party could not identify the created Canvas id to share it with the current Slack channel.",
+    );
+  }
+  const channelIds = regularChannelIds(context.viewerContextChannelIds);
+  if (channelIds.length === 0) {
+    return result;
+  }
+  try {
+    await options.canvasAccessSetter.setCanvasAccess({
+      accessLevel: "read",
+      canvasId,
+      channelIds,
+      enterpriseId: context.enterpriseId,
+      isEnterpriseInstall: context.isEnterpriseInstall,
+      teamId: context.teamId,
+      token: options.token,
+      userId: context.userId,
+    });
+    return result;
+  } catch (error) {
+    logWarn(options.logger, "Failed to share Slack MCP-created Canvas with invocation channel.", {
+      canvasId,
+      channelIds,
+      error,
+      teamId: context.teamId,
+      userId: context.userId,
+    });
+    return appendCanvasShareStatus(
+      result,
+      "Canvas was created, but Agents Party could not share it with the current Slack channel. Tell the user that channel sharing failed and include the Canvas link.",
+    );
+  }
+}
+
+function regularChannelIds(channelIds: string[]): string[] {
+  return [...new Set(channelIds.map((channelId) => channelId.trim()).filter(isRegularChannelId))];
+}
+
+function isRegularChannelId(channelId: string): boolean {
+  return /^[CG][A-Z0-9]+$/i.test(channelId);
+}
+
+function extractCanvasId(value: unknown, teamId: string): string | undefined {
+  const candidates = extractCanvasIdCandidates(value, teamId, 0, new Set<unknown>());
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function extractCanvasIdCandidates(
+  value: unknown,
+  teamId: string,
+  depth: number,
+  seen: Set<unknown>,
+): string[] {
+  if (depth > 8) {
+    return [];
+  }
+  if (value === null || typeof value !== "object" || seen.has(value)) {
+    return [];
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return uniqueStrings(
+      value.flatMap((item) => extractCanvasIdCandidates(item, teamId, depth + 1, seen)),
+    );
+  }
+  const record = value as Record<string, unknown>;
+  const candidates: string[] = [];
+  for (const key of ["canvas_id", "canvasId", "file_id", "fileId"]) {
+    const fieldValue = record[key];
+    if (typeof fieldValue === "string" && isCanvasId(fieldValue.trim())) {
+      candidates.push(fieldValue.trim());
+    }
+  }
+  for (const key of ["canvas_url", "canvasUrl", "url", "permalink"]) {
+    candidates.push(...canvasIdsFromSlackDocsUrls(record[key], teamId));
+  }
+  for (const nestedValue of Object.values(record)) {
+    candidates.push(...extractCanvasIdCandidates(nestedValue, teamId, depth + 1, seen));
+  }
+  const urlCandidates = canvasIdsFromSlackDocsUrlsInResultText(record, teamId);
+  return uniqueStrings([...candidates, ...urlCandidates]);
+}
+
+function canvasIdsFromSlackDocsUrls(value: unknown, teamId: string): string[] {
+  if (typeof value !== "string") {
+    return [];
+  }
+  return slackDocsUrlCanvasIds(value, teamId);
+}
+
+function canvasIdsFromSlackDocsUrlsInResultText(
+  result: Record<string, unknown>,
+  teamId: string,
+): string[] {
+  const content = result.content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+  const candidates = content.flatMap((item) => {
+    if (!isRecord(item) || typeof item.text !== "string") {
+      return [];
+    }
+    return slackDocsUrlCanvasIds(item.text, teamId);
+  });
+  return uniqueStrings(candidates).length === 1 ? uniqueStrings(candidates) : [];
+}
+
+function slackDocsUrlCanvasIds(value: string, teamId: string): string[] {
+  return uniqueStrings(
+    [...value.matchAll(/https:\/\/app\.slack\.com\/docs\/([a-z0-9]+)\/(f[a-z0-9]{7,})/gi)]
+      .filter((match) => match[1]?.toLowerCase() === teamId.toLowerCase())
+      .map((match) => match[2])
+      .filter((canvasId): canvasId is string => canvasId !== undefined && isCanvasId(canvasId)),
+  );
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Map(values.map((value) => [value.toLowerCase(), value])).values()];
+}
+
+function appendCanvasShareStatus(result: unknown, message: string): unknown {
+  if (!isRecord(result) || !Array.isArray(result.content)) {
+    return result;
+  }
+  return {
+    ...result,
+    content: [
+      ...result.content,
+      {
+        text: message,
+        type: "text",
+      },
+    ],
+  };
 }
 
 function slackMcpToolInput(
@@ -299,6 +481,12 @@ function failure(
     reconnectRequired,
     toolName,
   };
+}
+
+function logWarn(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.warn === "function") {
+    logger.warn(message, metadata);
+  }
 }
 
 async function withTimeout<T>(

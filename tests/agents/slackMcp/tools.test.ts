@@ -69,6 +69,165 @@ describe("createSlackMcpToolSet", () => {
     expect(calls).toEqual([{ channel_ids: ["C1"], markdown: "# Summary", title: "Summary" }]);
   });
 
+  it("shares Slack MCP-created Canvases with the invocation channel after creation", async () => {
+    const accessSets: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      canvasAccessSetter: {
+        async setCanvasAccess(input) {
+          accessSets.push(input);
+        },
+      },
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(async () => ({
+          content: [
+            {
+              text: "Canvasを作成しました: https://app.slack.com/docs/T1/F0B6PN7YQZ",
+              type: "text",
+            },
+          ],
+        })),
+      }),
+      context: context({ viewerContextChannelIds: ["C1", "D1", "C1"] }),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_create_canvas", {
+        content: "# Summary",
+        title: "Summary",
+      }),
+    ).resolves.toEqual({
+      content: [
+        {
+          text: "Canvasを作成しました: https://app.slack.com/docs/T1/F0B6PN7YQZ",
+          type: "text",
+        },
+      ],
+    });
+    expect(accessSets).toEqual([
+      expect.objectContaining({
+        accessLevel: "read",
+        canvasId: "F0B6PN7YQZ",
+        channelIds: ["C1"],
+        teamId: "T1",
+        token: "xoxp-token",
+        userId: "U1",
+      }),
+    ]);
+  });
+
+  it("does not share arbitrary Canvas ids from Canvas creation result text", async () => {
+    const accessSets: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      canvasAccessSetter: {
+        async setCanvasAccess(input) {
+          accessSets.push(input);
+        },
+      },
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(async () => ({
+          content: [
+            {
+              text: "Created a Canvas. Referenced Canvas id in content: F0B6OLD1111",
+              type: "text",
+            },
+          ],
+        })),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_create_canvas", {
+        content: "# Summary",
+        title: "Summary",
+      }),
+    ).resolves.toEqual({
+      content: [
+        {
+          text: "Created a Canvas. Referenced Canvas id in content: F0B6OLD1111",
+          type: "text",
+        },
+        {
+          text: "Canvas was created, but Agents Party could not identify the created Canvas id to share it with the current Slack channel.",
+          type: "text",
+        },
+      ],
+    });
+    expect(accessSets).toEqual([]);
+  });
+
+  it("does not share Canvas creation results with ambiguous same-team Canvas URLs", async () => {
+    const accessSets: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      canvasAccessSetter: {
+        async setCanvasAccess(input) {
+          accessSets.push(input);
+        },
+      },
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(async () => ({
+          content: [
+            {
+              text: "Canvas links: https://app.slack.com/docs/T1/F0B6NEW1111 and https://app.slack.com/docs/T1/F0B6OLD1111",
+              type: "text",
+            },
+          ],
+        })),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await executeTool(handle?.tools, "slack_create_canvas", {
+      content: "# Summary",
+      title: "Summary",
+    });
+
+    expect(accessSets).toEqual([]);
+  });
+
+  it("adds a model-visible status when Slack Canvas channel sharing fails", async () => {
+    const handle = await createSlackMcpToolSet({
+      canvasAccessSetter: {
+        async setCanvasAccess() {
+          throw new Error("restricted_action");
+        },
+      },
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(async () => ({
+          content: [
+            {
+              text: "Canvasを作成しました: https://app.slack.com/docs/T1/F0B6PN7YQZ",
+              type: "text",
+            },
+          ],
+        })),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_create_canvas", {
+        content: "# Summary",
+        title: "Summary",
+      }),
+    ).resolves.toEqual({
+      content: [
+        {
+          text: "Canvasを作成しました: https://app.slack.com/docs/T1/F0B6PN7YQZ",
+          type: "text",
+        },
+        {
+          text: "Canvas was created, but Agents Party could not share it with the current Slack channel. Tell the user that channel sharing failed and include the Canvas link.",
+          type: "text",
+        },
+      ],
+    });
+  });
+
   it("does not overwrite explicit Slack Canvas creation channel inputs", async () => {
     const calls: unknown[] = [];
     const handle = await createSlackMcpToolSet({
