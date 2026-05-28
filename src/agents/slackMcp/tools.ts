@@ -183,17 +183,8 @@ function readCanvasId(input: Record<string, unknown>): string | undefined {
 }
 
 function explicitCanvasUpdateTarget(sourceText: string): string | undefined {
-  if (!hasCanvasUpdateIntent(sourceText)) {
-    return undefined;
-  }
   const canvasIds = uniqueCanvasIds(sourceText);
   return canvasIds.length === 1 ? canvasIds[0] : undefined;
-}
-
-function hasCanvasUpdateIntent(sourceText: string): boolean {
-  return /\b(update|edit|modify|revise|rewrite|append|replace)\b|追記して|更新して|編集して|修正して|変更して|書き換えて|差し替えて|反映して/i.test(
-    sourceText,
-  );
 }
 
 function uniqueCanvasIds(sourceText: string): string[] {
