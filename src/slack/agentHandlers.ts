@@ -8173,8 +8173,7 @@ function streamedFinalMessageSuffix(
 function normalizeSlackCanvasUrls(text: string): string {
   return text.replace(
     slackCanvasUrlPattern("g"),
-    (_url, teamId: string, canvasId: string) =>
-      `https://app.slack.com/docs/${teamId.toLowerCase()}/${canvasId.toLowerCase()}`,
+    (_url, teamId: string, canvasId: string) => `https://app.slack.com/docs/${teamId}/${canvasId}`,
   );
 }
 

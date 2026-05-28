@@ -1181,7 +1181,7 @@ function slackCanvasUrlFromText(text: string): string | undefined {
   if (match === null) {
     return undefined;
   }
-  return `https://app.slack.com/docs/${match[1].toLowerCase()}/${match[2].toLowerCase()}`;
+  return `https://app.slack.com/docs/${match[1]}/${match[2]}`;
 }
 
 function withSlackCanvasUrl(message: string, slackCanvasUrl: string | undefined): string {
@@ -1194,7 +1194,7 @@ function withSlackCanvasUrl(message: string, slackCanvasUrl: string | undefined)
 
 function normalizeSlackCanvasUrls(message: string): string {
   return message.replace(slackCanvasUrlPattern("g"), (_url, teamId: string, canvasId: string) => {
-    return `https://app.slack.com/docs/${teamId.toLowerCase()}/${canvasId.toLowerCase()}`;
+    return `https://app.slack.com/docs/${teamId}/${canvasId}`;
   });
 }
 
