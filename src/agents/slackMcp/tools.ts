@@ -162,7 +162,11 @@ function validateSlackMcpCanvasAccess(
   }
   const canvasId = readCanvasId(input);
   const explicitUpdateTarget = explicitCanvasUpdateTarget(context.sourceText);
-  if (canvasId !== undefined && explicitUpdateTarget === canvasId) {
+  if (
+    canvasId !== undefined &&
+    explicitUpdateTarget !== undefined &&
+    explicitUpdateTarget.toLowerCase() === canvasId.toLowerCase()
+  ) {
     return undefined;
   }
   return failure(
@@ -179,7 +183,7 @@ function readCanvasId(input: Record<string, unknown>): string | undefined {
     return undefined;
   }
   const trimmed = canvasId.trim();
-  return /^[A-Z0-9]{8,}$/.test(trimmed) ? trimmed : undefined;
+  return isCanvasId(trimmed) ? trimmed : undefined;
 }
 
 function explicitCanvasUpdateTarget(sourceText: string): string | undefined {
@@ -188,7 +192,17 @@ function explicitCanvasUpdateTarget(sourceText: string): string | undefined {
 }
 
 function uniqueCanvasIds(sourceText: string): string[] {
-  return [...new Set(sourceText.match(/F[A-Z0-9]{7,}/g) ?? [])];
+  return [
+    ...new Map(
+      (sourceText.match(/(?<![a-z0-9])f[a-z0-9]{7,}(?![a-z0-9])/gi) ?? [])
+        .filter(isCanvasId)
+        .map((id) => [id.toLowerCase(), id]),
+    ).values(),
+  ];
+}
+
+function isCanvasId(value: string): boolean {
+  return /^f(?=.*\d)[a-z0-9]{7,}$/i.test(value);
 }
 
 function failure(

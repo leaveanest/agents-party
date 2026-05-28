@@ -1177,7 +1177,11 @@ function firstSlackCanvasUrl(value: unknown): string | undefined {
 }
 
 function slackCanvasUrlFromText(text: string): string | undefined {
-  return text.match(/https:\/\/app\.slack\.com\/docs\/[A-Z0-9]+\/[A-Z0-9]+/)?.[0];
+  const match = text.match(/https:\/\/app\.slack\.com\/docs\/([a-z0-9]+)\/([a-z0-9]+)/i);
+  if (match === null) {
+    return undefined;
+  }
+  return `https://app.slack.com/docs/${match[1].toLowerCase()}/${match[2].toLowerCase()}`;
 }
 
 function withSlackCanvasUrl(message: string, slackCanvasUrl: string | undefined): string {

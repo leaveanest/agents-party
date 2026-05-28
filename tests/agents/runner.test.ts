@@ -796,7 +796,9 @@ describe("AgentRunner", () => {
         {
           input: { markdown: "# Summary", title: "Summary" },
           output: {
-            content: [{ text: "Canvas created: https://app.slack.com/docs/T1/F123", type: "text" }],
+            content: [
+              { text: "Canvas created: https://app.slack.com/docs/T1/F0B6CLMM4PQ", type: "text" },
+            ],
           },
           toolCallId: "call-1",
           toolName: "slack_create_canvas",
@@ -807,7 +809,9 @@ describe("AgentRunner", () => {
       slack_create_canvas: {
         description: "Create a Slack Canvas through MCP.",
         execute: async () => ({
-          content: [{ text: "Canvas created: https://app.slack.com/docs/T1/F123", type: "text" }],
+          content: [
+            { text: "Canvas created: https://app.slack.com/docs/T1/F0B6CLMM4PQ", type: "text" },
+          ],
         }),
         inputSchema: jsonSchema({ type: "object" }),
         type: "dynamic",
@@ -830,7 +834,7 @@ describe("AgentRunner", () => {
       userId: "U1",
     });
 
-    expect(result.message).toContain("https://app.slack.com/docs/T1/F123");
+    expect(result.message).toContain("https://app.slack.com/docs/t1/f0b6clmm4pq");
     expect(router.requests[0]?.aiSdkTools?.slack_create_canvas).toBe(mcpTools.slack_create_canvas);
   });
 
