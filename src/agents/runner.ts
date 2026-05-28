@@ -1181,7 +1181,7 @@ function slackCanvasUrlFromText(text: string): string | undefined {
   if (match === null) {
     return undefined;
   }
-  return `https://app.slack.com/docs/${match[1]}/${match[2]}`;
+  return slackCanvasLink(match[1], match[2]);
 }
 
 function withSlackCanvasUrl(message: string, slackCanvasUrl: string | undefined): string {
@@ -1194,13 +1194,17 @@ function withSlackCanvasUrl(message: string, slackCanvasUrl: string | undefined)
 
 function normalizeSlackCanvasUrls(message: string): string {
   return message.replace(slackCanvasUrlPattern("g"), (_url, teamId: string, canvasId: string) => {
-    return `https://app.slack.com/docs/${teamId}/${canvasId}`;
+    return slackCanvasLink(teamId, canvasId);
   });
+}
+
+function slackCanvasLink(teamId: string, canvasId: string): string {
+  return `<https://app.slack.com/docs/${teamId.toLowerCase()}/${canvasId.toLowerCase()}>`;
 }
 
 function slackCanvasUrlPattern(flags = ""): RegExp {
   return new RegExp(
-    "https://(?:app|[a-z0-9-]+)\\.slack\\.com/docs/([a-z0-9]+)/(f(?=[a-z0-9]*\\d)[a-z0-9]{7,})(?![a-z0-9])",
+    "<?https://(?:app|[a-z0-9-]+)\\.slack\\.com/docs/([a-z0-9]+)/(f(?=[a-z0-9]*\\d)[a-z0-9]{7,})(?![a-z0-9])(?:\\|[^>]+>|>?)",
     `i${flags}`,
   );
 }

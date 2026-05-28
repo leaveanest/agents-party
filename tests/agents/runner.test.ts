@@ -840,7 +840,7 @@ describe("AgentRunner", () => {
       userId: "U1",
     });
 
-    expect(result.message).toContain("https://app.slack.com/docs/T1/F0B6CLMM4PQ");
+    expect(result.message).toContain("<https://app.slack.com/docs/t1/f0b6clmm4pq>");
     expect(result.message).not.toContain("e073v4z73am-8fdn8m4h.slack.com");
     expect(router.requests[0]?.aiSdkTools?.slack_create_canvas).toBe(mcpTools.slack_create_canvas);
   });

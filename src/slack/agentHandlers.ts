@@ -8171,10 +8171,13 @@ function streamedFinalMessageSuffix(
 }
 
 function normalizeSlackCanvasUrls(text: string): string {
-  return text.replace(
-    slackCanvasUrlPattern("g"),
-    (_url, teamId: string, canvasId: string) => `https://app.slack.com/docs/${teamId}/${canvasId}`,
+  return text.replace(slackCanvasUrlPattern("g"), (_url, teamId: string, canvasId: string) =>
+    slackCanvasLink(teamId, canvasId),
   );
+}
+
+function slackCanvasLink(teamId: string, canvasId: string): string {
+  return `<https://app.slack.com/docs/${teamId.toLowerCase()}/${canvasId.toLowerCase()}>`;
 }
 
 function flushableStreamingText(text: string): { pending: string; text: string } {
@@ -8189,29 +8192,43 @@ function flushableStreamingText(text: string): { pending: string; text: string }
     }
     return { pending: "", text };
   }
-  const urlTail = text.slice(lastUrlStart);
+  const urlStart =
+    lastUrlStart > 0 && text[lastUrlStart - 1] === "<" ? lastUrlStart - 1 : lastUrlStart;
+  const urlTail = text.slice(urlStart);
+  if (urlTail.startsWith("<https://") && !urlTail.includes(">")) {
+    return {
+      pending: urlTail,
+      text: text.slice(0, urlStart),
+    };
+  }
   if (/\s/.test(urlTail)) {
     return { pending: "", text };
   }
   return {
     pending: urlTail,
-    text: text.slice(0, lastUrlStart),
+    text: text.slice(0, urlStart),
   };
 }
 
 function incompleteHttpsPrefixLength(text: string): number {
   const urlPrefix = "https://";
   for (let length = urlPrefix.length - 1; length > 0; length -= 1) {
+    if (text.endsWith(`<${urlPrefix.slice(0, length)}`)) {
+      return length + 1;
+    }
     if (text.endsWith(urlPrefix.slice(0, length))) {
       return length;
     }
+  }
+  if (text.endsWith("<")) {
+    return 1;
   }
   return 0;
 }
 
 function slackCanvasUrlPattern(flags = ""): RegExp {
   return new RegExp(
-    String.raw`https:\/\/(?:app|[a-z0-9-]+)\.slack\.com\/docs\/([a-z0-9]+)\/(f(?=[a-z0-9]*\d)[a-z0-9]{7,})(?![a-z0-9])`,
+    String.raw`<?https:\/\/(?:app|[a-z0-9-]+)\.slack\.com\/docs\/([a-z0-9]+)\/(f(?=[a-z0-9]*\d)[a-z0-9]{7,})(?![a-z0-9])(?:\|[^>]+>|>?)`,
     `i${flags}`,
   );
 }
