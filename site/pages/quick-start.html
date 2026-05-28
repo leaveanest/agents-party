@@ -36,12 +36,11 @@
         <div class="section-inner">
           <div class="section-heading">
             <p class="eyebrow">Quick Start</p>
-            <h1>まずはSlackなしで起動し、次にワークスペースへ接続する。</h1>
+            <h1>まずはDocker Composeで、webとworkerまでまとめて確認する。</h1>
             <p>
-              Agents
-              partyはSlackアプリ、PostgreSQL、モデルプロバイダー、必要に応じてRedisを組み合わせて動きます。
-              いきなり全部を接続せず、HTTP health check、DB migration、Slack OAuth、workspace
-              routeの順に確認します。
+              Agents partyのローカル確認は <code>compose.yaml</code> が最短です。Slack
+              credentialsなしでも、PostgreSQL、Redis、migration、web、workerをまとめて起動し、
+              <code>GET /healthz</code> まで確認できます。
             </p>
           </div>
           <div class="grid-3">
@@ -57,8 +56,9 @@
               <span class="tag">Do not switch</span>
               <h3>パッケージ操作</h3>
               <p>
-                このリポジトリでは <code>npm</code> / <code>pnpm</code> /
-                <code>yarn</code> を直接使わず、通常操作は <code>vp</code> で行います。
+                コンテナ外で依存同期、検証、buildを行う場合は <code>vp</code> を使います。
+                通常操作で <code>npm</code> / <code>pnpm</code> /
+                <code>yarn</code> へ切り替えません。
               </p>
             </article>
             <article class="card">
@@ -76,95 +76,84 @@
       <section class="section alt">
         <div class="section-inner">
           <div class="section-heading">
-            <h2>最短の確認順</h2>
-            <p>Slack接続まで一気に進める前に、失敗箇所を切り分けられる順番で確認します。</p>
+            <h2>Composeで確認する</h2>
+            <p>Slack連携なしのsmoke test、seedありのworkspace route、実Slack接続の順に進めます。</p>
           </div>
           <div class="steps">
             <div class="step">
               <div>
-                <h3>依存関係を同期する</h3>
+                <h3>webとworkerを起動する</h3>
                 <p>
-                  <code>vp</code> が見つからない場合は、別のパッケージマネージャーへ切り替えず、先に
-                  <code>vp</code> を直します。
+                  <code>web</code> と <code>worker</code> を指定すると、PostgreSQL、Redis、
+                  migrationも依存関係として起動します。Slack credentialsが空でもhealth
+                  checkは確認できます。
                 </p>
-                <pre class="code">vp install</pre>
+                <pre class="code">docker compose up --build web worker</pre>
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>SlackなしでHTTPサーバーを起動する</h3>
+                <h3>health checkを確認する</h3>
                 <p>
-                  Slack環境変数がなくてもサーバーは起動し、<code>GET /healthz</code>
-                  で最小の疎通を確認できます。
+                  別シェルでHTTPサーバーの疎通を確認します。ここまで通れば、アプリbuild、migration、
+                  web processの最小経路は動いています。
                 </p>
-                <pre class="code">
-vp run dev
-curl http://localhost:8000/healthz</pre
-                >
-              </div>
-            </div>
-            <div class="step">
-              <div>
-                <h3>PostgreSQLを起動してmigrationを流す</h3>
-                <p>
-                  Slack installation、OAuth state、workspace routing、暗号化されたworkspace
-                  credentialsはPostgreSQLに保存します。
-                </p>
-                <pre class="code">
-docker compose up -d postgres
-export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
-vp run migrate</pre
-                >
-              </div>
-            </div>
-            <div class="step">
-              <div>
-                <h3>Slack App Manifestをワークスペースに入れる</h3>
-                <p>
-                  <code>slack-app-manifest.yaml</code> の <code>agents-party.example.com</code> を、
-                  <code>http://localhost:8000</code>
-                  へ転送する公開HTTPSトンネルURLに置き換えてからSlackへimportします。
-                </p>
-                <pre class="code">
-export SLACK_SIGNING_SECRET=...
-export SLACK_CLIENT_ID=...
-export SLACK_CLIENT_SECRET=...
-export SLACK_STATE_SECRET=...
-export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
-vp run migrate
-vp run dev</pre
-                >
+                <pre class="code">curl http://localhost:8000/healthz</pre>
               </div>
             </div>
             <div class="step">
               <div>
                 <h3>最初のworkspace routeをseedする</h3>
                 <p>
-                  app mentionがagent/modelへ解決できるように、Slack workspaceのteam
-                  idを使ってbootstrap routeを作ります。 ローカルの初期modelは例として
-                  <code>google:gemini-2.5-flash</code> を使っています。
+                  app mentionをagent/modelへ解決するにはworkspace routeが必要です。ローカル確認では
+                  <code>seed</code> profileでbootstrapできます。実Slackで試す場合は
+                  <code>AGENTS_PARTY_BOOTSTRAP_TEAM_ID</code> を実workspaceのteam idにします。
                 </p>
                 <pre class="code">
-DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
-AGENT_MODEL=google:gemini-2.5-flash \
 AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
-vp run seed:bootstrap</pre
+docker compose --profile seed run --rm seed</pre
                 >
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>必要ならRedis workerを分ける</h3>
+                <h3>実Slack接続用に.envを用意する</h3>
                 <p>
-                  Slack ackとprovider実行を分離したい場合は、Redis queueを有効にしてweb
-                  processとworkerを別々に起動します。
+                  Slack App Manifestの <code>agents-party.example.com</code> を
+                  <code>http://localhost:8000</code>
+                  へ転送する公開HTTPSトンネルURLに置き換えてから、 Slack
+                  workspaceへimportします。Composeは <code>.env</code> を読みます。
                 </p>
                 <pre class="code">
-docker compose up -d redis
-SLACK_AGENT_QUEUE_ENABLED=true REDIS_URL=redis://localhost:6379 vp run dev
-REDIS_URL=redis://localhost:6379 \
-DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
-vp run worker</pre
+cp .env.example .env
+# Fill SLACK_SIGNING_SECRET, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET,
+# SLACK_STATE_SECRET, AGENT_MODEL, and provider credentials as needed.
+docker compose up --build web worker</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>ログと状態を確認する</h3>
+                <p>
+                  Slack eventやprovider実行を確認するときはweb/workerのログを分けて見ます。 queue
+                  modeではwebがSlack requestを受け、workerがagent実行と返信を担当します。
+                </p>
+                <pre class="code">
+docker compose logs -f web
+docker compose logs -f worker</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>停止する</h3>
+                <p>
+                  環境を作り直したい場合だけvolumeも削除します。PostgreSQLのローカルデータも消える点に注意してください。
+                </p>
+                <pre class="code">
+docker compose down
+docker compose down -v  # reset local PostgreSQL and Redis volumes</pre
                 >
               </div>
             </div>
@@ -176,12 +165,11 @@ vp run worker</pre
         <div class="section-inner">
           <div class="grid-2">
             <article class="card">
-              <h3>モデルとAPIキー</h3>
+              <h3>コンテナ外で個別に動かす場合</h3>
               <p>
-                <code>AGENT_MODEL</code> はSlack
-                routingがまだmodelを返さないときのbootstrap/fallbackです。
-                本番相当のmulti-workspace運用では、process-level provider
-                keyではなく、暗号化したworkspace credentialsを使います。
+                開発時にwebだけを手元で動かしたい場合は、<code>vp install</code>
+                後にPostgreSQL/Redisだけを Composeで起動し、<code>vp run dev</code> や
+                <code>vp run worker</code> を使います。
               </p>
             </article>
             <article class="card">

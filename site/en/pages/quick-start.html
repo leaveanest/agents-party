@@ -39,11 +39,11 @@
         <div class="section-inner">
           <div class="section-heading">
             <p class="eyebrow">Quick Start</p>
-            <h1>Start without Slack, then connect a real workspace.</h1>
+            <h1>Start with Docker Compose and verify web plus worker together.</h1>
             <p>
-              Agents party combines a Slack app, PostgreSQL, model providers, and optionally Redis.
-              Bring those pieces online in order: HTTP health check, database migrations, Slack
-              OAuth, then the first workspace route.
+              <code>compose.yaml</code> is the fastest local path for Agents party. It can start
+              PostgreSQL, Redis, migrations, web, and worker together even before Slack credentials
+              are configured.
             </p>
           </div>
           <div class="grid-3">
@@ -59,8 +59,9 @@
               <span class="tag">Do not switch</span>
               <h3>Package workflow</h3>
               <p>
-                Use <code>vp</code> for normal JavaScript and TypeScript workflows. Do not switch to
-                direct <code>npm</code>, <code>pnpm</code>, or <code>yarn</code> commands.
+                Use <code>vp</code> when working outside containers for dependency sync, validation,
+                and builds. Do not switch normal workflows to direct <code>npm</code>,
+                <code>pnpm</code>, or <code>yarn</code> commands.
               </p>
             </article>
             <article class="card">
@@ -78,98 +79,86 @@
       <section class="section alt">
         <div class="section-inner">
           <div class="section-heading">
-            <h2>Recommended setup order</h2>
+            <h2>Verify with Compose</h2>
             <p>
-              Check each layer separately so failures are easy to isolate before real Slack traffic
-              is involved.
+              Start with the no-Slack smoke test, then add the bootstrap workspace route and real
+              Slack credentials.
             </p>
           </div>
           <div class="steps">
             <div class="step">
               <div>
-                <h3>Install dependencies</h3>
+                <h3>Start web and worker</h3>
                 <p>
-                  If <code>vp</code> is missing, fix that first instead of changing package
-                  managers.
+                  Starting <code>web</code> and <code>worker</code> also starts PostgreSQL, Redis,
+                  and migrations through service dependencies. Health checks work without Slack
+                  credentials.
                 </p>
-                <pre class="code">vp install</pre>
+                <pre class="code">docker compose up --build web worker</pre>
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>Run the HTTP server without Slack</h3>
+                <h3>Check the health endpoint</h3>
                 <p>
-                  The server can start without Slack environment variables and exposes
-                  <code>GET /healthz</code>.
+                  In another shell, confirm that the HTTP server is responding. At this point the
+                  app build, migrations, and web process have all run.
                 </p>
-                <pre class="code">
-vp run dev
-curl http://localhost:8000/healthz</pre
-                >
-              </div>
-            </div>
-            <div class="step">
-              <div>
-                <h3>Run PostgreSQL and migrations</h3>
-                <p>
-                  Slack installations, OAuth state, workspace routing, and encrypted workspace
-                  credentials are stored in PostgreSQL.
-                </p>
-                <pre class="code">
-docker compose up -d postgres
-export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
-vp run migrate</pre
-                >
-              </div>
-            </div>
-            <div class="step">
-              <div>
-                <h3>Configure the Slack App Manifest</h3>
-                <p>
-                  Replace <code>agents-party.example.com</code> in
-                  <code>slack-app-manifest.yaml</code> with a public HTTPS tunnel that forwards to
-                  <code>http://localhost:8000</code>, then import it into Slack.
-                </p>
-                <pre class="code">
-export SLACK_SIGNING_SECRET=...
-export SLACK_CLIENT_ID=...
-export SLACK_CLIENT_SECRET=...
-export SLACK_STATE_SECRET=...
-export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
-vp run migrate
-vp run dev</pre
-                >
+                <pre class="code">curl http://localhost:8000/healthz</pre>
               </div>
             </div>
             <div class="step">
               <div>
                 <h3>Seed the first workspace route</h3>
                 <p>
-                  App mentions need an enabled agent and model route. Use the Slack workspace team
-                  id for <code>AGENTS_PARTY_BOOTSTRAP_TEAM_ID</code>. The model below is only a
-                  local bootstrap example.
+                  App mentions need an enabled agent and model route. For real Slack testing, set
+                  <code>AGENTS_PARTY_BOOTSTRAP_TEAM_ID</code> to the actual Slack workspace team id.
                 </p>
                 <pre class="code">
-DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
-AGENT_MODEL=google:gemini-2.5-flash \
 AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
-vp run seed:bootstrap</pre
+docker compose --profile seed run --rm seed</pre
                 >
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>Split Redis-backed work when needed</h3>
+                <h3>Prepare .env for real Slack traffic</h3>
                 <p>
-                  Enable the Redis queue when Slack acknowledgements should be separated from
-                  provider execution.
+                  Replace <code>agents-party.example.com</code> in the Slack App Manifest with a
+                  public HTTPS tunnel that forwards to <code>http://localhost:8000</code>, then
+                  import it into Slack. Compose reads local settings from <code>.env</code>.
                 </p>
                 <pre class="code">
-docker compose up -d redis
-SLACK_AGENT_QUEUE_ENABLED=true REDIS_URL=redis://localhost:6379 vp run dev
-REDIS_URL=redis://localhost:6379 \
-DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
-vp run worker</pre
+cp .env.example .env
+# Fill SLACK_SIGNING_SECRET, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET,
+# SLACK_STATE_SECRET, AGENT_MODEL, and provider credentials as needed.
+docker compose up --build web worker</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>Watch web and worker logs</h3>
+                <p>
+                  In queue mode, the web process receives Slack requests while the worker performs
+                  agent execution and posts replies.
+                </p>
+                <pre class="code">
+docker compose logs -f web
+docker compose logs -f worker</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>Stop or reset the stack</h3>
+                <p>
+                  Only remove volumes when you intentionally want to reset local PostgreSQL and
+                  Redis data.
+                </p>
+                <pre class="code">
+docker compose down
+docker compose down -v  # reset local PostgreSQL and Redis volumes</pre
                 >
               </div>
             </div>
@@ -181,12 +170,11 @@ vp run worker</pre
         <div class="section-inner">
           <div class="grid-2">
             <article class="card">
-              <h3>Models and API keys</h3>
+              <h3>Running pieces outside containers</h3>
               <p>
-                <code>AGENT_MODEL</code> is the bootstrap or fallback model when Slack routing has
-                not resolved a workspace, channel, or thread model. For production-like
-                multi-workspace traffic, prefer encrypted workspace credentials over process-level
-                provider keys.
+                When you want to run only the web process on the host, use <code>vp install</code>,
+                keep PostgreSQL and Redis in Compose, then run <code>vp run dev</code> or
+                <code>vp run worker</code> locally.
               </p>
             </article>
             <article class="card">
