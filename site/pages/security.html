@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Security & Data | agents-party</title>
+    <meta
+      name="description"
+      content="agents-partyのデータ処理、秘密情報、OAuth、プロバイダー利用に関する運用境界です。"
+    />
+    <link rel="canonical" href="https://leaveanest.github.io/agents-party/pages/security.html" />
+    <link
+      rel="alternate"
+      hreflang="ja"
+      href="https://leaveanest.github.io/agents-party/pages/security.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://leaveanest.github.io/agents-party/en/pages/security.html"
+    />
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="サイトナビゲーション">
+        <a class="brand" href="../"><span class="brand-mark">AP</span>agents-party</a>
+        <div class="nav-links">
+          <a href="./quick-start.html">Quick Start</a>
+          <a href="./architecture.html">Architecture</a>
+          <a href="./security.html" aria-current="page">Security</a>
+          <a href="https://github.com/leaveanest/agents-party">GitHub</a>
+          <a class="language-link" href="../en/pages/security.html">English</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Security & Data</p>
+            <h1>何を保存し、何を保存しないかを分けて説明する。</h1>
+            <p>
+              Slack内のAI体験はデータ境界が曖昧に見えやすい領域です。agents-partyでは、運用設定、
+              OAuth state、workspace credentials、provider送信データを分けて扱います。
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag">Stored</span>
+              <h3>運用に必要な設定</h3>
+              <p>
+                Slack installation、workspace route、OAuth state、暗号化されたworkspace
+                credentialsはPostgreSQLに保存します。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Not a transcript store</span>
+              <h3>会話ログ保管庫ではない</h3>
+              <p>
+                AI SDK
+                message配列をドメイン履歴として保存しません。provider呼び出し境界で必要な形式へ変換します。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Operator duty</span>
+              <h3>外部サービス条件を確認</h3>
+              <p>
+                Slack、LLM provider、OAuth provider、object
+                storageの利用規約とデータ処理条件は導入者が確認します。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="notice">
+            公開サイト、Issue、PR、ログ、スクリーンショットにはSlack token、OAuth secret、provider
+            API key、 database URL、Terraform state、顧客データを含めないでください。
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>Review repository security docs before operating with workspace data.</span>
+        <div class="footer-links">
+          <a href="../">Home</a>
+          <a href="https://github.com/leaveanest/agents-party/blob/main/docs/data-processing.md"
+            >Data processing</a
+          >
+          <a href="https://github.com/leaveanest/agents-party/blob/main/SECURITY.md">SECURITY.md</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

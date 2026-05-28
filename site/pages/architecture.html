@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Architecture | agents-party</title>
+    <meta
+      name="description"
+      content="agents-partyのSlack、agent orchestration、provider routing、repository、PostgreSQL境界を説明します。"
+    />
+    <link
+      rel="canonical"
+      href="https://leaveanest.github.io/agents-party/pages/architecture.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="ja"
+      href="https://leaveanest.github.io/agents-party/pages/architecture.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://leaveanest.github.io/agents-party/en/pages/architecture.html"
+    />
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="サイトナビゲーション">
+        <a class="brand" href="../"><span class="brand-mark">AP</span>agents-party</a>
+        <div class="nav-links">
+          <a href="./quick-start.html">Quick Start</a>
+          <a href="./architecture.html" aria-current="page">Architecture</a>
+          <a href="./security.html">Security</a>
+          <a href="https://github.com/leaveanest/agents-party">GitHub</a>
+          <a class="language-link" href="../en/pages/architecture.html">English</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Architecture</p>
+            <h1>Slack境界からprovider adapterまでを分ける。</h1>
+            <p>
+              agents-partyはTypeScriptのlayered modular monolithです。Slack SDK、AI SDK、PostgreSQL
+              SDKの型を 必要な境界に閉じ込め、ドメイン履歴はリポジトリ独自モデルで扱います。
+            </p>
+          </div>
+          <div class="architecture-map" aria-label="agents-party architecture map">
+            <div class="map-node"><b>Slack</b><span>events, interactions, OAuth</span></div>
+            <div class="map-node"><b>Agents</b><span>routing, tools, specialist runners</span></div>
+            <div class="map-node"><b>Domain</b><span>message history, route models</span></div>
+            <div class="map-node">
+              <b>Providers</b><span>AI SDK adapters, native escape hatches</span>
+            </div>
+            <div class="map-node">
+              <b>PostgreSQL</b><span>installations, credentials, migrations</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="grid-2">
+            <article class="card">
+              <h3>Slack IDはworkspace scoped</h3>
+              <p>
+                channel、user、thread、message timestampは `team_id`
+                と組み合わせて扱い、グローバルIDのように保存しません。
+              </p>
+            </article>
+            <article class="card">
+              <h3>AI SDKは呼び出し境界に閉じる</h3>
+              <p>
+                AI SDKの `ModelMessage[]` をドメイン履歴として保存せず、provider
+                invocation時に変換します。
+              </p>
+            </article>
+            <article class="card">
+              <h3>Provider routingは自前で持つ</h3>
+              <p>
+                model registry、capability matrix、native provider escape hatchをrepository-owned
+                moduleとして管理します。
+              </p>
+            </article>
+            <article class="card">
+              <h3>Redis workerでSlack ackを分離</h3>
+              <p>
+                必要に応じてSlack ingressとprovider
+                executionをqueueで分け、重い処理をworkerに渡します。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>PlantUML diagrams live in the repository docs.</span>
+        <div class="footer-links">
+          <a href="../">Home</a>
+          <a href="https://github.com/leaveanest/agents-party/tree/main/docs">Docs</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

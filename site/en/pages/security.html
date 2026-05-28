@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Security & Data | agents-party</title>
+    <meta
+      name="description"
+      content="Security, data processing, OAuth, secret handling, and provider responsibility boundaries for agents-party."
+    />
+    <link rel="canonical" href="https://leaveanest.github.io/agents-party/en/pages/security.html" />
+    <link
+      rel="alternate"
+      hreflang="ja"
+      href="https://leaveanest.github.io/agents-party/pages/security.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://leaveanest.github.io/agents-party/en/pages/security.html"
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Site navigation">
+        <a class="brand" href="../"><span class="brand-mark">AP</span>agents-party</a>
+        <div class="nav-links">
+          <a href="./quick-start.html">Quick Start</a>
+          <a href="./architecture.html">Architecture</a>
+          <a href="./security.html" aria-current="page">Security</a>
+          <a href="https://github.com/leaveanest/agents-party">GitHub</a>
+          <a class="language-link" href="../../pages/security.html">日本語</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Security & Data</p>
+            <h1>Separate what is stored from what is only sent to providers.</h1>
+            <p>
+              Slack-native AI tools can make data boundaries feel blurry. agents-party separates
+              runtime settings, OAuth state, workspace credentials, and data sent to external
+              providers.
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag">Stored</span>
+              <h3>Operational configuration</h3>
+              <p>
+                Slack installations, workspace routes, OAuth state, and encrypted workspace
+                credentials are stored in PostgreSQL.
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Not a transcript store</span>
+              <h3>No AI SDK history persistence</h3>
+              <p>The app does not store AI SDK message arrays as the domain history format.</p>
+            </article>
+            <article class="card">
+              <span class="tag">Operator duty</span>
+              <h3>Review external service terms</h3>
+              <p>
+                Operators must review Slack, LLM provider, OAuth provider, and object storage data
+                terms.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="notice">
+            Do not put Slack tokens, OAuth secrets, provider API keys, database URLs, Terraform
+            state, customer data, or copied Slack transcripts in public issues, pull requests, logs,
+            or screenshots.
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>Review repository security docs before operating with workspace data.</span>
+        <div class="footer-links">
+          <a href="../">Home</a>
+          <a href="https://github.com/leaveanest/agents-party/blob/main/docs/data-processing.md"
+            >Data processing</a
+          >
+          <a href="https://github.com/leaveanest/agents-party/blob/main/SECURITY.md">SECURITY.md</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

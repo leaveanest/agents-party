@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quick Start | agents-party</title>
+    <meta name="description" content="The shortest setup path for running agents-party locally." />
+    <link
+      rel="canonical"
+      href="https://leaveanest.github.io/agents-party/en/pages/quick-start.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="ja"
+      href="https://leaveanest.github.io/agents-party/pages/quick-start.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://leaveanest.github.io/agents-party/en/pages/quick-start.html"
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Site navigation">
+        <a class="brand" href="../"><span class="brand-mark">AP</span>agents-party</a>
+        <div class="nav-links">
+          <a href="./quick-start.html" aria-current="page">Quick Start</a>
+          <a href="./architecture.html">Architecture</a>
+          <a href="./security.html">Security</a>
+          <a href="https://github.com/leaveanest/agents-party">GitHub</a>
+          <a class="language-link" href="../../pages/quick-start.html">日本語</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Quick Start</p>
+            <h1>Start with a local health check before connecting Slack.</h1>
+            <p>
+              Production use requires a Slack app, PostgreSQL, and provider credentials. The first
+              local path starts with the HTTP server.
+            </p>
+          </div>
+          <div class="steps">
+            <div class="step">
+              <div>
+                <h3>Install dependencies</h3>
+                <p>This repository uses `vp` for JavaScript and TypeScript workflows.</p>
+                <pre class="code">vp install</pre>
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>Run the server</h3>
+                <p>
+                  The server exposes `GET /healthz` even before Slack credentials are configured.
+                </p>
+                <pre class="code">
+vp run dev
+curl http://localhost:8000/healthz</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>Add PostgreSQL</h3>
+                <p>
+                  Slack installations, OAuth state, workspace routing, and encrypted credentials
+                  require PostgreSQL.
+                </p>
+                <pre class="code">
+docker compose up -d postgres
+export DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party
+vp run migrate</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>Configure the Slack App Manifest</h3>
+                <p>
+                  Update `slack-app-manifest.yaml` with your public HTTPS tunnel and install it into
+                  a Slack workspace.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>See the GitHub README for the complete operator path.</span>
+        <div class="footer-links">
+          <a href="../">Home</a>
+          <a href="https://github.com/leaveanest/agents-party/blob/main/README.md">README</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

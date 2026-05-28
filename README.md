@@ -9,6 +9,11 @@ The project uses Slack Bolt for JavaScript/TypeScript, repository-owned provider
 the AI SDK, PostgreSQL for persistence, Redis-compatible queues for background handoff, and
 Terraform for infrastructure.
 
+Project site:
+
+- Japanese: [`https://leaveanest.github.io/agents-party/`](https://leaveanest.github.io/agents-party/)
+- English: [`https://leaveanest.github.io/agents-party/en/`](https://leaveanest.github.io/agents-party/en/)
+
 ## Project Status
 
 `agents-party` is pre-1.0 and under active development. The current TypeScript runtime supports

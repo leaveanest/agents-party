@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>agents-party | OSS foundation for Slack-native AI agents</title>
+    <meta
+      name="description"
+      content="agents-party is an open-source foundation for bringing AI agents into Slack conversations and team workflows, inspired by the product philosophy behind Party on Slack."
+    />
+    <link rel="canonical" href="https://leaveanest.github.io/agents-party/en/" />
+    <link rel="alternate" hreflang="ja" href="https://leaveanest.github.io/agents-party/" />
+    <link rel="alternate" hreflang="en" href="https://leaveanest.github.io/agents-party/en/" />
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Site navigation">
+        <a class="brand" href="./" aria-current="page"
+          ><span class="brand-mark">AP</span>agents-party</a
+        >
+        <div class="nav-links">
+          <a href="./pages/quick-start.html">Quick Start</a>
+          <a href="./pages/architecture.html">Architecture</a>
+          <a href="./pages/security.html">Security</a>
+          <a href="https://github.com/leaveanest/agents-party">GitHub</a>
+          <a class="language-link" href="../">日本語</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Slack-native agent routing OSS</p>
+          <h1>Bring AI agents into the Slack conversations where work already happens.</h1>
+          <p class="lead">
+            agents-party is an OSS foundation inspired by Party on Slack. It helps teammates, AI,
+            and operators collaborate in the same Slack workflow across summaries, search,
+            translation, file understanding, and specialist tools.
+          </p>
+          <div class="actions">
+            <a class="button" href="./pages/quick-start.html">Get started</a>
+            <a class="button secondary" href="https://github.com/leaveanest/agents-party"
+              >View GitHub</a
+            >
+          </div>
+          <div class="proof-row" aria-label="Core technologies">
+            <span class="proof-chip">Slack Bolt</span>
+            <span class="proof-chip">Multi-provider LLM routing</span>
+            <span class="proof-chip">PostgreSQL</span>
+            <span class="proof-chip">Terraform</span>
+          </div>
+        </div>
+
+        <aside class="workspace-visual" aria-label="Example of AI agents joining a Slack workflow">
+          <div class="visual-topbar">
+            <div class="window-dots" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <span class="channel-name">#product-research</span>
+          </div>
+          <div class="message-stream">
+            <div class="message">
+              <div class="avatar">K</div>
+              <div class="bubble">
+                <strong>koizumi</strong>
+                Summarize this material and separate the next actions.
+              </div>
+            </div>
+            <div class="message">
+              <div class="avatar agent">AI</div>
+              <div class="bubble">
+                <strong>assistant route</strong>
+                I will read the thread and files, then route research, translation, and sales
+                summary work.
+              </div>
+            </div>
+            <div class="message">
+              <div class="avatar">T</div>
+              <div class="bubble">
+                <strong>teammate</strong>
+                Please publish the English version to Canvas too.
+              </div>
+            </div>
+          </div>
+          <div class="route-panel">
+            <div class="route-step"><b>Route</b><span>workspace / channel / thread</span></div>
+            <div class="route-step">
+              <b>Model</b><span>OpenAI, Anthropic, Google, Vertex AI</span>
+            </div>
+            <div class="route-step"><b>Tools</b><span>research, files, OAuth, media</span></div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>Product philosophy</h2>
+            <p>
+              AI should not be trapped in a separate app. agents-party turns the Party on Slack
+              philosophy into an operator-owned OSS foundation for Slack workspaces.
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag">Conversation</span>
+              <h3>Teammates, AI, and you</h3>
+              <p>
+                Agents participate in Slack channels and threads, not only private one-to-one chats.
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Routing</span>
+              <h3>No single-model assumption</h3>
+              <p>
+                Route across OpenAI, Anthropic, Google, Vertex AI, and other providers by use case
+                and workspace policy.
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Operator control</span>
+              <h3>Clear runtime ownership</h3>
+              <p>
+                Slack OAuth, workspace credentials, PostgreSQL, and Terraform boundaries are
+                explicit from the start.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>First entry points</h2>
+            <p>
+              Start with the small set of pages an OSS operator needs before running a Slack AI app.
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <h3>Quick Start</h3>
+              <p>Node.js 22, vp, Slack App Manifest, and the fastest local health check path.</p>
+              <p><a href="./pages/quick-start.html">Read the setup path</a></p>
+            </article>
+            <article class="card">
+              <h3>Architecture</h3>
+              <p>
+                A TypeScript modular monolith with Slack, agents, providers, repositories, and
+                PostgreSQL boundaries.
+              </p>
+              <p><a href="./pages/architecture.html">Explore the architecture</a></p>
+            </article>
+            <article class="card">
+              <h3>Security & Data</h3>
+              <p>
+                What configuration is stored, what message content is not retained by default, and
+                where provider terms apply.
+              </p>
+              <p><a href="./pages/security.html">Review the boundaries</a></p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="notice">
+            agents-party is a pre-1.0 OSS application. It is not the commercial Party on Slack app;
+            it is an implementation foundation inspired by the same Slack-native collaboration
+            philosophy.
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>MIT Licensed. Built for Slack-native agent routing.</span>
+        <div class="footer-links">
+          <a href="https://github.com/leaveanest/agents-party/blob/main/README.md">README</a>
+          <a href="https://github.com/leaveanest/agents-party/blob/main/SECURITY.md">Security</a>
+          <a href="../">日本語</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

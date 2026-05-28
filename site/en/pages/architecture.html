@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Architecture | agents-party</title>
+    <meta
+      name="description"
+      content="The Slack, agent orchestration, provider routing, repository, and PostgreSQL boundaries in agents-party."
+    />
+    <link
+      rel="canonical"
+      href="https://leaveanest.github.io/agents-party/en/pages/architecture.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="ja"
+      href="https://leaveanest.github.io/agents-party/pages/architecture.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://leaveanest.github.io/agents-party/en/pages/architecture.html"
+    />
+    <link rel="stylesheet" href="../../assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="Site navigation">
+        <a class="brand" href="../"><span class="brand-mark">AP</span>agents-party</a>
+        <div class="nav-links">
+          <a href="./quick-start.html">Quick Start</a>
+          <a href="./architecture.html" aria-current="page">Architecture</a>
+          <a href="./security.html">Security</a>
+          <a href="https://github.com/leaveanest/agents-party">GitHub</a>
+          <a class="language-link" href="../../pages/architecture.html">日本語</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Architecture</p>
+            <h1>Keep Slack ingress, agent routing, and provider adapters separate.</h1>
+            <p>
+              agents-party is a layered TypeScript modular monolith. Slack SDK, AI SDK, and
+              PostgreSQL SDK types stay at their boundaries while domain message history remains
+              repository-owned.
+            </p>
+          </div>
+          <div class="architecture-map" aria-label="agents-party architecture map">
+            <div class="map-node"><b>Slack</b><span>events, interactions, OAuth</span></div>
+            <div class="map-node"><b>Agents</b><span>routing, tools, specialist runners</span></div>
+            <div class="map-node"><b>Domain</b><span>message history, route models</span></div>
+            <div class="map-node">
+              <b>Providers</b><span>AI SDK adapters, native escape hatches</span>
+            </div>
+            <div class="map-node">
+              <b>PostgreSQL</b><span>installations, credentials, migrations</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="grid-2">
+            <article class="card">
+              <h3>Slack IDs are workspace scoped</h3>
+              <p>
+                Channel, user, thread, and message timestamp identifiers are stored and compared
+                with `team_id`.
+              </p>
+            </article>
+            <article class="card">
+              <h3>AI SDK stays at invocation boundaries</h3>
+              <p>The app does not store AI SDK `ModelMessage[]` as the domain history format.</p>
+            </article>
+            <article class="card">
+              <h3>Provider routing is repository-owned</h3>
+              <p>
+                Model registry, capability matrix, and native provider escape hatches stay in local
+                TypeScript modules.
+              </p>
+            </article>
+            <article class="card">
+              <h3>Redis workers separate Slack acknowledgements</h3>
+              <p>
+                Queue mode lets Slack ingress acknowledge quickly while provider execution runs in
+                workers.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>PlantUML diagrams live in the repository docs.</span>
+        <div class="footer-links">
+          <a href="../">Home</a>
+          <a href="https://github.com/leaveanest/agents-party/tree/main/docs">Docs</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>agents-party | SlackにAIエージェントを参加させるOSS基盤</title>
+    <meta
+      name="description"
+      content="agents-partyは、Slackの会話とチーム作業にAIエージェントを参加させるためのOSS基盤です。Party on Slackの設計思想を受け継ぎ、複数LLMプロバイダー、Slack Bolt、PostgreSQL、Terraformで構成されています。"
+    />
+    <link rel="canonical" href="https://leaveanest.github.io/agents-party/" />
+    <link rel="alternate" hreflang="ja" href="https://leaveanest.github.io/agents-party/" />
+    <link rel="alternate" hreflang="en" href="https://leaveanest.github.io/agents-party/en/" />
+    <link rel="stylesheet" href="./assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="サイトナビゲーション">
+        <a class="brand" href="./" aria-current="page"
+          ><span class="brand-mark">AP</span>agents-party</a
+        >
+        <div class="nav-links">
+          <a href="./pages/quick-start.html">Quick Start</a>
+          <a href="./pages/architecture.html">Architecture</a>
+          <a href="./pages/security.html">Security</a>
+          <a href="https://github.com/leaveanest/agents-party">GitHub</a>
+          <a class="language-link" href="./en/">English</a>
+        </div>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Slack-native agent routing OSS</p>
+          <h1>Slackの会話に、AIエージェントが自然に参加する。</h1>
+          <p class="lead">
+            agents-partyは、Party on
+            Slackの思想を受け継ぐOSS基盤です。仲間、AI、自分が同じSlackの作業導線で会話し、
+            要約、検索、翻訳、ファイル理解、専門ツール呼び出しを進められるようにします。
+          </p>
+          <div class="actions">
+            <a class="button" href="./pages/quick-start.html">始める</a>
+            <a class="button secondary" href="https://github.com/leaveanest/agents-party"
+              >GitHubを見る</a
+            >
+          </div>
+          <div class="proof-row" aria-label="主要技術">
+            <span class="proof-chip">Slack Bolt</span>
+            <span class="proof-chip">Multi-provider LLM routing</span>
+            <span class="proof-chip">PostgreSQL</span>
+            <span class="proof-chip">Terraform</span>
+          </div>
+        </div>
+
+        <aside class="workspace-visual" aria-label="Slack内でAIエージェントが会話に参加する例">
+          <div class="visual-topbar">
+            <div class="window-dots" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <span class="channel-name">#product-research</span>
+          </div>
+          <div class="message-stream">
+            <div class="message">
+              <div class="avatar">K</div>
+              <div class="bubble">
+                <strong>koizumi</strong>
+                この資料を要約して、次のアクションを分けて。
+              </div>
+            </div>
+            <div class="message">
+              <div class="avatar agent">AI</div>
+              <div class="bubble">
+                <strong>assistant route</strong>
+                スレッド文脈とファイルを読み、調査、翻訳、営業向け要約に分けて処理します。
+              </div>
+            </div>
+            <div class="message">
+              <div class="avatar">T</div>
+              <div class="bubble">
+                <strong>teammate</strong>
+                英語版もCanvasに出しておいて。
+              </div>
+            </div>
+          </div>
+          <div class="route-panel">
+            <div class="route-step"><b>Route</b><span>workspace / channel / thread</span></div>
+            <div class="route-step">
+              <b>Model</b><span>OpenAI, Anthropic, Google, Vertex AI</span>
+            </div>
+            <div class="route-step"><b>Tools</b><span>research, files, OAuth, media</span></div>
+          </div>
+        </aside>
+      </section>
+
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>設計思想</h2>
+            <p>
+              AIを別アプリに閉じ込めず、チームがすでに使っているSlackの会話空間に参加させる。
+              agents-partyは、その思想をOSSとして運用できる形に分解します。
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag">Conversation</span>
+              <h3>仲間・AI・自分で進める</h3>
+              <p>
+                DMだけではなく、チャンネルやスレッドの文脈でAIが会話に参加する前提で設計します。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Routing</span>
+              <h3>モデルを固定しない</h3>
+              <p>
+                OpenAI、Anthropic、Google、Vertex
+                AIなど複数プロバイダーを、用途やワークスペース設定で切り替えます。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Operator control</span>
+              <h3>運用者が制御できる</h3>
+              <p>
+                Slack OAuth、workspace
+                credentials、PostgreSQL、Terraformを明示し、導入者が責任範囲を把握できます。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>公開初期の入口</h2>
+            <p>OSS利用者が最初に必要とする導入、構造、データ処理の情報に短い導線を置きます。</p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <h3>Quick Start</h3>
+              <p>Node.js 22、vp、Slack App Manifest、ローカルヘルスチェックまでの最短経路。</p>
+              <p><a href="./pages/quick-start.html">導入手順へ</a></p>
+            </article>
+            <article class="card">
+              <h3>Architecture</h3>
+              <p>
+                Slack、agents、providers、repositories、PostgreSQLを分離したTypeScript modular
+                monolith。
+              </p>
+              <p><a href="./pages/architecture.html">構成を見る</a></p>
+            </article>
+            <article class="card">
+              <h3>Security & Data</h3>
+              <p>
+                保存する設定情報、保存しない会話ログ、プロバイダー利用規約、秘密情報管理の境界。
+              </p>
+              <p><a href="./pages/security.html">安全性を見る</a></p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="notice">
+            agents-partyはpre-1.0のOSSアプリケーションです。Party on
+            Slack商用アプリそのものではなく、
+            Slack内でAIと協働する設計思想を受け継いだ、運用者向けの実装基盤として公開しています。
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>MIT Licensed. Built for Slack-native agent routing.</span>
+        <div class="footer-links">
+          <a href="https://github.com/leaveanest/agents-party/blob/main/README.md">README</a>
+          <a href="https://github.com/leaveanest/agents-party/blob/main/SECURITY.md">Security</a>
+          <a href="./en/">English</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
