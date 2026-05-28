@@ -36,38 +36,32 @@
         <div class="section-inner">
           <div class="section-heading">
             <p class="eyebrow">Quick Start</p>
-            <h1>まずはDocker Composeで、webとworkerまでまとめて確認する。</h1>
+            <h1>Docker Composeでローカル起動する。</h1>
             <p>
-              Agents partyのローカル確認は <code>compose.yaml</code> が最短です。Slack
-              credentialsなしでも、PostgreSQL、Redis、migration、web、workerをまとめて起動し、
-              <code>GET /healthz</code> まで確認できます。
+              Agents partyは
+              <code>compose.yaml</code>
+              でPostgreSQL、Redis、migration、web、workerをまとめて起動できます。
+              Slack接続なしでも、まずはhealth checkまで確認できます。
             </p>
           </div>
           <div class="grid-3">
             <article class="card">
               <span class="tag">Required</span>
-              <h3>ローカル前提</h3>
+              <h3>必要なもの</h3>
               <p>
-                Node.js 22.x、<code>vp</code>、Docker
-                Compose、Slackアプリを作成できるワークスペースを用意します。
+                Docker Compose。コンテナ外で開発する場合だけNode.js 22.xと
+                <code>vp</code> も使います。
               </p>
             </article>
             <article class="card">
-              <span class="tag">Do not switch</span>
-              <h3>パッケージ操作</h3>
-              <p>
-                コンテナ外で依存同期、検証、buildを行う場合は <code>vp</code> を使います。
-                通常操作で <code>npm</code> / <code>pnpm</code> /
-                <code>yarn</code> へ切り替えません。
-              </p>
+              <span class="tag">Slack</span>
+              <h3>あとで接続</h3>
+              <p>実Slackで試すときだけ <code>.env</code> と公開HTTPSトンネルを用意します。</p>
             </article>
             <article class="card">
-              <span class="tag">Secrets</span>
-              <h3>秘密情報</h3>
-              <p>
-                Slack token、OAuth secret、provider API key、database
-                URLを公開Issue、PR、ログ、スクリーンショットに載せないでください。
-              </p>
+              <span class="tag">More</span>
+              <h3>詳細</h3>
+              <p>設定値、Slack scopes、provider keyの扱いはREADMEを参照してください。</p>
             </article>
           </div>
         </div>
@@ -76,39 +70,30 @@
       <section class="section alt">
         <div class="section-inner">
           <div class="section-heading">
-            <h2>Composeで確認する</h2>
-            <p>Slack連携なしのsmoke test、seedありのworkspace route、実Slack接続の順に進めます。</p>
+            <h2>最短手順</h2>
           </div>
           <div class="steps">
             <div class="step">
               <div>
-                <h3>webとworkerを起動する</h3>
+                <h3>起動する</h3>
                 <p>
-                  <code>web</code> と <code>worker</code> を指定すると、PostgreSQL、Redis、
-                  migrationも依存関係として起動します。Slack credentialsが空でもhealth
-                  checkは確認できます。
+                  <code>web</code> と
+                  <code>worker</code> を指定すると、DB、Redis、migrationも一緒に動きます。
                 </p>
                 <pre class="code">docker compose up --build web worker</pre>
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>health checkを確認する</h3>
-                <p>
-                  別シェルでHTTPサーバーの疎通を確認します。ここまで通れば、アプリbuild、migration、
-                  web processの最小経路は動いています。
-                </p>
+                <h3>確認する</h3>
+                <p>別シェルでhealth checkを叩きます。</p>
                 <pre class="code">curl http://localhost:8000/healthz</pre>
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>最初のworkspace routeをseedする</h3>
-                <p>
-                  app mentionをagent/modelへ解決するにはworkspace routeが必要です。ローカル確認では
-                  <code>seed</code> profileでbootstrapできます。実Slackで試す場合は
-                  <code>AGENTS_PARTY_BOOTSTRAP_TEAM_ID</code> を実workspaceのteam idにします。
-                </p>
+                <h3>必要なら初期routeを入れる</h3>
+                <p>Slack app mentionを試す前に、workspace team idでbootstrap routeを作ります。</p>
                 <pre class="code">
 AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
 docker compose --profile seed run --rm seed</pre
@@ -117,28 +102,20 @@ docker compose --profile seed run --rm seed</pre
             </div>
             <div class="step">
               <div>
-                <h3>実Slack接続用に.envを用意する</h3>
+                <h3>Slackにつなぐ</h3>
                 <p>
-                  Slack App Manifestの <code>agents-party.example.com</code> を
-                  <code>http://localhost:8000</code>
-                  へ転送する公開HTTPSトンネルURLに置き換えてから、 Slack
-                  workspaceへimportします。Composeは <code>.env</code> を読みます。
+                  <code>.env</code> にSlack
+                  OAuth設定を入れ、manifestのURLを公開HTTPSトンネルに置き換えてimportします。
                 </p>
                 <pre class="code">
 cp .env.example .env
-# Fill SLACK_SIGNING_SECRET, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET,
-# SLACK_STATE_SECRET, AGENT_MODEL, and provider credentials as needed.
 docker compose up --build web worker</pre
                 >
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>ログと状態を確認する</h3>
-                <p>
-                  Slack eventやprovider実行を確認するときはweb/workerのログを分けて見ます。 queue
-                  modeではwebがSlack requestを受け、workerがagent実行と返信を担当します。
-                </p>
+                <h3>ログを見る</h3>
                 <pre class="code">
 docker compose logs -f web
 docker compose logs -f worker</pre
@@ -148,12 +125,9 @@ docker compose logs -f worker</pre
             <div class="step">
               <div>
                 <h3>停止する</h3>
-                <p>
-                  環境を作り直したい場合だけvolumeも削除します。PostgreSQLのローカルデータも消える点に注意してください。
-                </p>
                 <pre class="code">
 docker compose down
-docker compose down -v  # reset local PostgreSQL and Redis volumes</pre
+docker compose down -v  # DB/Redisも消す場合</pre
                 >
               </div>
             </div>
@@ -165,16 +139,15 @@ docker compose down -v  # reset local PostgreSQL and Redis volumes</pre
         <div class="section-inner">
           <div class="grid-2">
             <article class="card">
-              <h3>コンテナ外で個別に動かす場合</h3>
+              <h3>コンテナ外で動かす場合</h3>
               <p>
-                開発時にwebだけを手元で動かしたい場合は、<code>vp install</code>
-                後にPostgreSQL/Redisだけを Composeで起動し、<code>vp run dev</code> や
-                <code>vp run worker</code> を使います。
+                詳細はREADMEのQuick Startを参照してください。通常のJS/TS操作は
+                <code>vp</code> を使います。
               </p>
             </article>
             <article class="card">
               <h3>PR前の検証</h3>
-              <p>通常の変更では、format/lint、型チェック、テスト、packを通してからPRにします。</p>
+              <p>変更前後の確認にはこのセットを使います。</p>
               <pre class="code">
 vp check
 vp run typecheck
@@ -188,7 +161,7 @@ vp pack</pre
     </main>
     <footer class="footer">
       <div class="footer-inner">
-        <span>詳細はGitHubのREADMEを参照してください。</span>
+        <span>詳細な設定と運用メモはREADMEにあります。</span>
         <div class="footer-links">
           <a href="../">Home</a>
           <a href="https://github.com/leaveanest/agents-party/blob/main/README.md">README</a>

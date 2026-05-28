@@ -39,38 +39,33 @@
         <div class="section-inner">
           <div class="section-heading">
             <p class="eyebrow">Quick Start</p>
-            <h1>Start with Docker Compose and verify web plus worker together.</h1>
+            <h1>Run locally with Docker Compose.</h1>
             <p>
-              <code>compose.yaml</code> is the fastest local path for Agents party. It can start
-              PostgreSQL, Redis, migrations, web, and worker together even before Slack credentials
-              are configured.
+              <code>compose.yaml</code> starts PostgreSQL, Redis, migrations, web, and worker
+              together. You can verify the health endpoint before connecting Slack.
             </p>
           </div>
           <div class="grid-3">
             <article class="card">
               <span class="tag">Required</span>
-              <h3>Local prerequisites</h3>
+              <h3>Prerequisite</h3>
               <p>
-                Use Node.js 22.x, <code>vp</code>, Docker Compose, and a Slack workspace where you
-                can create or install an app.
+                Docker Compose. Use Node.js 22.x and <code>vp</code> only when developing outside
+                containers.
               </p>
             </article>
             <article class="card">
-              <span class="tag">Do not switch</span>
-              <h3>Package workflow</h3>
+              <span class="tag">Slack</span>
+              <h3>Connect later</h3>
               <p>
-                Use <code>vp</code> when working outside containers for dependency sync, validation,
-                and builds. Do not switch normal workflows to direct <code>npm</code>,
-                <code>pnpm</code>, or <code>yarn</code> commands.
+                Use <code>.env</code> and a public HTTPS tunnel only when testing real Slack
+                traffic.
               </p>
             </article>
             <article class="card">
-              <span class="tag">Secrets</span>
-              <h3>Keep secrets out</h3>
-              <p>
-                Do not put Slack tokens, OAuth secrets, provider API keys, database URLs, or copied
-                Slack transcripts in public issues, PRs, logs, or screenshots.
-              </p>
+              <span class="tag">More</span>
+              <h3>Details</h3>
+              <p>See the README for configuration, Slack scopes, and provider key handling.</p>
             </article>
           </div>
         </div>
@@ -79,40 +74,32 @@
       <section class="section alt">
         <div class="section-inner">
           <div class="section-heading">
-            <h2>Verify with Compose</h2>
-            <p>
-              Start with the no-Slack smoke test, then add the bootstrap workspace route and real
-              Slack credentials.
-            </p>
+            <h2>Shortest path</h2>
           </div>
           <div class="steps">
             <div class="step">
               <div>
-                <h3>Start web and worker</h3>
+                <h3>Start the stack</h3>
                 <p>
-                  Starting <code>web</code> and <code>worker</code> also starts PostgreSQL, Redis,
-                  and migrations through service dependencies. Health checks work without Slack
-                  credentials.
+                  <code>web</code> and <code>worker</code> pull in the database, Redis, and
+                  migrations.
                 </p>
                 <pre class="code">docker compose up --build web worker</pre>
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>Check the health endpoint</h3>
-                <p>
-                  In another shell, confirm that the HTTP server is responding. At this point the
-                  app build, migrations, and web process have all run.
-                </p>
+                <h3>Check health</h3>
+                <p>In another shell, confirm that the HTTP server is responding.</p>
                 <pre class="code">curl http://localhost:8000/healthz</pre>
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>Seed the first workspace route</h3>
+                <h3>Seed a route when needed</h3>
                 <p>
-                  App mentions need an enabled agent and model route. For real Slack testing, set
-                  <code>AGENTS_PARTY_BOOTSTRAP_TEAM_ID</code> to the actual Slack workspace team id.
+                  Before testing Slack app mentions, create the bootstrap route with a workspace
+                  team id.
                 </p>
                 <pre class="code">
 AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
@@ -122,27 +109,20 @@ docker compose --profile seed run --rm seed</pre
             </div>
             <div class="step">
               <div>
-                <h3>Prepare .env for real Slack traffic</h3>
+                <h3>Connect Slack</h3>
                 <p>
-                  Replace <code>agents-party.example.com</code> in the Slack App Manifest with a
-                  public HTTPS tunnel that forwards to <code>http://localhost:8000</code>, then
-                  import it into Slack. Compose reads local settings from <code>.env</code>.
+                  Fill <code>.env</code>, replace manifest URLs with your public HTTPS tunnel, then
+                  import the manifest into Slack.
                 </p>
                 <pre class="code">
 cp .env.example .env
-# Fill SLACK_SIGNING_SECRET, SLACK_CLIENT_ID, SLACK_CLIENT_SECRET,
-# SLACK_STATE_SECRET, AGENT_MODEL, and provider credentials as needed.
 docker compose up --build web worker</pre
                 >
               </div>
             </div>
             <div class="step">
               <div>
-                <h3>Watch web and worker logs</h3>
-                <p>
-                  In queue mode, the web process receives Slack requests while the worker performs
-                  agent execution and posts replies.
-                </p>
+                <h3>Watch logs</h3>
                 <pre class="code">
 docker compose logs -f web
 docker compose logs -f worker</pre
@@ -151,14 +131,10 @@ docker compose logs -f worker</pre
             </div>
             <div class="step">
               <div>
-                <h3>Stop or reset the stack</h3>
-                <p>
-                  Only remove volumes when you intentionally want to reset local PostgreSQL and
-                  Redis data.
-                </p>
+                <h3>Stop</h3>
                 <pre class="code">
 docker compose down
-docker compose down -v  # reset local PostgreSQL and Redis volumes</pre
+docker compose down -v  # remove DB/Redis volumes too</pre
                 >
               </div>
             </div>
@@ -170,16 +146,12 @@ docker compose down -v  # reset local PostgreSQL and Redis volumes</pre
         <div class="section-inner">
           <div class="grid-2">
             <article class="card">
-              <h3>Running pieces outside containers</h3>
-              <p>
-                When you want to run only the web process on the host, use <code>vp install</code>,
-                keep PostgreSQL and Redis in Compose, then run <code>vp run dev</code> or
-                <code>vp run worker</code> locally.
-              </p>
+              <h3>Running outside containers</h3>
+              <p>See the README Quick Start. Use <code>vp</code> for normal JS/TS workflows.</p>
             </article>
             <article class="card">
               <h3>Validation before a PR</h3>
-              <p>Run the normal repository validation set before opening a pull request.</p>
+              <p>Use this set before opening a pull request.</p>
               <pre class="code">
 vp check
 vp run typecheck
@@ -193,7 +165,7 @@ vp pack</pre
     </main>
     <footer class="footer">
       <div class="footer-inner">
-        <span>See the GitHub README for the complete operator path.</span>
+        <span>See the README for detailed configuration and operations notes.</span>
         <div class="footer-links">
           <a href="../">Home</a>
           <a href="https://github.com/leaveanest/agents-party/blob/main/README.md">README</a>
