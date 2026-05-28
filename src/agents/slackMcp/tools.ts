@@ -30,10 +30,12 @@ export type SlackMcpCanvasAccessSetter = {
 };
 
 export type SlackMcpCanvasAccessSetInput = SlackMcpTokenLookup & {
-  accessLevel: "read" | "write";
   canvasId: string;
+  channelAccessLevel: "read" | "write";
   channelIds: string[];
   token: string;
+  userAccessLevel: "read" | "write";
+  userIds: string[];
 };
 
 export type SlackMcpToolSetHandle = {
@@ -183,32 +185,36 @@ async function shareCreatedCanvasIfPossible(
     );
   }
   const channelIds = regularChannelIds(context.viewerContextChannelIds);
-  if (channelIds.length === 0) {
+  const userIds = regularUserIds([context.userId]);
+  if (channelIds.length === 0 && userIds.length === 0) {
     return result;
   }
   try {
     await options.canvasAccessSetter.setCanvasAccess({
-      accessLevel: "read",
       canvasId,
+      channelAccessLevel: "read",
       channelIds,
       enterpriseId: context.enterpriseId,
       isEnterpriseInstall: context.isEnterpriseInstall,
       teamId: context.teamId,
       token: options.token,
+      userAccessLevel: "write",
       userId: context.userId,
+      userIds,
     });
     return result;
   } catch (error) {
-    logWarn(options.logger, "Failed to share Slack MCP-created Canvas with invocation channel.", {
+    logWarn(options.logger, "Failed to update Slack MCP-created Canvas access.", {
       canvasId,
       channelIds,
       error,
       teamId: context.teamId,
       userId: context.userId,
+      userIds,
     });
     return appendCanvasShareStatus(
       result,
-      "Canvas was created, but Agents Party could not share it with the current Slack channel. Tell the user that channel sharing failed and include the Canvas link.",
+      "Canvas was created, but Agents Party could not finish sharing it with the current Slack channel and granting the user edit access. Tell the user that Canvas permission updates failed and include the Canvas link.",
     );
   }
 }
@@ -219,6 +225,14 @@ function regularChannelIds(channelIds: string[]): string[] {
 
 function isRegularChannelId(channelId: string): boolean {
   return /^[CG][A-Z0-9]+$/i.test(channelId);
+}
+
+function regularUserIds(userIds: string[]): string[] {
+  return [...new Set(userIds.map((userId) => userId.trim()).filter(isRegularUserId))];
+}
+
+function isRegularUserId(userId: string): boolean {
+  return /^[UW][A-Z0-9]+$/i.test(userId);
 }
 
 function extractCanvasId(value: unknown, teamId: string): string | undefined {

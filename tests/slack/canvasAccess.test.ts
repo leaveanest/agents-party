@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { createSlackCanvasAccessSetter } from "../../src/slack/canvasAccess.js";
 
 describe("createSlackCanvasAccessSetter", () => {
-  it("sets Canvas access for Slack channels with the user token", async () => {
+  it("sets Canvas access for Slack channels and users with the user token", async () => {
     const apiCalls: unknown[] = [];
     const setter = createSlackCanvasAccessSetter((token) => ({
       async apiCall(method, options) {
@@ -13,12 +13,14 @@ describe("createSlackCanvasAccessSetter", () => {
     }));
 
     await setter.setCanvasAccess({
-      accessLevel: "read",
       canvasId: "F0B6PN7YQZ",
+      channelAccessLevel: "read",
       channelIds: ["C1"],
       teamId: "T1",
       token: "xoxp-token",
+      userAccessLevel: "write",
       userId: "U1",
+      userIds: ["U1"],
     });
 
     expect(apiCalls).toEqual([
@@ -31,10 +33,19 @@ describe("createSlackCanvasAccessSetter", () => {
         },
         token: "xoxp-token",
       },
+      {
+        method: "canvases.access.set",
+        options: {
+          access_level: "write",
+          canvas_id: "F0B6PN7YQZ",
+          user_ids: ["U1"],
+        },
+        token: "xoxp-token",
+      },
     ]);
   });
 
-  it("skips Slack API calls when no channel ids are available", async () => {
+  it("skips Slack API calls when no channel or user ids are available", async () => {
     const apiCalls: unknown[] = [];
     const setter = createSlackCanvasAccessSetter(() => ({
       async apiCall(method, options) {
@@ -44,12 +55,14 @@ describe("createSlackCanvasAccessSetter", () => {
     }));
 
     await setter.setCanvasAccess({
-      accessLevel: "read",
       canvasId: "F0B6PN7YQZ",
+      channelAccessLevel: "read",
       channelIds: [],
       teamId: "T1",
       token: "xoxp-token",
+      userAccessLevel: "write",
       userId: "U1",
+      userIds: [],
     });
 
     expect(apiCalls).toEqual([]);
@@ -64,12 +77,14 @@ describe("createSlackCanvasAccessSetter", () => {
 
     await expect(
       setter.setCanvasAccess({
-        accessLevel: "read",
         canvasId: "F0B6PN7YQZ",
+        channelAccessLevel: "read",
         channelIds: ["C1"],
         teamId: "T1",
         token: "xoxp-token",
+        userAccessLevel: "write",
         userId: "U1",
+        userIds: [],
       }),
     ).rejects.toThrow("restricted_action");
   });

@@ -9,19 +9,46 @@ export function createSlackCanvasAccessSetter(
 ): SlackMcpCanvasAccessSetter {
   return {
     async setCanvasAccess(input) {
-      if (input.channelIds.length === 0) {
-        return;
+      if (input.channelIds.length > 0) {
+        await setAccess(clientFactory(input.token), {
+          accessLevel: input.channelAccessLevel,
+          canvasId: input.canvasId,
+          channelIds: input.channelIds,
+        });
       }
-      const response = await clientFactory(input.token).apiCall("canvases.access.set", {
-        access_level: input.accessLevel,
-        canvas_id: input.canvasId,
-        channel_ids: input.channelIds,
-      });
-      if (response.ok === false) {
-        throw new Error(
-          `Slack canvases.access.set failed: ${typeof response.error === "string" ? response.error : "unknown_error"}`,
-        );
+      if (input.userIds.length > 0) {
+        await setAccess(clientFactory(input.token), {
+          accessLevel: input.userAccessLevel,
+          canvasId: input.canvasId,
+          userIds: input.userIds,
+        });
       }
     },
   };
+}
+
+async function setAccess(
+  client: SlackWebApiCaller,
+  input:
+    | {
+        accessLevel: "read" | "write";
+        canvasId: string;
+        channelIds: string[];
+      }
+    | {
+        accessLevel: "read" | "write";
+        canvasId: string;
+        userIds: string[];
+      },
+): Promise<void> {
+  const response = await client.apiCall("canvases.access.set", {
+    access_level: input.accessLevel,
+    canvas_id: input.canvasId,
+    ...("channelIds" in input ? { channel_ids: input.channelIds } : { user_ids: input.userIds }),
+  });
+  if (response.ok === false) {
+    throw new Error(
+      `Slack canvases.access.set failed: ${typeof response.error === "string" ? response.error : "unknown_error"}`,
+    );
+  }
 }

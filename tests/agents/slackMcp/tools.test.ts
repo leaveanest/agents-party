@@ -69,7 +69,7 @@ describe("createSlackMcpToolSet", () => {
     expect(calls).toEqual([{ channel_ids: ["C1"], markdown: "# Summary", title: "Summary" }]);
   });
 
-  it("shares Slack MCP-created Canvases with the invocation channel after creation", async () => {
+  it("shares Slack MCP-created Canvases with the invocation channel and grants user edit access", async () => {
     const accessSets: unknown[] = [];
     const handle = await createSlackMcpToolSet({
       canvasAccessSetter: {
@@ -106,12 +106,14 @@ describe("createSlackMcpToolSet", () => {
     });
     expect(accessSets).toEqual([
       expect.objectContaining({
-        accessLevel: "read",
         canvasId: "F0B6PN7YQZ",
+        channelAccessLevel: "read",
         channelIds: ["C1"],
         teamId: "T1",
         token: "xoxp-token",
+        userAccessLevel: "write",
         userId: "U1",
+        userIds: ["U1"],
       }),
     ]);
   });
@@ -188,7 +190,7 @@ describe("createSlackMcpToolSet", () => {
     expect(accessSets).toEqual([]);
   });
 
-  it("adds a model-visible status when Slack Canvas channel sharing fails", async () => {
+  it("adds a model-visible status when Slack Canvas permission updates fail", async () => {
     const handle = await createSlackMcpToolSet({
       canvasAccessSetter: {
         async setCanvasAccess() {
@@ -221,7 +223,7 @@ describe("createSlackMcpToolSet", () => {
           type: "text",
         },
         {
-          text: "Canvas was created, but Agents Party could not share it with the current Slack channel. Tell the user that channel sharing failed and include the Canvas link.",
+          text: "Canvas was created, but Agents Party could not finish sharing it with the current Slack channel and granting the user edit access. Tell the user that Canvas permission updates failed and include the Canvas link.",
           type: "text",
         },
       ],
