@@ -421,30 +421,6 @@ h3 {
   line-height: 1.6;
 }
 
-.architecture-map {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
-  gap: 10px;
-  align-items: stretch;
-}
-
-.map-node {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 15px;
-  background: var(--surface);
-}
-
-.map-node b {
-  display: block;
-  margin-bottom: 5px;
-}
-
-.map-node span {
-  color: var(--muted);
-  font-size: 13px;
-}
-
 .notice {
   border-left: 4px solid var(--gold);
   padding: 16px 18px;
@@ -493,8 +469,7 @@ h3 {
   }
 
   .grid-3,
-  .grid-2,
-  .architecture-map {
+  .grid-2 {
     grid-template-columns: 1fr;
   }
 
