@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Architecture | agents-party</title>
+    <title>Architecture | Agents party</title>
     <meta
       name="description"
-      content="agents-partyのSlack、agent orchestration、provider routing、repository、PostgreSQL境界を説明します。"
+      content="Agents partyのSlack、agent orchestration、provider routing、repository、PostgreSQL境界を説明します。"
     />
     <link
       rel="canonical"
@@ -27,7 +27,7 @@
   <body>
     <header class="site-header">
       <nav class="nav" aria-label="サイトナビゲーション">
-        <a class="brand" href="../"><span class="brand-mark">AP</span>agents-party</a>
+        <a class="brand" href="../"><span class="brand-mark">AP</span>Agents party</a>
         <div class="nav-links">
           <a href="./quick-start.html">Quick Start</a>
           <a href="./architecture.html" aria-current="page">Architecture</a>
@@ -44,11 +44,11 @@
             <p class="eyebrow">Architecture</p>
             <h1>Slack境界からprovider adapterまでを分ける。</h1>
             <p>
-              agents-partyはTypeScriptのlayered modular monolithです。Slack SDK、AI SDK、PostgreSQL
+              Agents partyはTypeScriptのlayered modular monolithです。Slack SDK、AI SDK、PostgreSQL
               SDKの型を 必要な境界に閉じ込め、ドメイン履歴はリポジトリ独自モデルで扱います。
             </p>
           </div>
-          <div class="architecture-map" aria-label="agents-party architecture map">
+          <div class="architecture-map" aria-label="Agents party architecture map">
             <div class="map-node"><b>Slack</b><span>events, interactions, OAuth</span></div>
             <div class="map-node"><b>Agents</b><span>routing, tools, specialist runners</span></div>
             <div class="map-node"><b>Domain</b><span>message history, route models</span></div>

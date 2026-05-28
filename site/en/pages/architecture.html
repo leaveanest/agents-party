@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Architecture | agents-party</title>
+    <title>Architecture | Agents party</title>
     <meta
       name="description"
-      content="The Slack, agent orchestration, provider routing, repository, and PostgreSQL boundaries in agents-party."
+      content="The Slack, agent orchestration, provider routing, repository, and PostgreSQL boundaries in Agents party."
     />
     <link
       rel="canonical"
@@ -27,7 +27,7 @@
   <body>
     <header class="site-header">
       <nav class="nav" aria-label="Site navigation">
-        <a class="brand" href="../"><span class="brand-mark">AP</span>agents-party</a>
+        <a class="brand" href="../"><span class="brand-mark">AP</span>Agents party</a>
         <div class="nav-links">
           <a href="./quick-start.html">Quick Start</a>
           <a href="./architecture.html" aria-current="page">Architecture</a>
@@ -44,12 +44,12 @@
             <p class="eyebrow">Architecture</p>
             <h1>Keep Slack ingress, agent routing, and provider adapters separate.</h1>
             <p>
-              agents-party is a layered TypeScript modular monolith. Slack SDK, AI SDK, and
+              Agents party is a layered TypeScript modular monolith. Slack SDK, AI SDK, and
               PostgreSQL SDK types stay at their boundaries while domain message history remains
               repository-owned.
             </p>
           </div>
-          <div class="architecture-map" aria-label="agents-party architecture map">
+          <div class="architecture-map" aria-label="Agents party architecture map">
             <div class="map-node"><b>Slack</b><span>events, interactions, OAuth</span></div>
             <div class="map-node"><b>Agents</b><span>routing, tools, specialist runners</span></div>
             <div class="map-node"><b>Domain</b><span>message history, route models</span></div>
