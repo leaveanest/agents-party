@@ -4992,7 +4992,7 @@ describe("createAgentSlackHandlers", () => {
           result: {
             decision: { action: "respond", reason: "test" },
             message:
-              "こちらです:\nCanvasを作成しました。\n<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>",
+              "こちらです:\nCanvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
             toolResults: [],
           },
           type: "result",
@@ -5030,7 +5030,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(appends).toEqual([
       { markdown_text: "Canvasを作成しました。" },
-      { markdown_text: "\n<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>" },
+      { markdown_text: "\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
     ]);
   });
 
@@ -5047,7 +5047,7 @@ describe("createAgentSlackHandlers", () => {
         yield {
           result: {
             decision: { action: "respond", reason: "test" },
-            message: "Canvasを作成しました。\n<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>",
+            message: "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
             toolResults: [],
           },
           type: "result",
@@ -5085,7 +5085,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(appends).toEqual([
       { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>" },
+      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
     ]);
   });
 
@@ -5103,7 +5103,7 @@ describe("createAgentSlackHandlers", () => {
         yield {
           result: {
             decision: { action: "respond", reason: "test" },
-            message: "Canvasを作成しました。\n<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>",
+            message: "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
             toolResults: [],
           },
           type: "result",
@@ -5141,7 +5141,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(appends).toEqual([
       { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>" },
+      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
     ]);
   });
 
@@ -5162,7 +5162,7 @@ describe("createAgentSlackHandlers", () => {
         yield {
           result: {
             decision: { action: "respond", reason: "test" },
-            message: "Canvasを作成しました。\n<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>",
+            message: "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
             toolResults: [],
           },
           type: "result",
@@ -5200,7 +5200,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(appends).toEqual([
       { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>" },
+      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
     ]);
   });
 
@@ -5217,7 +5217,7 @@ describe("createAgentSlackHandlers", () => {
         yield {
           result: {
             decision: { action: "respond", reason: "test" },
-            message: "Canvasを作成しました。\n<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>",
+            message: "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
             toolResults: [],
           },
           type: "result",
@@ -5255,7 +5255,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(appends).toEqual([
       { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>" },
+      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
     ]);
   });
 
@@ -5272,7 +5272,7 @@ describe("createAgentSlackHandlers", () => {
         yield {
           result: {
             decision: { action: "respond", reason: "test" },
-            message: "Canvasを作成しました。\n<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>",
+            message: "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
             toolResults: [],
           },
           type: "result",
@@ -5310,7 +5310,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(appends).toEqual([
       { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>" },
+      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
     ]);
   });
 
@@ -5328,7 +5328,7 @@ describe("createAgentSlackHandlers", () => {
         yield {
           result: {
             decision: { action: "respond", reason: "test" },
-            message: "Canvasを作成しました。\n<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>",
+            message: "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
             toolResults: [],
           },
           type: "result",
@@ -5366,7 +5366,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(appends).toEqual([
       { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6>" },
+      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
     ]);
   });
 

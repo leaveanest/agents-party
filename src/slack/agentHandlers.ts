@@ -8177,7 +8177,7 @@ function normalizeSlackCanvasUrls(text: string): string {
 }
 
 function slackCanvasLink(teamId: string, canvasId: string): string {
-  return `<https://app.slack.com/docs/${teamId.toLowerCase()}/${canvasId.toLowerCase()}>`;
+  return `<https://app.slack.com/docs/${teamId}/${canvasId}>`;
 }
 
 function flushableStreamingText(text: string): { pending: string; text: string } {
