@@ -69,6 +69,8 @@ describe("loadSettings", () => {
       slackSigningSecret: undefined,
       slackStateSecret: undefined,
       slackUserScopes: [
+        "canvases:read",
+        "canvases:write",
         "channels:history",
         "groups:history",
         "im:history",

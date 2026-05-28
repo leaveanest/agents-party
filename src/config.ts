@@ -85,6 +85,8 @@ const DEFAULT_SLACK_SCOPES = [
   "users:read",
 ];
 const DEFAULT_SLACK_USER_SCOPES = [
+  "canvases:read",
+  "canvases:write",
   "channels:history",
   "groups:history",
   "im:history",

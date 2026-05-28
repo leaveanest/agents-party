@@ -34,6 +34,8 @@ oauth_config:
       - reactions:read
       - users:read
     user:
+      - canvases:read
+      - canvases:write
       - channels:history
       - groups:history
       - im:history

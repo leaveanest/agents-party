@@ -27,6 +27,10 @@ Slack OAuth install routes additionally require:
 `SLACK_USER_SCOPES` is comma-separated. Slack Real-time Search and Slack MCP tools use these
 invoking-user token scopes when search or MCP access is enabled.
 
+Slack MCP Canvas tools require the user `canvases:read` and `canvases:write` scopes. Existing Slack
+workspace installations must reinstall the app after these scopes are added, otherwise Slack MCP
+will not expose Canvas tools for the invoking user.
+
 Slack-visible fixed copy is localized with the following fallback order:
 
 1. App-level user setting from `app_user_settings.locale`

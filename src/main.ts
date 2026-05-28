@@ -21,6 +21,7 @@ import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCre
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
+import { createSlackCanvasAccessSetter } from "./slack/canvasAccess.js";
 import { createSlackInstallationMcpTokenResolver } from "./slack/mcpTokenResolver.js";
 import { createSlackWebClientProvider } from "./slack/webClient.js";
 
@@ -90,6 +91,7 @@ const agentRunner = createDefaultAgentRunner(settings, {
   featureSettingsRepository,
   logger: console,
   salesforcePdfTools,
+  slackMcpCanvasAccessSetter: createSlackCanvasAccessSetter(),
   slackMcpTokenResolver:
     slackInstallationRepository === undefined
       ? undefined

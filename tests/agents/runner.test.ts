@@ -789,6 +789,88 @@ describe("AgentRunner", () => {
     expect(closed).toEqual(["closed"]);
   });
 
+  it("uses Slack MCP canvas tools when they are available and preserves the Canvas link", async () => {
+    const router = new FakeProviderRouter({
+      content: "Canvasを作成しました。\nhttps://e073v4z73am-8fdn8m4h.slack.com/docs/T1/F0B6CLMM4PQ",
+      toolResults: [
+        {
+          input: { markdown: "# Summary", title: "Summary" },
+          output: {
+            content: [
+              {
+                text: "Canvas created: https://e073v4z73am-8fdn8m4h.slack.com/docs/T1/F0B6CLMM4PQ",
+                type: "text",
+              },
+            ],
+          },
+          toolCallId: "call-1",
+          toolName: "slack_create_canvas",
+        },
+      ],
+    });
+    const mcpTools: ToolSet = {
+      slack_create_canvas: {
+        description: "Create a Slack Canvas through MCP.",
+        execute: async () => ({
+          content: [
+            {
+              text: "Canvas created: https://e073v4z73am-8fdn8m4h.slack.com/docs/T1/F0B6CLMM4PQ",
+              type: "text",
+            },
+          ],
+        }),
+        inputSchema: jsonSchema({ type: "object" }),
+        type: "dynamic",
+      } as ToolSet[string],
+    };
+    const runner = new AgentRunner({
+      aiSdkToolSetFactory: () => ({
+        close: async () => {},
+        tools: mcpTools,
+      }),
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "このスレッドをCanvasにして",
+      userId: "U1",
+    });
+
+    expect(result.message).toContain("<https://app.slack.com/docs/T1/F0B6CLMM4PQ>");
+    expect(result.message).not.toContain("e073v4z73am-8fdn8m4h.slack.com");
+    expect(router.requests[0]?.aiSdkTools?.slack_create_canvas).toBe(mcpTools.slack_create_canvas);
+  });
+
+  it("returns a user-facing authorization message for Canvas requests without MCP canvas tools", async () => {
+    const router = new FakeProviderRouter({
+      content: "should not run",
+    });
+    const runner = new AgentRunner({
+      aiSdkToolSetFactory: () => ({
+        close: async () => {},
+        tools: {},
+      }),
+      defaultModelId: model.id,
+      providerRouter: router,
+    });
+
+    const result = await runner.run({
+      channelId: "C1",
+      messageTs: "1.0",
+      teamId: "T1",
+      text: "このスレッドをCanvasにして",
+      userId: "U1",
+    });
+
+    expect(result.message).toContain("Slack MCPのユーザー認可");
+    expect(result.message).toContain("canvases:read / canvases:write");
+    expect(router.requests).toEqual([]);
+  });
+
   it("continues without AI SDK toolsets when preparing them fails", async () => {
     const router = new FakeProviderRouter({
       content: "without mcp",
