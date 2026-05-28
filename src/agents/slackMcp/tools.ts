@@ -202,6 +202,13 @@ async function shareCreatedCanvasIfPossible(
       userId: context.userId,
       userIds,
     });
+    logInfo(options.logger, "Updated Slack MCP-created Canvas access.", {
+      canvasId,
+      channelIds,
+      teamId: context.teamId,
+      userId: context.userId,
+      userIds,
+    });
     return result;
   } catch (error) {
     logWarn(options.logger, "Failed to update Slack MCP-created Canvas access.", {
@@ -295,14 +302,41 @@ function canvasIdsFromSlackDocsUrlsInResultText(
     if (!isRecord(item) || typeof item.text !== "string") {
       return [];
     }
-    return slackDocsUrlCanvasIds(item.text, teamId);
+    return canvasIdsFromCreateResultText(item.text, teamId);
   });
   return uniqueStrings(candidates).length === 1 ? uniqueStrings(candidates) : [];
 }
 
+function canvasIdsFromCreateResultText(text: string, teamId: string): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) {
+    return [];
+  }
+  if (looksLikeCanvasUrlOnly(trimmed) || looksLikeCanvasCreateResultWithOnlyUrl(trimmed)) {
+    return slackDocsUrlCanvasIds(trimmed, teamId);
+  }
+  return [];
+}
+
+function looksLikeCanvasUrlOnly(text: string): boolean {
+  return /^<?https:\/\/(?:app|[a-z0-9-]+)\.slack\.com\/docs\/[a-z0-9]+\/f[a-z0-9]{7,}>?$/i.test(
+    text,
+  );
+}
+
+function looksLikeCanvasCreateResultWithOnlyUrl(text: string): boolean {
+  return /^(?:Canvas\s+(?:created|was created|has been created)(?:\s+successfully)?|Created(?:\s+a)?(?:\s+Slack)?\s+Canvas|Successfully\s+created(?:\s+a)?(?:\s+Slack)?\s+Canvas|Canvasを作成しました|キャンバスを作成しました)\s*(?::|：|-)?\s*<?https:\/\/(?:app|[a-z0-9-]+)\.slack\.com\/docs\/[a-z0-9]+\/f[a-z0-9]{7,}>?$/i.test(
+    text.trim(),
+  );
+}
+
 function slackDocsUrlCanvasIds(value: string, teamId: string): string[] {
   return uniqueStrings(
-    [...value.matchAll(/https:\/\/app\.slack\.com\/docs\/([a-z0-9]+)\/(f[a-z0-9]{7,})/gi)]
+    [
+      ...value.matchAll(
+        /https:\/\/(?:app|[a-z0-9-]+)\.slack\.com\/docs\/([a-z0-9]+)\/(f[a-z0-9]{7,})/gi,
+      ),
+    ]
       .filter((match) => match[1]?.toLowerCase() === teamId.toLowerCase())
       .map((match) => match[2])
       .filter((canvasId): canvasId is string => canvasId !== undefined && isCanvasId(canvasId)),
@@ -500,6 +534,12 @@ function failure(
 function logWarn(logger: unknown, message: string, metadata: Record<string, unknown>): void {
   if (isRecord(logger) && typeof logger.warn === "function") {
     logger.warn(message, metadata);
+  }
+}
+
+function logInfo(logger: unknown, message: string, metadata: Record<string, unknown>): void {
+  if (isRecord(logger) && typeof logger.info === "function") {
+    logger.info(message, metadata);
   }
 }
 
