@@ -35,6 +35,111 @@ describe("createSlackMcpToolSet", () => {
     ]);
   });
 
+  it("adds the invocation channel to Slack Canvas creation inputs when the MCP schema supports it", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(
+          async (input) => {
+            calls.push(input);
+            return { content: [{ text: "created", type: "text" }] };
+          },
+          {
+            properties: {
+              channel_ids: { items: { type: "string" }, type: "array" },
+              markdown: { type: "string" },
+              title: { type: "string" },
+            },
+            type: "object",
+          },
+        ),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_create_canvas", {
+        markdown: "# Summary",
+        title: "Summary",
+      }),
+    ).resolves.toEqual({
+      content: [{ text: "created", type: "text" }],
+    });
+    expect(calls).toEqual([{ channel_ids: ["C1"], markdown: "# Summary", title: "Summary" }]);
+  });
+
+  it("does not overwrite explicit Slack Canvas creation channel inputs", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(
+          async (input) => {
+            calls.push(input);
+            return { content: [{ text: "created", type: "text" }] };
+          },
+          {
+            properties: {
+              channel_id: { type: "string" },
+              markdown: { type: "string" },
+            },
+            type: "object",
+          },
+        ),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_create_canvas", {
+        channel_id: "C1",
+        markdown: "# Summary",
+      }),
+    ).resolves.toEqual({
+      content: [{ text: "created", type: "text" }],
+    });
+    expect(calls).toEqual([{ channel_id: "C1", markdown: "# Summary" }]);
+  });
+
+  it("rejects Slack Canvas creation shares outside the invocation channel allowlist", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(
+          async (input) => {
+            calls.push(input);
+            return { content: [{ text: "created", type: "text" }] };
+          },
+          {
+            properties: {
+              channel_ids: { items: { type: "string" }, type: "array" },
+              markdown: { type: "string" },
+            },
+            type: "object",
+          },
+        ),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    for (const input of [
+      { channel_id: "C2", markdown: "# Summary" },
+      { channel_ids: ["C1", "C2"], markdown: "# Summary" },
+      { channelIds: ["C2"], markdown: "# Summary" },
+    ]) {
+      await expect(executeTool(handle?.tools, "slack_create_canvas", input)).resolves.toMatchObject(
+        {
+          code: "slack_mcp_channel_not_allowed",
+          ok: false,
+          reconnectRequired: false,
+        },
+      );
+    }
+    expect(calls).toEqual([]);
+  });
+
   it("uses the invocation-scoped installation user token when creating the MCP client", async () => {
     const createdWithTokens: string[] = [];
     const toolCalls: unknown[] = [];
@@ -323,11 +428,12 @@ function fakeTool(
   execute: (input: unknown) => unknown | Promise<unknown> = async () => ({
     content: [{ text: "ok", type: "text" }],
   }),
+  inputSchema: Parameters<typeof jsonSchema>[0] = { type: "object" },
 ) {
   return {
     description: "Fake MCP tool.",
     execute,
-    inputSchema: jsonSchema({ type: "object" }),
+    inputSchema: jsonSchema(inputSchema),
     type: "dynamic" as const,
   } as ToolSet[string];
 }

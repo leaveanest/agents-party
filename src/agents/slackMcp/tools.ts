@@ -117,19 +117,57 @@ function filterAndWrapSlackMcpTools(tools: ToolSet, context: SlackMcpToolContext
     filtered[toolName] = {
       ...mcpTool,
       async execute(input, executionOptions) {
+        const toolInput = slackMcpToolInput(context, toolName, input, mcpTool);
         const accessFailure = validateSlackMcpToolAccess(
           context,
           toolName,
-          input as Record<string, unknown>,
+          toolInput as Record<string, unknown>,
         );
         if (accessFailure !== undefined) {
           return accessFailure;
         }
-        return execute(input, executionOptions);
+        return execute(toolInput, executionOptions);
       },
     };
   }
   return filtered;
+}
+
+function slackMcpToolInput(
+  context: SlackMcpToolContext,
+  toolName: string,
+  input: unknown,
+  tool: ToolSet[string],
+): unknown {
+  if (toolName !== "slack_create_canvas" || !isRecord(input)) {
+    return input;
+  }
+  const channelId = context.viewerContextChannelIds[0];
+  if (channelId === undefined) {
+    return input;
+  }
+  const withChannel = { ...input };
+  if (schemaHasProperty(tool, "channel_ids") && withChannel.channel_ids === undefined) {
+    withChannel.channel_ids = [channelId];
+  }
+  if (schemaHasProperty(tool, "channel_id") && withChannel.channel_id === undefined) {
+    withChannel.channel_id = channelId;
+  }
+  if (schemaHasProperty(tool, "channelIds") && withChannel.channelIds === undefined) {
+    withChannel.channelIds = [channelId];
+  }
+  if (schemaHasProperty(tool, "channelId") && withChannel.channelId === undefined) {
+    withChannel.channelId = channelId;
+  }
+  return withChannel;
+}
+
+function schemaHasProperty(tool: ToolSet[string], propertyName: string): boolean {
+  return JSON.stringify(tool.inputSchema ?? {}).includes(`"${propertyName}"`);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function validateSlackMcpToolAccess(
@@ -138,7 +176,10 @@ function validateSlackMcpToolAccess(
   input: Record<string, unknown>,
 ): JsonValue | undefined {
   if (toolName !== "slack_read_channel" && toolName !== "slack_read_thread") {
-    return validateSlackMcpCanvasAccess(context, toolName, input);
+    return (
+      validateSlackMcpCreateCanvasAccess(context, toolName, input) ??
+      validateSlackMcpCanvasAccess(context, toolName, input)
+    );
   }
   const channelId = typeof input.channel_id === "string" ? input.channel_id.trim() : "";
   if (channelId.length > 0 && context.viewerContextChannelIds.includes(channelId)) {
@@ -150,6 +191,46 @@ function validateSlackMcpToolAccess(
     "Slack MCP channel reads are limited to the channel that started this agent invocation.",
     false,
   );
+}
+
+function validateSlackMcpCreateCanvasAccess(
+  context: SlackMcpToolContext,
+  toolName: string,
+  input: Record<string, unknown>,
+): JsonValue | undefined {
+  if (toolName !== "slack_create_canvas") {
+    return undefined;
+  }
+  const channelIds = readCanvasShareChannelIds(input);
+  if (channelIds.every((channelId) => context.viewerContextChannelIds.includes(channelId))) {
+    return undefined;
+  }
+  return failure(
+    toolName,
+    "slack_mcp_channel_not_allowed",
+    "Slack MCP Canvas creation can only share to the channel that started this agent invocation.",
+    false,
+  );
+}
+
+function readCanvasShareChannelIds(input: Record<string, unknown>): string[] {
+  const channelIds = [
+    ...readChannelIdList(input.channel_ids),
+    ...readChannelIdList(input.channelIds),
+    ...readChannelIdList(input.channel_id),
+    ...readChannelIdList(input.channelId),
+  ];
+  return [...new Set(channelIds.map((channelId) => channelId.trim()).filter(Boolean))];
+}
+
+function readChannelIdList(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  return [];
 }
 
 function validateSlackMcpCanvasAccess(
