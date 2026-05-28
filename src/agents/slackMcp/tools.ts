@@ -21,6 +21,7 @@ export type SlackMcpTokenResolver = {
 };
 
 export type SlackMcpToolContext = SlackMcpTokenLookup & {
+  sourceText: string;
   viewerContextChannelIds: string[];
 };
 
@@ -51,6 +52,7 @@ const allowedSlackMcpToolNames = [
   "slack_read_channel",
   "slack_read_thread",
   "slack_read_user_profile",
+  "slack_update_canvas",
 ] as const;
 
 export async function createSlackMcpToolSet(
@@ -136,7 +138,7 @@ function validateSlackMcpToolAccess(
   input: Record<string, unknown>,
 ): JsonValue | undefined {
   if (toolName !== "slack_read_channel" && toolName !== "slack_read_thread") {
-    return undefined;
+    return validateSlackMcpCanvasAccess(context, toolName, input);
   }
   const channelId = typeof input.channel_id === "string" ? input.channel_id.trim() : "";
   if (channelId.length > 0 && context.viewerContextChannelIds.includes(channelId)) {
@@ -148,6 +150,54 @@ function validateSlackMcpToolAccess(
     "Slack MCP channel reads are limited to the channel that started this agent invocation.",
     false,
   );
+}
+
+function validateSlackMcpCanvasAccess(
+  context: SlackMcpToolContext,
+  toolName: string,
+  input: Record<string, unknown>,
+): JsonValue | undefined {
+  if (toolName !== "slack_update_canvas") {
+    return undefined;
+  }
+  const canvasId = readCanvasId(input);
+  const explicitUpdateTarget = explicitCanvasUpdateTarget(context.sourceText);
+  if (canvasId !== undefined && explicitUpdateTarget === canvasId) {
+    return undefined;
+  }
+  return failure(
+    toolName,
+    "slack_mcp_canvas_not_explicit",
+    "Slack MCP Canvas updates require an explicit Canvas id or Slack Canvas URL in the user request.",
+    false,
+  );
+}
+
+function readCanvasId(input: Record<string, unknown>): string | undefined {
+  const canvasId = input.canvas_id ?? input.canvasId;
+  if (typeof canvasId !== "string") {
+    return undefined;
+  }
+  const trimmed = canvasId.trim();
+  return /^[A-Z0-9]{8,}$/.test(trimmed) ? trimmed : undefined;
+}
+
+function explicitCanvasUpdateTarget(sourceText: string): string | undefined {
+  if (!hasCanvasUpdateIntent(sourceText)) {
+    return undefined;
+  }
+  const canvasIds = uniqueCanvasIds(sourceText);
+  return canvasIds.length === 1 ? canvasIds[0] : undefined;
+}
+
+function hasCanvasUpdateIntent(sourceText: string): boolean {
+  return /\b(update|edit|modify|revise|rewrite|append|replace)\b|追記して|更新して|編集して|修正して|変更して|書き換えて|差し替えて|反映して/i.test(
+    sourceText,
+  );
+}
+
+function uniqueCanvasIds(sourceText: string): string[] {
+  return [...new Set(sourceText.match(/F[A-Z0-9]{7,}/g) ?? [])];
 }
 
 function failure(

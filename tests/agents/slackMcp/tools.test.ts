@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   createSlackMcpToolSet,
+  type SlackMcpToolContext,
   type SlackMcpTokenResolver,
 } from "../../../src/agents/slackMcp/index.js";
 
@@ -17,6 +18,7 @@ describe("createSlackMcpToolSet", () => {
         slack_read_thread: fakeTool(),
         slack_read_user_profile: fakeTool(),
         slack_search_public: fakeTool(),
+        slack_update_canvas: fakeTool(),
       }),
       context: context(),
       tokenResolver: tokenResolver("xoxp-token"),
@@ -29,6 +31,7 @@ describe("createSlackMcpToolSet", () => {
       "slack_read_channel",
       "slack_read_thread",
       "slack_read_user_profile",
+      "slack_update_canvas",
     ]);
   });
 
@@ -176,15 +179,137 @@ describe("createSlackMcpToolSet", () => {
     });
     expect(calls).toEqual([{ channel_id: "C1", thread_ts: "1.2" }]);
   });
+
+  it("allows Canvas updates when the requested Canvas id is explicit in the invocation text", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_update_canvas: fakeTool(async (input) => {
+          calls.push(input);
+          return { content: [{ text: "updated", type: "text" }] };
+        }),
+      }),
+      context: context({
+        sourceText: "https://app.slack.com/docs/T1/F0B6J9E45CL を更新して",
+      }),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_update_canvas", {
+        canvas_id: "F0B6J9E45CL",
+        markdown: "# Updated",
+      }),
+    ).resolves.toEqual({
+      content: [{ text: "updated", type: "text" }],
+    });
+    expect(calls).toEqual([{ canvas_id: "F0B6J9E45CL", markdown: "# Updated" }]);
+  });
+
+  it("rejects Canvas updates when the target Canvas id is missing or differs from the request", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_update_canvas: fakeTool(async (input) => {
+          calls.push(input);
+          return { content: [{ text: "updated", type: "text" }] };
+        }),
+      }),
+      context: context({ sourceText: "F0B6J9E45CL を更新して" }),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    for (const input of [{}, { canvas_id: "F9999999999" }, { canvas_id: "" }]) {
+      await expect(executeTool(handle?.tools, "slack_update_canvas", input)).resolves.toMatchObject(
+        {
+          code: "slack_mcp_canvas_not_explicit",
+          ok: false,
+          reconnectRequired: false,
+        },
+      );
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects Canvas updates for read-only Canvas requests even when the Canvas id matches", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_update_canvas: fakeTool(async (input) => {
+          calls.push(input);
+          return { content: [{ text: "updated", type: "text" }] };
+        }),
+      }),
+      context: context({ sourceText: "F0B6J9E45CL を要約して" }),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_update_canvas", { canvas_id: "F0B6J9E45CL" }),
+    ).resolves.toMatchObject({
+      code: "slack_mcp_canvas_not_explicit",
+      ok: false,
+      reconnectRequired: false,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects Canvas updates for edit-advice requests that mention a Canvas id", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_update_canvas: fakeTool(async (input) => {
+          calls.push(input);
+          return { content: [{ text: "updated", type: "text" }] };
+        }),
+      }),
+      context: context({ sourceText: "F0B6J9E45CL の修正案を出して" }),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_update_canvas", { canvas_id: "F0B6J9E45CL" }),
+    ).resolves.toMatchObject({
+      code: "slack_mcp_canvas_not_explicit",
+      ok: false,
+      reconnectRequired: false,
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects Canvas updates when multiple Canvas ids make the target ambiguous", async () => {
+    const calls: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      clientFactory: fakeClientFactory({
+        slack_update_canvas: fakeTool(async (input) => {
+          calls.push(input);
+          return { content: [{ text: "updated", type: "text" }] };
+        }),
+      }),
+      context: context({ sourceText: "F0B6J9E45CL の内容を F9999999999 に追記して" }),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await expect(
+      executeTool(handle?.tools, "slack_update_canvas", { canvas_id: "F9999999999" }),
+    ).resolves.toMatchObject({
+      code: "slack_mcp_canvas_not_explicit",
+      ok: false,
+      reconnectRequired: false,
+    });
+    expect(calls).toEqual([]);
+  });
 });
 
-function context() {
+function context(overrides: Partial<SlackMcpToolContext> = {}): SlackMcpToolContext {
   return {
     enterpriseId: "E1",
     isEnterpriseInstall: false,
+    sourceText: "hello",
     teamId: "T1",
     userId: "U1",
     viewerContextChannelIds: ["C1"],
+    ...overrides,
   };
 }
 
