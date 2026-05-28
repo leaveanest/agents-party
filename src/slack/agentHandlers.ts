@@ -8029,23 +8029,32 @@ async function tryPostStreamingAgentRun(input: {
   };
   try {
     let finalResult: AgentRunnerResult | undefined;
+    let pendingStreamText = "";
     for await (const event of runStream.call(
       input.runner,
       input.invocation,
       input.runtimeOptions,
     ) as AsyncIterable<AgentRunnerStreamEvent>) {
       if (event.type === "text-delta") {
-        if (event.text.length === 0) {
+        const flush = flushableStreamingText(`${pendingStreamText}${event.text}`);
+        pendingStreamText = flush.pending;
+        const text = normalizeSlackCanvasUrls(flush.text);
+        if (text.length === 0) {
           continue;
         }
-        await ensureStream().append({ markdown_text: event.text });
-        streamedText += event.text;
+        await ensureStream().append({ markdown_text: text });
+        streamedText += text;
         continue;
       }
       finalResult = event.result;
     }
     if (finalResult === undefined) {
       throw new Error("Agent stream ended without a final result.");
+    }
+    if (pendingStreamText.length > 0) {
+      const text = normalizeSlackCanvasUrls(pendingStreamText);
+      await ensureStream().append({ markdown_text: text });
+      streamedText += text;
     }
 
     await appendStreamingResultHandoff({
@@ -8063,7 +8072,7 @@ async function tryPostStreamingAgentRun(input: {
       streamedText.length === 0 &&
       readGeneratedMedia(finalResult.structuredResult) === undefined
     ) {
-      await ensureStream().append({ markdown_text: finalResult.message });
+      await ensureStream().append({ markdown_text: normalizeSlackCanvasUrls(finalResult.message) });
     }
     await stream?.stop();
     logInfo(input.logger, "Delivered agent message to Slack with live stream.", {
@@ -8146,18 +8155,66 @@ function streamedFinalMessageSuffix(
   streamedText: string,
   finalMessage: string,
 ): string | undefined {
-  if (streamedText.length === 0 || finalMessage.trim().length === 0) {
+  const normalizedFinalMessage = normalizeSlackCanvasUrls(finalMessage);
+  if (streamedText.length === 0 || normalizedFinalMessage.trim().length === 0) {
     return undefined;
   }
-  if (finalMessage === streamedText || streamedText.includes(finalMessage)) {
+  if (normalizedFinalMessage === streamedText || streamedText.includes(normalizedFinalMessage)) {
     return undefined;
   }
-  const streamedTextIndex = finalMessage.indexOf(streamedText);
+  const streamedTextIndex = normalizedFinalMessage.indexOf(streamedText);
   if (streamedTextIndex >= 0) {
-    const suffix = finalMessage.slice(streamedTextIndex + streamedText.length);
+    const suffix = normalizedFinalMessage.slice(streamedTextIndex + streamedText.length);
     return suffix.length === 0 ? undefined : suffix;
   }
-  return `\n${finalMessage}`;
+  return `\n${normalizedFinalMessage}`;
+}
+
+function normalizeSlackCanvasUrls(text: string): string {
+  return text.replace(
+    slackCanvasUrlPattern("g"),
+    (_url, teamId: string, canvasId: string) =>
+      `https://app.slack.com/docs/${teamId.toLowerCase()}/${canvasId.toLowerCase()}`,
+  );
+}
+
+function flushableStreamingText(text: string): { pending: string; text: string } {
+  const lastUrlStart = text.lastIndexOf("https://");
+  if (lastUrlStart < 0) {
+    const pendingLength = incompleteHttpsPrefixLength(text);
+    if (pendingLength > 0) {
+      return {
+        pending: text.slice(-pendingLength),
+        text: text.slice(0, -pendingLength),
+      };
+    }
+    return { pending: "", text };
+  }
+  const urlTail = text.slice(lastUrlStart);
+  if (/\s/.test(urlTail)) {
+    return { pending: "", text };
+  }
+  return {
+    pending: urlTail,
+    text: text.slice(0, lastUrlStart),
+  };
+}
+
+function incompleteHttpsPrefixLength(text: string): number {
+  const urlPrefix = "https://";
+  for (let length = urlPrefix.length - 1; length > 0; length -= 1) {
+    if (text.endsWith(urlPrefix.slice(0, length))) {
+      return length;
+    }
+  }
+  return 0;
+}
+
+function slackCanvasUrlPattern(flags = ""): RegExp {
+  return new RegExp(
+    String.raw`https:\/\/(?:app|[a-z0-9-]+)\.slack\.com\/docs\/([a-z0-9]+)\/(f(?=[a-z0-9]*\d)[a-z0-9]{7,})(?![a-z0-9])`,
+    `i${flags}`,
+  );
 }
 
 function createSlackClientStreamStarter(input: {

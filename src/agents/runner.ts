@@ -1177,7 +1177,7 @@ function firstSlackCanvasUrl(value: unknown): string | undefined {
 }
 
 function slackCanvasUrlFromText(text: string): string | undefined {
-  const match = text.match(/https:\/\/app\.slack\.com\/docs\/([a-z0-9]+)\/([a-z0-9]+)/i);
+  const match = text.match(slackCanvasUrlPattern());
   if (match === null) {
     return undefined;
   }
@@ -1185,10 +1185,24 @@ function slackCanvasUrlFromText(text: string): string | undefined {
 }
 
 function withSlackCanvasUrl(message: string, slackCanvasUrl: string | undefined): string {
-  if (slackCanvasUrl === undefined || message.includes(slackCanvasUrl)) {
-    return message;
+  const normalizedMessage = normalizeSlackCanvasUrls(message);
+  if (slackCanvasUrl === undefined || normalizedMessage.includes(slackCanvasUrl)) {
+    return normalizedMessage;
   }
-  return `${message.trim()}\n${slackCanvasUrl}`;
+  return `${normalizedMessage.trim()}\n${slackCanvasUrl}`;
+}
+
+function normalizeSlackCanvasUrls(message: string): string {
+  return message.replace(slackCanvasUrlPattern("g"), (_url, teamId: string, canvasId: string) => {
+    return `https://app.slack.com/docs/${teamId.toLowerCase()}/${canvasId.toLowerCase()}`;
+  });
+}
+
+function slackCanvasUrlPattern(flags = ""): RegExp {
+  return new RegExp(
+    "https://(?:app|[a-z0-9-]+)\\.slack\\.com/docs/([a-z0-9]+)/(f(?=[a-z0-9]*\\d)[a-z0-9]{7,})(?![a-z0-9])",
+    `i${flags}`,
+  );
 }
 
 function nonEmptyAgentMessage(

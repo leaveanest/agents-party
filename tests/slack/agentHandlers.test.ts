@@ -4991,7 +4991,8 @@ describe("createAgentSlackHandlers", () => {
         yield {
           result: {
             decision: { action: "respond", reason: "test" },
-            message: "こちらです:\nCanvasを作成しました。\nhttps://app.slack.com/docs/T1/F123",
+            message:
+              "こちらです:\nCanvasを作成しました。\nhttps://app.slack.com/docs/T073DHGG11B/F0B6M809CN6",
             toolResults: [],
           },
           type: "result",
@@ -5029,7 +5030,177 @@ describe("createAgentSlackHandlers", () => {
 
     expect(appends).toEqual([
       { markdown_text: "Canvasを作成しました。" },
-      { markdown_text: "\nhttps://app.slack.com/docs/T1/F123" },
+      { markdown_text: "\nhttps://app.slack.com/docs/t073dhgg11b/f0b6m809cn6" },
+    ]);
+  });
+
+  it("normalizes Slack Canvas URLs before appending streamed deltas", async () => {
+    const runner = {
+      async run() {
+        throw new Error("run should not be called when live streaming is available.");
+      },
+      async *runStream() {
+        yield {
+          text: "Canvasを作成しました。\nhttps://e073v4z73am-8fdn8m4h.slack.com/docs/T073DHGG11B/F0B6M809CN6",
+          type: "text-delta",
+        };
+        yield {
+          result: {
+            decision: { action: "respond", reason: "test" },
+            message: "Canvasを作成しました。\nhttps://app.slack.com/docs/t073dhgg11b/f0b6m809cn6",
+            toolResults: [],
+          },
+          type: "result",
+        };
+      },
+    };
+    const appends: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async () => ({}),
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> canvas",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+      sayStream() {
+        return {
+          append: async (payload: unknown) => {
+            appends.push(payload);
+            return null;
+          },
+          stop: async () => ({ ok: true }),
+        };
+      },
+    } as never);
+
+    expect(appends).toEqual([
+      { markdown_text: "Canvasを作成しました。\n" },
+      { markdown_text: "https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6" },
+    ]);
+  });
+
+  it("buffers split streamed Slack Canvas URLs before appending them", async () => {
+    const runner = {
+      async run() {
+        throw new Error("run should not be called when live streaming is available.");
+      },
+      async *runStream() {
+        yield {
+          text: "Canvasを作成しました。\nhttps://e073v4z73am-8fdn8m4h.slack.com/docs/T073DHGG11B/F0B6M809",
+          type: "text-delta",
+        };
+        yield { text: "CN6", type: "text-delta" };
+        yield {
+          result: {
+            decision: { action: "respond", reason: "test" },
+            message: "Canvasを作成しました。\nhttps://app.slack.com/docs/t073dhgg11b/f0b6m809cn6",
+            toolResults: [],
+          },
+          type: "result",
+        };
+      },
+    };
+    const appends: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async () => ({}),
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> canvas",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+      sayStream() {
+        return {
+          append: async (payload: unknown) => {
+            appends.push(payload);
+            return null;
+          },
+          stop: async () => ({ ok: true }),
+        };
+      },
+    } as never);
+
+    expect(appends).toEqual([
+      { markdown_text: "Canvasを作成しました。\n" },
+      { markdown_text: "https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6" },
+    ]);
+  });
+
+  it("buffers streamed Slack Canvas URLs split inside the https scheme", async () => {
+    const runner = {
+      async run() {
+        throw new Error("run should not be called when live streaming is available.");
+      },
+      async *runStream() {
+        yield {
+          text: "Canvasを作成しました。\nhttps:/",
+          type: "text-delta",
+        };
+        yield {
+          text: "/e073v4z73am-8fdn8m4h.slack.com/docs/T073DHGG11B/F0B6M809CN6",
+          type: "text-delta",
+        };
+        yield {
+          result: {
+            decision: { action: "respond", reason: "test" },
+            message: "Canvasを作成しました。\nhttps://app.slack.com/docs/t073dhgg11b/f0b6m809cn6",
+            toolResults: [],
+          },
+          type: "result",
+        };
+      },
+    };
+    const appends: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async () => ({}),
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> canvas",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+      sayStream() {
+        return {
+          append: async (payload: unknown) => {
+            appends.push(payload);
+            return null;
+          },
+          stop: async () => ({ ok: true }),
+        };
+      },
+    } as never);
+
+    expect(appends).toEqual([
+      { markdown_text: "Canvasを作成しました。\n" },
+      { markdown_text: "https://app.slack.com/docs/t073dhgg11b/f0b6m809cn6" },
     ]);
   });
 
