@@ -4977,7 +4977,7 @@ describe("createAgentSlackHandlers", () => {
 
     expect(posts).toEqual([]);
     expect(streamArgs).toEqual([{ buffer_size: 128 }]);
-    expect(appends).toEqual([{ markdown_text: "streamed " }, { markdown_text: "**reply**" }]);
+    expect(appends).toEqual([{ markdown_text: "streamed **reply**" }]);
     expect(stops).toEqual([undefined]);
   });
 
@@ -5034,6 +5034,159 @@ describe("createAgentSlackHandlers", () => {
     ]);
   });
 
+  it("posts streamed Slack Canvas tool results with postMessage so Slack can unfurl them", async () => {
+    const runner = {
+      async run() {
+        throw new Error("run should not be called when live streaming is available.");
+      },
+      async *runStream() {
+        yield { toolName: "slack_create_canvas", type: "tool-call" };
+        yield {
+          text: "Canvasにまとめました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+          type: "text-delta",
+        };
+        yield {
+          result: {
+            decision: { action: "respond", reason: "test" },
+            message: "Canvasにまとめました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+            toolResults: [
+              {
+                input: {},
+                output: "https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6",
+                toolCallId: "call-1",
+                toolName: "slack_create_canvas",
+              },
+            ],
+          },
+          type: "result",
+        };
+      },
+    };
+    const appends: unknown[] = [];
+    const posts: unknown[] = [];
+    const stops: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> canvas",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+      sayStream() {
+        return {
+          append: async (payload: unknown) => {
+            appends.push(payload);
+            return null;
+          },
+          stop: async (payload?: unknown) => {
+            stops.push(payload);
+            return { ok: true };
+          },
+        };
+      },
+    } as never);
+
+    expect(appends).toEqual([]);
+    expect(stops).toEqual([]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "Canvasにまとめました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+        thread_ts: "1712345678.000100",
+        unfurl_links: true,
+        unfurl_media: true,
+      }),
+    ]);
+    expect(posts[0]).not.toHaveProperty("blocks");
+  });
+
+  it("keeps pre-tool streamed text buffered when Slack Canvas creation later needs unfurling", async () => {
+    const runner = {
+      async run() {
+        throw new Error("run should not be called when live streaming is available.");
+      },
+      async *runStream() {
+        yield { text: "Canvasを作成しています...\n", type: "text-delta" };
+        yield { toolName: "slack_create_canvas", type: "tool-call" };
+        yield {
+          text: "Canvasにまとめました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+          type: "text-delta",
+        };
+        yield {
+          result: {
+            decision: { action: "respond", reason: "test" },
+            message: "Canvasにまとめました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+            toolResults: [
+              {
+                input: {},
+                output: "https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6",
+                toolCallId: "call-1",
+                toolName: "slack_create_canvas",
+              },
+            ],
+          },
+          type: "result",
+        };
+      },
+    };
+    const appends: unknown[] = [];
+    const posts: unknown[] = [];
+    const handlers = createAgentSlackHandlers(runner as never);
+
+    await handlers.handleAppMention({
+      body: { team_id: "T1" },
+      client: {
+        chat: {
+          postMessage: async (payload: unknown) => {
+            posts.push(payload);
+            return {};
+          },
+        },
+      },
+      context: { botUserId: "B1" },
+      event: {
+        channel: "C1",
+        text: "<@B1> canvas",
+        ts: "1712345678.000100",
+        user: "U1",
+      },
+      logger: { info() {}, warn() {} },
+      sayStream() {
+        return {
+          append: async (payload: unknown) => {
+            appends.push(payload);
+            return null;
+          },
+          stop: async () => ({ ok: true }),
+        };
+      },
+    } as never);
+
+    expect(appends).toEqual([]);
+    expect(posts).toEqual([
+      expect.objectContaining({
+        channel: "C1",
+        text: "Canvasにまとめました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+        thread_ts: "1712345678.000100",
+        unfurl_links: true,
+        unfurl_media: true,
+      }),
+    ]);
+  });
+
   it("normalizes Slack Canvas URLs before appending streamed deltas", async () => {
     const runner = {
       async run() {
@@ -5084,8 +5237,10 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(appends).toEqual([
-      { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
+      {
+        markdown_text:
+          "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+      },
     ]);
   });
 
@@ -5140,8 +5295,10 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(appends).toEqual([
-      { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
+      {
+        markdown_text:
+          "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+      },
     ]);
   });
 
@@ -5199,8 +5356,10 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(appends).toEqual([
-      { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
+      {
+        markdown_text:
+          "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+      },
     ]);
   });
 
@@ -5254,8 +5413,10 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(appends).toEqual([
-      { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
+      {
+        markdown_text:
+          "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+      },
     ]);
   });
 
@@ -5309,8 +5470,10 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(appends).toEqual([
-      { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
+      {
+        markdown_text:
+          "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+      },
     ]);
   });
 
@@ -5365,8 +5528,10 @@ describe("createAgentSlackHandlers", () => {
     } as never);
 
     expect(appends).toEqual([
-      { markdown_text: "Canvasを作成しました。\n" },
-      { markdown_text: "<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>" },
+      {
+        markdown_text:
+          "Canvasを作成しました。\n<https://app.slack.com/docs/T073DHGG11B/F0B6M809CN6>",
+      },
     ]);
   });
 
@@ -8505,7 +8670,7 @@ describe("createAgentSlackHandlers", () => {
         thread_ts: "1712345678.000100",
       },
     ]);
-    expect(appends).toEqual([{ markdown_text: "worker " }, { markdown_text: "stream" }]);
+    expect(appends).toEqual([{ markdown_text: "worker stream" }]);
     expect(stops).toEqual([undefined]);
   });
 

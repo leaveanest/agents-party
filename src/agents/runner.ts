@@ -67,6 +67,10 @@ export type AgentRunnerStreamEvent =
       type: "text-delta";
     }
   | {
+      toolName: string;
+      type: "tool-call";
+    }
+  | {
       result: AgentRunnerResult;
       type: "result";
     };
@@ -344,7 +348,7 @@ export class AgentRunner {
     model: ModelInfo,
     runtimeOptions: AgentRunnerRuntimeOptions,
   ): AsyncGenerator<
-    Extract<AgentRunnerStreamEvent, { type: "text-delta" }>,
+    Exclude<AgentRunnerStreamEvent, { type: "result" }>,
     { result: LlmResult; toolResults: AgentToolResult[] },
     void
   > {
@@ -404,6 +408,10 @@ export class AgentRunner {
               break;
             case "tool-call":
               roundToolCalls.push(event.toolCall);
+              yield {
+                toolName: event.toolCall.toolName,
+                type: "tool-call",
+              };
               break;
             case "done":
               result = event.result;

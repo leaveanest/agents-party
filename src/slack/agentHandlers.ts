@@ -8028,6 +8028,7 @@ async function tryPostStreamingAgentRun(input: {
     return stream;
   };
   try {
+    let canvasToolCallSeen = false;
     let finalResult: AgentRunnerResult | undefined;
     let pendingStreamText = "";
     for await (const event of runStream.call(
@@ -8035,6 +8036,12 @@ async function tryPostStreamingAgentRun(input: {
       input.invocation,
       input.runtimeOptions,
     ) as AsyncIterable<AgentRunnerStreamEvent>) {
+      if (event.type === "tool-call") {
+        if (event.toolName === "slack_create_canvas") {
+          canvasToolCallSeen = true;
+        }
+        continue;
+      }
       if (event.type === "text-delta") {
         const flush = flushableStreamingText(`${pendingStreamText}${event.text}`);
         pendingStreamText = flush.pending;
@@ -8042,7 +8049,6 @@ async function tryPostStreamingAgentRun(input: {
         if (text.length === 0) {
           continue;
         }
-        await ensureStream().append({ markdown_text: text });
         streamedText += text;
         continue;
       }
@@ -8053,10 +8059,26 @@ async function tryPostStreamingAgentRun(input: {
     }
     if (pendingStreamText.length > 0) {
       const text = normalizeSlackCanvasUrls(pendingStreamText);
-      await ensureStream().append({ markdown_text: text });
       streamedText += text;
     }
-
+    if (shouldPostCanvasResultForUnfurl(finalResult, canvasToolCallSeen)) {
+      await postFormattedAgentMessage({
+        channel: input.channel,
+        client: input.client,
+        text: normalizeSlackCanvasUrls(finalResult.message),
+        thread_ts: input.threadTs,
+        unfurlLinks: true,
+      });
+      logInfo(input.logger, "Delivered Slack Canvas result with postMessage unfurl.", {
+        channelId: input.channel,
+        delivery: "post_message_canvas_unfurl",
+        threadTs: input.threadTs,
+      });
+      return { result: finalResult, type: "success" };
+    }
+    if (streamedText.length > 0) {
+      await ensureStream().append({ markdown_text: streamedText });
+    }
     await appendStreamingResultHandoff({
       channel: input.channel,
       client: input.client,
@@ -8116,6 +8138,19 @@ async function tryPostStreamingAgentRun(input: {
     }
     throw error;
   }
+}
+
+function shouldPostCanvasResultForUnfurl(
+  result: AgentRunnerResult,
+  canvasToolCallSeen: boolean,
+): boolean {
+  if (readGeneratedMedia(result.structuredResult) !== undefined) {
+    return false;
+  }
+  return (
+    canvasToolCallSeen ||
+    result.toolResults.some((toolResult) => toolResult.toolName === "slack_create_canvas")
+  );
 }
 
 async function appendStreamingResultHandoff(input: {
@@ -8285,8 +8320,19 @@ async function postFormattedAgentMessage(input: {
   client: SlackAgentClient;
   text: string;
   thread_ts: string;
+  unfurlLinks?: boolean;
 }): Promise<void> {
   const mrkdwn = markdownToSlackMrkdwn(input.text);
+  if (input.unfurlLinks === true) {
+    await input.client.chat.postMessage({
+      channel: input.channel,
+      text: mrkdwn,
+      thread_ts: input.thread_ts,
+      unfurl_links: true,
+      unfurl_media: true,
+    });
+    return;
+  }
   if (mrkdwn.length > 0 && mrkdwn.length <= SLACK_SECTION_TEXT_LIMIT) {
     await input.client.chat.postMessage({
       blocks: [
