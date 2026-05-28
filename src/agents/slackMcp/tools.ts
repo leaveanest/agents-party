@@ -256,6 +256,9 @@ function extractCanvasIdCandidates(
   if (depth > 8) {
     return [];
   }
+  if (typeof value === "string") {
+    return [];
+  }
   if (value === null || typeof value !== "object" || seen.has(value)) {
     return [];
   }
@@ -302,9 +305,38 @@ function canvasIdsFromSlackDocsUrlsInResultText(
     if (!isRecord(item) || typeof item.text !== "string") {
       return [];
     }
-    return canvasIdsFromCreateResultText(item.text, teamId);
+    return [
+      ...canvasIdsFromCreateResultJsonText(item.text, teamId),
+      ...canvasIdsFromCreateResultText(item.text, teamId),
+    ];
   });
   return uniqueStrings(candidates).length === 1 ? uniqueStrings(candidates) : [];
+}
+
+function canvasIdsFromCreateResultJsonText(text: string, teamId: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{")) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed) as unknown;
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed) || parsed.isError === true) {
+    return [];
+  }
+  const canvasId = typeof parsed.canvas_id === "string" ? parsed.canvas_id.trim() : undefined;
+  const canvasUrl = typeof parsed.canvas_url === "string" ? parsed.canvas_url.trim() : undefined;
+  if (canvasId === undefined || canvasUrl === undefined || !isCanvasId(canvasId)) {
+    return [];
+  }
+  const urlCanvasIds = slackDocsUrlCanvasIds(canvasUrl, teamId);
+  if (urlCanvasIds.length !== 1 || urlCanvasIds[0]?.toLowerCase() !== canvasId.toLowerCase()) {
+    return [];
+  }
+  return [canvasId];
 }
 
 function canvasIdsFromCreateResultText(text: string, teamId: string): string[] {

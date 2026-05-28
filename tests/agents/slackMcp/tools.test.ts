@@ -156,6 +156,86 @@ describe("createSlackMcpToolSet", () => {
     ]);
   });
 
+  it("shares Slack MCP-created Canvases when MCP returns a JSON string payload", async () => {
+    const accessSets: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      canvasAccessSetter: {
+        async setCanvasAccess(input) {
+          accessSets.push(input);
+        },
+      },
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(async () => ({
+          content: [
+            {
+              text: JSON.stringify({
+                canvas_id: "F0B6PN7YQZ",
+                canvas_url: "https://e073v4z73am-8fdn8m4h.slack.com/docs/T1/F0B6PN7YQZ",
+              }),
+              type: "text",
+            },
+          ],
+          isError: false,
+        })),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await executeTool(handle?.tools, "slack_create_canvas", {
+      content: "# Summary",
+      title: "Summary",
+    });
+
+    expect(accessSets).toEqual([
+      expect.objectContaining({
+        canvasId: "F0B6PN7YQZ",
+        channelAccessLevel: "read",
+        channelIds: ["C1"],
+        userAccessLevel: "write",
+        userIds: ["U1"],
+      }),
+    ]);
+  });
+
+  it("does not share arbitrary Canvas ids from JSON string result text", async () => {
+    const accessSets: unknown[] = [];
+    const handle = await createSlackMcpToolSet({
+      canvasAccessSetter: {
+        async setCanvasAccess(input) {
+          accessSets.push(input);
+        },
+      },
+      clientFactory: fakeClientFactory({
+        slack_create_canvas: fakeTool(async () => ({
+          content: [
+            {
+              text: JSON.stringify({ canvas_id: "F0B6OLD1111" }),
+              type: "text",
+            },
+            {
+              text: JSON.stringify({
+                canvas_id: "F0B6NEW1111",
+                canvas_url: "https://e073v4z73am-8fdn8m4h.slack.com/docs/T1/F0B6OLD1111",
+              }),
+              type: "text",
+            },
+          ],
+          isError: false,
+        })),
+      }),
+      context: context(),
+      tokenResolver: tokenResolver("xoxp-token"),
+    });
+
+    await executeTool(handle?.tools, "slack_create_canvas", {
+      content: "# Summary",
+      title: "Summary",
+    });
+
+    expect(accessSets).toEqual([]);
+  });
+
   it("does not share arbitrary workspace-domain Canvas URLs from Canvas creation result text", async () => {
     const accessSets: unknown[] = [];
     const handle = await createSlackMcpToolSet({
