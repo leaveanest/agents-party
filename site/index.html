@@ -135,6 +135,46 @@
         </div>
       </section>
 
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>自分たちで持てるSlack AI基盤</h2>
+            <p>
+              OSSとして動かす価値は、Slackワークスペース、プロバイダーキー、モデルルーティング、データ処理の責任境界を運用者が設計できることです。
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag t-blue">Self-host</span>
+              <h3>インフラを選んで運用する</h3>
+              <p>
+                Node.js runtime、PostgreSQL、Redis worker、Terraformを前提に、導入者の環境に合わせてデプロイと運用を組み立てられます。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag t-green">Credentials</span>
+              <h3>APIキーとコストをワークスペース単位で扱う</h3>
+              <p>
+                Slack OAuth、workspace credentials、multi-provider routingを分け、用途やワークスペース設定に応じてモデルとプロバイダーを選べます。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag t-yellow">Data boundary</span>
+              <h3>データ処理の前提を確認できる</h3>
+              <p>
+                運用前に
+                <a href="https://github.com/leaveanest/agents-party/blob/main/docs/data-processing.md"
+                  >Data processing</a
+                >と
+                <a href="https://github.com/leaveanest/agents-party/blob/main/SECURITY.md"
+                  >Security</a
+                >を確認し、接続先サービスごとの条件を整理できます。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
       <section class="section alt">
         <div class="section-inner">
           <div class="section-heading">
