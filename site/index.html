@@ -37,8 +37,8 @@
           <h1>Slackの会話に、AIエージェントが自然に参加する。</h1>
           <p class="lead">
             Agents partyは、Party on
-            Slackの思想を受け継ぐOSS基盤です。仲間、AI、自分が同じSlackの作業導線で会話し、
-            要約、検索、翻訳、ファイル理解、専門ツール呼び出しを進められるようにします。
+            Slackの思想を受け継ぐOSS基盤です。仲間とAIと自分が同じSlack上で会話しながら、
+            要約、検索、翻訳、ファイル理解、専門ツールの呼び出しまで進められます。
           </p>
           <div class="actions">
             <a class="button" href="./pages/quick-start.html">始める</a>
@@ -86,7 +86,7 @@
               <span class="tag t-blue">Inherited idea</span>
               <h3>別アプリではなく、Slackの中で協働する</h3>
               <p>
-                AIチャットを個人の画面に閉じず、チャンネルやスレッドの文脈で仲間とAIが同じ作業を見ながら進める前提を受け継ぎます。
+                AIチャットを個人の画面に閉じず、チャンネルやスレッドの文脈で仲間とAIが同じ作業を見ながら進める、という考え方を受け継ぎます。
               </p>
             </article>
             <article class="card">
@@ -106,29 +106,29 @@
           <div class="section-heading">
             <h2>Slackの中で作れること</h2>
             <p>
-              Agents partyは、Slackのメンションやスレッドを入口に、会話、検索、翻訳、ファイル理解、専門ツール呼び出しを組み合わせるための基盤です。
+              いつものチャンネルやスレッドでAIに話しかけるだけで、調べもの・翻訳・資料の読み込みまで、会話の流れを止めずに進められます。専用アプリを開き直す必要はありません。
             </p>
           </div>
           <div class="grid-3">
             <article class="card">
               <span class="tag t-blue">Agent routing</span>
-              <h3>チャンネルとスレッドでAIに相談する</h3>
+              <h3>チャンネルやスレッドで、そのまま相談する</h3>
               <p>
-                app mention、assistant thread、継続スレッドの文脈を使い、会話の場所ごとにエージェントやモデルを解決します。
+                メンションやアシスタントスレッドで話しかけると、そのスレッドの流れを踏まえて応答します。会話している場所や用途に応じて、担当するエージェントやモデルが切り替わります。
               </p>
             </article>
             <article class="card">
               <span class="tag t-green">Workspace tools</span>
-              <h3>検索・翻訳・Canvasを作業導線に戻す</h3>
+              <h3>検索・翻訳・まとめをSlackの中で片づける</h3>
               <p>
-                Slack検索、リアクション翻訳、Canvas出力、RSS要約など、Slack内の作業を中断しにくいツール経路を拡張できます。
+                Slack内の検索、リアクションを付けるだけの翻訳、Canvasへの書き出し、RSSの要約などを、別のツールに移らずそのまま使えます。
               </p>
             </article>
             <article class="card">
               <span class="tag t-yellow">Specialists</span>
-              <h3>ファイルや業務ワークフローを扱う</h3>
+              <h3>ファイルや専門的な作業もまかせる</h3>
               <p>
-                画像、音声、PDF、Salesforce PDFワークフローなどを、用途に応じた専門ツールとしてエージェントから呼び出せます。
+                画像・音声・PDFの読み取りや、Salesforce向けのPDFワークフローなど、用途ごとの専門ツールを会話の中から呼び出せます。
               </p>
             </article>
           </div>
@@ -169,6 +169,57 @@
                 <a href="https://github.com/leaveanest/agents-party/blob/main/SECURITY.md"
                   >Security</a
                 >を確認し、接続先サービスごとの条件を整理できます。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>OSSとして確認できること</h2>
+            <p>
+              導入を検討する段階で気になることは、ライセンス、セキュリティ、データの扱い、開発状況、参加方法まで、すべてGitHub上で確かめられます。
+              Agents partyはMITライセンスのpre-1.0 OSSアプリケーションです。
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag t-blue">Repository</span>
+              <h3>コードと始め方を見る</h3>
+              <p>
+                <a href="https://github.com/leaveanest/agents-party">GitHub repository</a>、
+                <a href="./pages/quick-start.html">Quick Start</a>、
+                <a href="https://github.com/leaveanest/agents-party/blob/main/README.md"
+                  >README</a
+                >で、全体構成と手元で動かす手順をたどれます。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag t-green">Trust</span>
+              <h3>ライセンスと安全性を確かめる</h3>
+              <p>
+                <a href="https://github.com/leaveanest/agents-party/blob/main/LICENSE">MIT
+                  License</a
+                >、
+                <a href="https://github.com/leaveanest/agents-party/blob/main/SECURITY.md"
+                  >Security</a
+                >、
+                <a href="https://github.com/leaveanest/agents-party/blob/main/docs/data-processing.md"
+                  >Data processing</a
+                >に目を通せば、自社で使ってよいかを見極める材料がそろいます。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag t-yellow">Project</span>
+              <h3>開発状況と参加のしかた</h3>
+              <p>
+                <a href="https://github.com/leaveanest/agents-party/issues">Issues</a
+                >では進行中の課題や検討の様子を追えます。
+                <a href="https://github.com/leaveanest/agents-party/blob/main/CONTRIBUTING.md"
+                  >Contributing</a
+                >では参加のしかたを確認できます。
               </p>
             </article>
           </div>
