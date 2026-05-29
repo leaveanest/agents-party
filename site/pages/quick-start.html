@@ -33,7 +33,10 @@
       <section class="section">
         <div class="section-inner">
           <div class="section-heading">
-            <p class="eyebrow">Quick Start</p>
+            <p class="eyebrow">
+              <span class="brand-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              Quick Start
+            </p>
             <h1>Docker Composeでローカル起動する。</h1>
             <p>
               Agents partyは
@@ -44,21 +47,21 @@
           </div>
           <div class="grid-3">
             <article class="card">
-              <span class="tag">Required</span>
-              <h3>必要なもの</h3>
+              <span class="tag t-blue">Required</span>
+              <h2>必要なもの</h2>
               <p>
                 Docker Compose。コンテナ外で開発する場合だけNode.js 22.xとVite+ CLIの
                 <code>vp</code> も使います。
               </p>
             </article>
             <article class="card">
-              <span class="tag">Slack</span>
-              <h3>あとで接続</h3>
+              <span class="tag t-green">Slack</span>
+              <h2>あとで接続</h2>
               <p>実Slackで試すときだけ <code>.env</code> と公開HTTPSトンネルを用意します。</p>
             </article>
             <article class="card">
-              <span class="tag">More</span>
-              <h3>詳細</h3>
+              <span class="tag t-yellow">More</span>
+              <h2>詳細</h2>
               <p>設定値、Slack scopes、provider keyの扱いはREADMEを参照してください。</p>
             </article>
           </div>
@@ -137,14 +140,14 @@ docker compose down -v  # DB/Redisも消す場合</pre
         <div class="section-inner">
           <div class="grid-2">
             <article class="card">
-              <h3>コンテナ外で動かす場合</h3>
+              <h2>コンテナ外で動かす場合</h2>
               <p>
                 詳細はREADMEのQuick Startを参照してください。通常のJS/TS操作はVite+ CLIの
                 <code>vp</code> を使います。
               </p>
             </article>
             <article class="card">
-              <h3>PR前の検証</h3>
+              <h2>PR前の検証</h2>
               <p>変更前後の確認にはこのセットを使います。</p>
               <pre class="code">
 vp check

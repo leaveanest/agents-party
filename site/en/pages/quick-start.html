@@ -36,7 +36,10 @@
       <section class="section">
         <div class="section-inner">
           <div class="section-heading">
-            <p class="eyebrow">Quick Start</p>
+            <p class="eyebrow">
+              <span class="brand-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+              Quick Start
+            </p>
             <h1>Run locally with Docker Compose.</h1>
             <p>
               <code>compose.yaml</code> starts PostgreSQL, Redis, migrations, web, and worker
@@ -45,24 +48,24 @@
           </div>
           <div class="grid-3">
             <article class="card">
-              <span class="tag">Required</span>
-              <h3>Prerequisite</h3>
+              <span class="tag t-blue">Required</span>
+              <h2>Prerequisite</h2>
               <p>
                 Docker Compose. Use Node.js 22.x and the Vite+ CLI <code>vp</code> only when
                 developing outside containers.
               </p>
             </article>
             <article class="card">
-              <span class="tag">Slack</span>
-              <h3>Connect later</h3>
+              <span class="tag t-green">Slack</span>
+              <h2>Connect later</h2>
               <p>
                 Use <code>.env</code> and a public HTTPS tunnel only when testing real Slack
                 traffic.
               </p>
             </article>
             <article class="card">
-              <span class="tag">More</span>
-              <h3>Details</h3>
+              <span class="tag t-yellow">More</span>
+              <h2>Details</h2>
               <p>See the README for configuration, Slack scopes, and provider key handling.</p>
             </article>
           </div>
@@ -144,14 +147,14 @@ docker compose down -v  # remove DB/Redis volumes too</pre
         <div class="section-inner">
           <div class="grid-2">
             <article class="card">
-              <h3>Running outside containers</h3>
+              <h2>Running outside containers</h2>
               <p>
                 See the README Quick Start. Use the Vite+ CLI <code>vp</code> for normal JS/TS
                 workflows.
               </p>
             </article>
             <article class="card">
-              <h3>Validation before a PR</h3>
+              <h2>Validation before a PR</h2>
               <p>Use this set before opening a pull request.</p>
               <pre class="code">
 vp check
