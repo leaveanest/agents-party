@@ -413,10 +413,10 @@ h1 {
 }
 
 .card:hover {
-  border-color: var(--line);
   transform: translateY(-2px);
 }
 
+.card h2,
 .card h3 {
   margin: 0 0 9px;
   font-size: 18.5px;
