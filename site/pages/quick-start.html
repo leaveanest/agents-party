@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quick Start | Agents party</title>
+    <meta name="description" content="Agents partyをローカルで動かすための最短導線です。" />
+    <link rel="canonical" href="https://leaveanest.github.io/agents-party/pages/quick-start.html" />
+    <link
+      rel="alternate"
+      hreflang="ja"
+      href="https://leaveanest.github.io/agents-party/pages/quick-start.html"
+    />
+    <link
+      rel="alternate"
+      hreflang="en"
+      href="https://leaveanest.github.io/agents-party/en/pages/quick-start.html"
+    />
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <nav class="nav" aria-label="サイトナビゲーション">
+        <a class="brand" href="../"><span class="brand-mark">AP</span>Agents party</a>
+        <div class="nav-links">
+          <a href="./quick-start.html" aria-current="page">Quick Start</a>
+          <a href="https://github.com/leaveanest/agents-party">GitHub</a>
+          <a class="language-link" href="../en/pages/quick-start.html">English</a>
+        </div>
+      </nav>
+    </header>
+    <main>
+      <section class="section">
+        <div class="section-inner">
+          <div class="section-heading">
+            <p class="eyebrow">Quick Start</p>
+            <h1>Docker Composeでローカル起動する。</h1>
+            <p>
+              Agents partyは
+              <code>compose.yaml</code>
+              でPostgreSQL、Redis、migration、web、workerをまとめて起動できます。
+              Slack接続なしでも、まずはhealth checkまで確認できます。
+            </p>
+          </div>
+          <div class="grid-3">
+            <article class="card">
+              <span class="tag">Required</span>
+              <h3>必要なもの</h3>
+              <p>
+                Docker Compose。コンテナ外で開発する場合だけNode.js 22.xとVite+ CLIの
+                <code>vp</code> も使います。
+              </p>
+            </article>
+            <article class="card">
+              <span class="tag">Slack</span>
+              <h3>あとで接続</h3>
+              <p>実Slackで試すときだけ <code>.env</code> と公開HTTPSトンネルを用意します。</p>
+            </article>
+            <article class="card">
+              <span class="tag">More</span>
+              <h3>詳細</h3>
+              <p>設定値、Slack scopes、provider keyの扱いはREADMEを参照してください。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section alt">
+        <div class="section-inner">
+          <div class="section-heading">
+            <h2>最短手順</h2>
+          </div>
+          <div class="steps">
+            <div class="step">
+              <div>
+                <h3>起動する</h3>
+                <p>
+                  <code>web</code> と
+                  <code>worker</code> を指定すると、DB、Redis、migrationも一緒に動きます。
+                </p>
+                <pre class="code">docker compose up --build web worker</pre>
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>確認する</h3>
+                <p>別シェルでhealth checkを叩きます。</p>
+                <pre class="code">curl http://localhost:8000/healthz</pre>
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>必要なら初期routeを入れる</h3>
+                <p>Slack app mentionを試す前に、workspace team idでbootstrap routeを作ります。</p>
+                <pre class="code">
+AGENTS_PARTY_BOOTSTRAP_TEAM_ID=T123456789 \
+docker compose --profile seed run --rm seed</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>Slackにつなぐ</h3>
+                <p>
+                  <code>.env</code> にSlack
+                  OAuth設定を入れ、manifestのURLを公開HTTPSトンネルに置き換えてimportします。
+                </p>
+                <pre class="code">
+cp .env.example .env
+docker compose up --build web worker</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>ログを見る</h3>
+                <pre class="code">
+docker compose logs -f web
+docker compose logs -f worker</pre
+                >
+              </div>
+            </div>
+            <div class="step">
+              <div>
+                <h3>停止する</h3>
+                <pre class="code">
+docker compose down
+docker compose down -v  # DB/Redisも消す場合</pre
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-inner">
+          <div class="grid-2">
+            <article class="card">
+              <h3>コンテナ外で動かす場合</h3>
+              <p>
+                詳細はREADMEのQuick Startを参照してください。通常のJS/TS操作はVite+ CLIの
+                <code>vp</code> を使います。
+              </p>
+            </article>
+            <article class="card">
+              <h3>PR前の検証</h3>
+              <p>変更前後の確認にはこのセットを使います。</p>
+              <pre class="code">
+vp check
+vp run typecheck
+vp test
+vp pack</pre
+              >
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="footer">
+      <div class="footer-inner">
+        <span>詳細な設定と運用メモはREADMEにあります。</span>
+        <div class="footer-links">
+          <a href="../">Home</a>
+          <a href="https://github.com/leaveanest/agents-party/blob/main/README.md">README</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

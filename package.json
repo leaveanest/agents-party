@@ -20,6 +20,8 @@
     "migrate": "tsx src/infrastructure/postgres/runMigrations.ts",
     "rss:batch": "tsx src/rssFeedWorker.ts",
     "seed:bootstrap": "tsx src/infrastructure/postgres/seedBootstrap.ts",
+    "site:build": "vp build site --config site/vite.config.ts",
+    "site:dev": "vp dev site --config site/vite.config.ts",
     "start": "node dist/main.mjs",
     "test": "vp test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
