@@ -30,7 +30,10 @@
     <main>
       <section class="hero">
         <div>
-          <p class="eyebrow">Slack-native agent routing OSS</p>
+          <p class="eyebrow">
+            <span class="brand-dots" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+            Slack-native agent routing OSS
+          </p>
           <h1>Slackの会話に、AIエージェントが自然に参加する。</h1>
           <p class="lead">
             Agents partyは、Party on
@@ -43,11 +46,11 @@
               >GitHubを見る</a
             >
           </div>
-          <div class="proof-row" aria-label="主要技術">
-            <span class="proof-chip">Slack Bolt</span>
-            <span class="proof-chip">Multi-provider LLM routing</span>
-            <span class="proof-chip">PostgreSQL</span>
-            <span class="proof-chip">Terraform</span>
+          <div class="proof-row" role="list" aria-label="主要技術">
+            <span class="proof-chip" role="listitem">Slack Bolt</span>
+            <span class="proof-chip" role="listitem">Multi-provider LLM routing</span>
+            <span class="proof-chip" role="listitem">PostgreSQL</span>
+            <span class="proof-chip" role="listitem">Terraform</span>
           </div>
         </div>
 
@@ -55,6 +58,10 @@
           class="workspace-visual"
           aria-label="Agents partyがSlack風スレッドで応答するダミー画面"
         >
+          <div class="window-bar" aria-hidden="true">
+            <span class="lights"><i></i><i></i><i></i></span>
+            <span class="win-title"><span class="win-hash">#</span><b>product</b> ・ スレッド</span>
+          </div>
           <img
             class="thread-screenshot"
             src="./assets/agents-party-thread-demo.png"
@@ -76,14 +83,14 @@
           </div>
           <div class="grid-3">
             <article class="card">
-              <span class="tag">Conversation</span>
+              <span class="tag t-blue">Conversation</span>
               <h3>仲間・AI・自分で進める</h3>
               <p>
                 DMだけではなく、チャンネルやスレッドの文脈でAIが会話に参加する前提で設計します。
               </p>
             </article>
             <article class="card">
-              <span class="tag">Routing</span>
+              <span class="tag t-green">Routing</span>
               <h3>モデルを固定しない</h3>
               <p>
                 OpenAI、Anthropic、Google、Vertex
@@ -91,7 +98,7 @@
               </p>
             </article>
             <article class="card">
-              <span class="tag">Operator control</span>
+              <span class="tag t-yellow">Operator control</span>
               <h3>運用者が制御できる</h3>
               <p>
                 Slack OAuth、workspace
@@ -105,9 +112,11 @@
       <section class="section alt">
         <div class="section-inner">
           <div class="notice">
-            Agents partyはpre-1.0のOSSアプリケーションです。Party on
-            Slack商用アプリそのものではなく、
-            Slack内でAIと協働する設計思想を受け継いだ、運用者向けの実装基盤として公開しています。
+            <span>
+              Agents partyはpre-1.0のOSSアプリケーションです。Party on
+              Slack商用アプリそのものではなく、
+              Slack内でAIと協働する設計思想を受け継いだ、運用者向けの実装基盤として公開しています。
+            </span>
           </div>
         </div>
       </section>
