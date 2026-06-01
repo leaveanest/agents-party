@@ -1,20 +1,33 @@
 # OSA-69 / Claude Design プロンプト
 
-OSS プロジェクト「agents-party」の GitHub Pages 紹介サイトを Slack ネイティブ感のデザインへ
-刷新するための **Claude Design 用プロンプト**。以下の「---」で囲んだ本文を Claude Design に
-そのまま貼り付けて使う。
+OSS プロジェクト「agents-party」の GitHub Pages 紹介サイトを、Party on Slack の思想と
+既存アイコンを継承したデザインへ刷新するための **Claude Design 用プロンプト**。以下の
+「---」で囲んだ本文を Claude Design にそのまま貼り付けて使う。
 
 ---
 
 OSS プロジェクト「agents-party」の GitHub Pages 紹介サイトを刷新する、静的サイトの
-デザインと HTML / CSS を生成してください。現状は light-green テーマ(アクセント `#126b54`)
-ですが、これを置き換え、**Slack ネイティブ感**のあるデザインへ刷新します。
+デザインと HTML / CSS を生成してください。現状は Slack aubergine / purple 寄りの
+ドキュメント調サイトですが、これを **Party on Slack から継承した親しみやすいアイコンと
+Slack-native な実務感が両立するデザイン**へ調整します。
 
 完成物は **React 等のフレームワークを使わない素の HTML + CSS のみ**の静的サイトです。
 ビルドは Vite 前提、GitHub Pages で配信され、base path は `/agents-party/`、公開 URL は
 `https://leaveanest.github.io/agents-party/` です。日本語をデフォルト、英語版も用意する
 **二言語サイト**として、同じデザインシステムで統一してください。URL 構成は
 `/agents-party/` が日本語、`/agents-party/en/` が英語です。
+
+## 既存アセットと継承したいアイコン
+
+- 元になった Party on Slack の貼り付けアイコンは、ピンク・水色・グリーン・イエローの
+  幾何学的なグリッドと、オレンジの円を持つ親しみやすいアイコンです。
+- agents-party 側の既存アイコンは `assets/slack/agents-party-app-icon-friendly-flat.png` です。
+  4 色の吹き出しが中央の星を囲む構図で、Party on Slack の「会話空間に参加する」思想を
+  継承したものとして扱います。
+- LP 用には `site/assets/agents-party-icon.png`、`site/assets/favicon-32.png`、
+  `site/assets/apple-touch-icon.png`、`site/assets/agents-party-og-image.png` を使います。
+- ナビのブランドマーク、favicon、OGP / Twitter サムネイル、必要なら hero 内の小さな
+  ブランドシグナルにこのアイコンを使ってください。
 
 ## プロダクト概要
 
@@ -52,6 +65,7 @@ OSS 基盤です。商用アプリ「Party on Slack」そのものではなく�
 ### トップページで維持する内容
 
 - ナビ: ブランド「AP / Agents party」、Quick Start、GitHub、English 切替
+  - ブランドマークは `AP` 文字ではなく、`site/assets/agents-party-icon.png` を使う
 - Hero:
   - eyebrow: `Slack-native agent routing OSS`
   - h1: `Slackの会話に、AIエージェントが自然に参加する。`
@@ -60,6 +74,12 @@ OSS 基盤です。商用アプリ「Party on Slack」そのものではなく�
   - 技術チップ: `Slack Bolt`、`Multi-provider LLM routing`、`PostgreSQL`、`Terraform`
   - 右側に Slack 風スレッドのデモ画面画像
 - 「設計思想」セクション(3 つ): 仲間・AI・自分で進める / モデルを固定しない / 運用者が制御できる
+- 「運営会社」セクション:
+  - 会社名: `株式会社リバネスナレッジ`
+  - 英文名: `Leave a Nest Knowledge Co., Ltd.`
+  - 所在地: `〒162-0822 東京都新宿区下宮比町1-4 飯田橋御幸ビル6階`
+  - 関連リンク: `https://k.lne.st/`、`https://k.lne.st/service/`、`https://k.lne.st/privacy/`
+  - 表現方針: テクノロジーありきではなく、組織が大切にしているもの、人の強み、日々の会話の流れに合わせて Slack と AI の使われ方を設計する会社として伝える
 - pre-1.0 OSS であることの notice
 - フッター: MIT、README、Data、Security、English リンク
 
@@ -70,22 +90,27 @@ Docker Compose 起動手順 / 必要なもの 3 カード / 番号付きステ�
 ## 目指すビジュアル
 
 Slack の UI を連想させつつ、Slack の公式ロゴや商標そのものを流用・模倣しすぎない
-「Slack-native inspired」なデザインにしてください。
+「Slack-native inspired」なデザインにしてください。加えて、Party on Slack 由来の
+貼り付けアイコンが持っていた親しみやすさ、明るい色面、会話が集まる印象を継承してください。
+ただし幼く見せず、OSS 利用者や運用担当者が信頼できる実務密度を保ってください。
 
-### 配色案(現状の緑テーマを置き換える)
+### 配色案(アイコン継承 + Slack-native)
 
 - Primary aubergine: `#4A154B`
 - Deep purple: `#611F69`
-- Accent blue: `#36C5F0`
-- Accent green: `#2EB67D`
-- Accent yellow: `#ECB22E`
-- Accent red/pink: `#E01E5A`
+- Icon blue: `#4A9FEE`
+- Icon green/teal: `#43C2B0`
+- Icon yellow: `#F8B82D`
+- Icon coral: `#FF695F`
 - Text primary: `#1D1C1D`
 - Text muted: `#5E5A62`
-- Background: `#F8F5F8`
+- Background: `#F7F8F8`
 - Surface: `#FFFFFF`
-- Border: `#E7DDE8`
+- Border: `#DFE8EA`
 - Code background: `#17131A`
+
+紫だけに寄せすぎないでください。アイコン由来の coral / teal / yellow / blue を、小さな面・
+タグ・区切り・図解のリズムとして使い、Party on Slack から続く明るさを感じさせてください。
 
 ### タイポグラフィ
 
@@ -146,6 +171,8 @@ Slack の UI を連想させつつ、Slack の公式ロゴや商標そのもの�
 ## 注意点
 
 - Slack らしさは必要だが、Slack の公式ロゴや商標そのものを流用・模倣しすぎない
+- 既存アイコンは継承元を示すブランドシグナルとして使うが、画面全体をロゴだらけにしない
+- 運営会社情報は信頼シグナルとして載せる。会社紹介が主役になりすぎないようにし、OSS 基盤の説明を邪魔しない
 - セキュリティ説明では「保存しないもの」と「設定上保存するもの」を曖昧にしない。
   ただし実際の実装仕様と矛盾しそうな断定は避ける
 - agents-party は pre-1.0 OSS であり、商用 Party on Slack そのものではない点を明確にする

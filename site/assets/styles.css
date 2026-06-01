@@ -1,7 +1,7 @@
 /* ============================================================
    Agents party — site styles
    Direction A · 堅実ドキュメント
-   Palette: Slack-family aubergine/purple + 4 brand accents.
+   Palette: inherited Agents party icon colors + Slack-family accents.
    System font stack, no build step, GitHub Pages friendly.
    ============================================================ */
 
@@ -9,14 +9,14 @@
   color-scheme: light;
 
   /* surfaces */
-  --bg: #f7f5f8;
+  --bg: #f7f8f8;
   --surface: #ffffff;
-  --surface-soft: #f3eef4;
+  --surface-soft: #eef6f7;
   --ink: #1d1c1d;
   --muted: #5e5a62;
   --muted-soft: #8a8590;
-  --line: #e7dde8;
-  --line-soft: #f0e9f1;
+  --line: #dfe8ea;
+  --line-soft: #edf2f3;
 
   /* brand */
   --aubergine: #4a154b;
@@ -24,17 +24,17 @@
   --purple: #611f69;
   --purple-soft: #f3e9f4;
 
-  /* 4 accents (Slack-family) */
-  --blue: #2d9fd1;
-  --green: #1f9d6b;
-  --yellow: #d99a13;
-  --red: #d61f56;
+  /* inherited icon accents */
+  --blue: #4a9fee;
+  --green: #43c2b0;
+  --yellow: #f8b82d;
+  --red: #ff695f;
 
   --code-bg: #1c1320;
   --code-ink: #efe6f2;
 
   --shadow-sm: 0 1px 2px rgba(29, 28, 29, 0.05);
-  --shadow: 0 22px 56px -28px rgba(74, 21, 75, 0.45);
+  --shadow: 0 22px 56px -28px rgba(58, 83, 93, 0.36);
   --radius: 12px;
   --radius-sm: 9px;
 
@@ -121,18 +121,22 @@ code {
 }
 
 .brand-mark {
-  position: relative;
+  flex: 0 0 auto;
   display: grid;
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   place-items: center;
-  border-radius: 9px;
-  background: linear-gradient(140deg, var(--aubergine), var(--purple));
-  color: #fff;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  border: 1px solid rgba(67, 194, 176, 0.28);
+  border-radius: 10px;
+  background: #f2f7f8;
   box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .nav-links {
@@ -546,6 +550,82 @@ h1 {
   background: var(--yellow);
 }
 
+/* ---------- company ---------- */
+.company-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+  gap: 24px;
+  align-items: stretch;
+}
+
+.company-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 26px;
+  background: var(--surface);
+}
+
+.company-card h3 {
+  margin: 0 0 10px;
+  font-size: 20px;
+  font-weight: 780;
+}
+
+.company-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.company-meta {
+  display: grid;
+  gap: 14px;
+}
+
+.company-meta div {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 14px;
+}
+
+.company-meta dt {
+  color: var(--muted-soft);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.company-meta dd {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.company-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.company-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 13px;
+  background: var(--surface);
+  color: var(--aubergine);
+  font-size: 13.5px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.company-links a:hover {
+  border-color: var(--green);
+}
+
 /* ---------- footer ---------- */
 .footer {
   border-top: 1px solid var(--line);
@@ -592,7 +672,8 @@ h1 {
   }
 
   .grid-3,
-  .grid-2 {
+  .grid-2,
+  .company-panel {
     grid-template-columns: 1fr;
   }
 
