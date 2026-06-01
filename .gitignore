@@ -29,3 +29,6 @@ dist/
 *.tfvars
 *.tfvars.json
 !*.tfvars.example
+
+# Codex bridge local run logs
+.agent-runs/
