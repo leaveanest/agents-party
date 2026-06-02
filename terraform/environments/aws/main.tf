@@ -336,6 +336,7 @@ resource "aws_db_instance" "postgres" {
   instance_class              = var.database_instance_class
   manage_master_user_password = true
   multi_az                    = var.database_multi_az
+  publicly_accessible         = false
   skip_final_snapshot         = false
   storage_encrypted           = true
   storage_type                = "gp3"
