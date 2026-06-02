@@ -39,6 +39,17 @@ variable "container_port" {
   default     = 8080
 }
 
+variable "ecs_cpu_architecture" {
+  description = "CPU architecture for ECS Fargate task definitions."
+  type        = string
+  default     = "X86_64"
+
+  validation {
+    condition     = contains(["X86_64", "ARM64"], var.ecs_cpu_architecture)
+    error_message = "ecs_cpu_architecture must be X86_64 or ARM64."
+  }
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for the VPC."
   type        = string
@@ -71,6 +82,18 @@ variable "allow_plain_http" {
 
 variable "certificate_arn" {
   description = "ACM certificate ARN for the public ALB HTTPS listener. Required unless allow_plain_http is explicitly true."
+  type        = string
+  default     = null
+}
+
+variable "domain_name" {
+  description = "Optional public application domain name. When set with route53_zone_name and certificate_arn is null, Terraform creates DNS validation, an ACM certificate, and ALB alias records."
+  type        = string
+  default     = null
+}
+
+variable "route53_zone_name" {
+  description = "Optional public Route53 hosted zone name that owns domain_name, for example example.com. Required for Terraform-managed domain_name certificates."
   type        = string
   default     = null
 }
