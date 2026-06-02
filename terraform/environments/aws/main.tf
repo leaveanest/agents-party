@@ -7,8 +7,14 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  certificate_arn                    = try(trimspace(var.certificate_arn), "")
-  has_certificate                    = local.certificate_arn != ""
+  external_certificate_arn           = try(trimspace(var.certificate_arn), "")
+  domain_name                        = var.domain_name == null ? "" : trimsuffix(trimspace(var.domain_name), ".")
+  route53_zone_name                  = var.route53_zone_name == null ? "" : trimsuffix(trimspace(var.route53_zone_name), ".")
+  has_external_certificate           = local.external_certificate_arn != ""
+  manage_domain_records              = local.domain_name != "" && local.route53_zone_name != ""
+  use_managed_certificate            = local.manage_domain_records && !local.has_external_certificate
+  has_certificate                    = local.has_external_certificate || local.use_managed_certificate
+  certificate_arn                    = local.has_external_certificate ? local.external_certificate_arn : try(aws_acm_certificate_validation.app[0].certificate_arn, "")
   name_prefix                        = "${var.project_name}-${var.environment}"
   bucket_name                        = coalesce(var.object_storage_bucket_name, "${local.name_prefix}-objects")
   object_storage_prefix              = var.object_storage_prefix == null ? null : trimprefix(trimsuffix(var.object_storage_prefix, "/"), "/")
@@ -44,6 +50,48 @@ locals {
       valueFrom = value_from
     }
   ]
+}
+
+data "aws_route53_zone" "app" {
+  count = local.manage_domain_records ? 1 : 0
+
+  name         = local.route53_zone_name
+  private_zone = false
+}
+
+resource "aws_acm_certificate" "app" {
+  count = local.use_managed_certificate ? 1 : 0
+
+  domain_name       = local.domain_name
+  validation_method = "DNS"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "app_certificate_validation" {
+  for_each = local.use_managed_certificate ? {
+    for option in aws_acm_certificate.app[0].domain_validation_options : option.domain_name => {
+      name   = option.resource_record_name
+      record = option.resource_record_value
+      type   = option.resource_record_type
+    }
+  } : {}
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = data.aws_route53_zone.app[0].zone_id
+}
+
+resource "aws_acm_certificate_validation" "app" {
+  count = local.use_managed_certificate ? 1 : 0
+
+  certificate_arn         = aws_acm_certificate.app[0].arn
+  validation_record_fqdns = [for record in aws_route53_record.app_certificate_validation : record.fqdn]
 }
 
 resource "aws_vpc" "main" {
@@ -191,7 +239,7 @@ resource "aws_lb" "app" {
   lifecycle {
     precondition {
       condition     = local.has_certificate || var.allow_plain_http
-      error_message = "certificate_arn is required for public ALB traffic unless allow_plain_http is explicitly true."
+      error_message = "certificate_arn or Terraform-managed domain_name/route53_zone_name is required for HTTPS unless allow_plain_http is explicitly true."
     }
   }
 }
@@ -254,6 +302,34 @@ resource "aws_lb_listener" "https" {
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+}
+
+resource "aws_route53_record" "app_ipv4" {
+  count = local.manage_domain_records ? 1 : 0
+
+  name    = local.domain_name
+  type    = "A"
+  zone_id = data.aws_route53_zone.app[0].zone_id
+
+  alias {
+    evaluate_target_health = true
+    name                   = aws_lb.app.dns_name
+    zone_id                = aws_lb.app.zone_id
+  }
+}
+
+resource "aws_route53_record" "app_ipv6" {
+  count = local.manage_domain_records ? 1 : 0
+
+  name    = local.domain_name
+  type    = "AAAA"
+  zone_id = data.aws_route53_zone.app[0].zone_id
+
+  alias {
+    evaluate_target_health = true
+    name                   = aws_lb.app.dns_name
+    zone_id                = aws_lb.app.zone_id
+  }
 }
 
 resource "aws_db_subnet_group" "main" {
@@ -525,6 +601,11 @@ resource "aws_ecs_task_definition" "web" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.task.arn
+
+  runtime_platform {
+    cpu_architecture        = var.ecs_cpu_architecture
+    operating_system_family = "LINUX"
+  }
 }
 
 resource "aws_ecs_task_definition" "worker" {
@@ -553,6 +634,11 @@ resource "aws_ecs_task_definition" "worker" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.task.arn
+
+  runtime_platform {
+    cpu_architecture        = var.ecs_cpu_architecture
+    operating_system_family = "LINUX"
+  }
 }
 
 resource "aws_ecs_task_definition" "rss_feed" {
@@ -581,6 +667,11 @@ resource "aws_ecs_task_definition" "rss_feed" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.maintenance_task.arn
+
+  runtime_platform {
+    cpu_architecture        = var.ecs_cpu_architecture
+    operating_system_family = "LINUX"
+  }
 }
 
 resource "aws_ecs_task_definition" "migrate" {
@@ -609,6 +700,11 @@ resource "aws_ecs_task_definition" "migrate" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.maintenance_task.arn
+
+  runtime_platform {
+    cpu_architecture        = var.ecs_cpu_architecture
+    operating_system_family = "LINUX"
+  }
 }
 
 resource "aws_ecs_task_definition" "seed" {
@@ -637,6 +733,11 @@ resource "aws_ecs_task_definition" "seed" {
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   task_role_arn            = aws_iam_role.maintenance_task.arn
+
+  runtime_platform {
+    cpu_architecture        = var.ecs_cpu_architecture
+    operating_system_family = "LINUX"
+  }
 }
 
 data "aws_iam_policy_document" "scheduler_rss_feed" {

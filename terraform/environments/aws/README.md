@@ -50,10 +50,12 @@ from the ALB. RDS and Redis stay in private subnets. This avoids a NAT Gateway i
 baseline. If `assign_public_ip = false`, add NAT or VPC endpoints for ECR, CloudWatch Logs, Secrets
 Manager, and any outbound provider APIs before applying.
 
-Public ALB traffic is HTTPS-first. Set `certificate_arn` to an ACM certificate ARN for
-production-like deployments; HTTP requests then redirect to HTTPS. Terraform fails planning when no
-certificate is configured unless `allow_plain_http = true` is explicitly set for a temporary
-HTTP-only test environment.
+Public ALB traffic is HTTPS-first. When Route53 manages the public zone, set `domain_name` and
+`route53_zone_name`; Terraform creates the DNS validation records, ACM certificate, and ALB alias
+records. If the certificate is managed elsewhere, set `certificate_arn` to an ACM certificate ARN in
+the same region. HTTP requests then redirect to HTTPS. Terraform fails planning when no certificate
+is configured unless `allow_plain_http = true` is explicitly set for a temporary HTTP-only test
+environment.
 
 ## First Plan
 

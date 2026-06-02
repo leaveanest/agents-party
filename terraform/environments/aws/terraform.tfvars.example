@@ -1,8 +1,17 @@
 container_image = "123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/agents-party:latest"
 
-# Public deployments should terminate TLS at the ALB. For a temporary HTTP-only test
-# environment, set allow_plain_http = true and leave certificate_arn = null.
-certificate_arn = "arn:aws:acm:ap-northeast-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+# Public deployments should terminate TLS at the ALB. If Route53 manages the
+# domain, set domain_name and route53_zone_name and leave certificate_arn = null
+# so Terraform can create DNS validation, an ACM certificate, and ALB alias records.
+domain_name       = "agents-party.example.com"
+route53_zone_name = "example.com"
+certificate_arn   = null
+
+# Alternatively, pass an existing ACM certificate ARN in the same AWS region.
+# certificate_arn = "arn:aws:acm:ap-northeast-1:123456789012:certificate/00000000-0000-0000-0000-000000000000"
+
+# For a temporary HTTP-only test environment, set allow_plain_http = true and
+# leave domain_name, route53_zone_name, and certificate_arn unset.
 # allow_plain_http = true
 
 # Store DATABASE_URL, Slack/OAuth secrets, and encryption keys outside Terraform state.

@@ -3,6 +3,16 @@ output "alb_dns_name" {
   value       = aws_lb.app.dns_name
 }
 
+output "application_domain_name" {
+  description = "Public application domain name when managed by this environment."
+  value       = var.domain_name
+}
+
+output "application_url" {
+  description = "Public application base URL."
+  value       = var.domain_name == null ? "http://${aws_lb.app.dns_name}" : "https://${trimsuffix(var.domain_name, ".")}"
+}
+
 output "ecs_cluster_name" {
   description = "ECS cluster name."
   value       = aws_ecs_cluster.main.name

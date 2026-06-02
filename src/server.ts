@@ -60,10 +60,11 @@ async function handleRequest(
 
   if (isSlackRoute(url.pathname, settings)) {
     logSlackIngress(request, url.pathname);
-    if (url.pathname === settings.slackEventsPath && method !== "POST") {
+    const allowedMethod = getSlackRouteAllowedMethod(url.pathname, settings);
+    if (allowedMethod !== undefined && method !== allowedMethod) {
       sendJson(response, 405, {
         error: "method_not_allowed",
-        message: "Slack events endpoint only accepts POST requests.",
+        message: `Slack endpoint only accepts ${allowedMethod} requests.`,
       });
       return;
     }
@@ -74,7 +75,19 @@ async function handleRequest(
       });
       return;
     }
-    dependencies.slackGateway.handle(request, response);
+    try {
+      dependencies.slackGateway.handle(request, response);
+    } catch (error) {
+      console.error("Slack HTTP ingress failed.", error);
+      if (!response.headersSent && !response.writableEnded) {
+        sendJson(response, 500, {
+          error: "slack_ingress_failed",
+          message: "Slack ingress failed.",
+        });
+      } else if (!response.writableEnded) {
+        response.end();
+      }
+    }
     return;
   }
 
@@ -100,6 +113,19 @@ function isSlackRoute(pathname: string, settings: AppSettings): boolean {
     pathname === settings.slackInstallPath ||
     pathname === settings.slackOAuthRedirectPath
   );
+}
+
+function getSlackRouteAllowedMethod(
+  pathname: string,
+  settings: AppSettings,
+): "GET" | "POST" | undefined {
+  if (pathname === settings.slackEventsPath) {
+    return "POST";
+  }
+  if (pathname === settings.slackInstallPath || pathname === settings.slackOAuthRedirectPath) {
+    return "GET";
+  }
+  return undefined;
 }
 
 function parseRequestUrl(rawUrl: string | undefined): URL | undefined {

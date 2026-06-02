@@ -218,6 +218,71 @@ describe("createAppServer", () => {
     expect(delegated).toBe(false);
   });
 
+  it("does not delegate non-GET Slack install requests", async () => {
+    let delegated = false;
+    const server = createAppServer(settings, {
+      slackGateway: {
+        async close() {},
+        handle() {
+          delegated = true;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/slack/install`, {
+      method: "HEAD",
+    });
+
+    expect(response.status).toBe(405);
+    expect(delegated).toBe(false);
+  });
+
+  it("returns 500 when the Slack gateway throws before responding", async () => {
+    const server = createAppServer(settings, {
+      slackGateway: {
+        async close() {},
+        handle() {
+          throw new Error("gateway failed");
+        },
+      },
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    closeServer = () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+
+    const address = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${address.port}/slack/install`);
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "slack_ingress_failed",
+    });
+  });
+
   it("returns 503 for Slack routes when Slack is not configured", async () => {
     const server = createAppServer(settings);
     await new Promise<void>((resolve) => {
