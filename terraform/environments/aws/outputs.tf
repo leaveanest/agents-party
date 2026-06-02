@@ -9,8 +9,8 @@ output "application_domain_name" {
 }
 
 output "application_url" {
-  description = "Public application base URL."
-  value       = var.domain_name == null ? "http://${aws_lb.app.dns_name}" : "https://${trimsuffix(var.domain_name, ".")}"
+  description = "Public custom-domain application base URL. Null when domain_name is unset."
+  value       = var.domain_name == null ? null : "https://${trimsuffix(var.domain_name, ".")}"
 }
 
 output "ecs_cluster_name" {

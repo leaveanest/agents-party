@@ -318,20 +318,6 @@ resource "aws_route53_record" "app_ipv4" {
   }
 }
 
-resource "aws_route53_record" "app_ipv6" {
-  count = local.manage_domain_records ? 1 : 0
-
-  name    = local.domain_name
-  type    = "AAAA"
-  zone_id = data.aws_route53_zone.app[0].zone_id
-
-  alias {
-    evaluate_target_health = true
-    name                   = aws_lb.app.dns_name
-    zone_id                = aws_lb.app.zone_id
-  }
-}
-
 resource "aws_db_subnet_group" "main" {
   name       = "${local.name_prefix}-db"
   subnet_ids = aws_subnet.private[*].id
