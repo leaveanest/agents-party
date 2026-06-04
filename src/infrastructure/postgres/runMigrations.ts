@@ -1,7 +1,13 @@
 import { PostgresMigrationRunner } from "./migrations.js";
 import { postgresMigrations } from "./schemaMigrations.js";
 
+const databaseBackend = process.env.APP_DATABASE_BACKEND?.trim() || "postgres";
 const databaseUrl = process.env.DATABASE_URL;
+
+if (databaseBackend !== "postgres") {
+  console.error("APP_DATABASE_BACKEND=postgres is required to run PostgreSQL migrations.");
+  process.exit(1);
+}
 
 if (databaseUrl === undefined || databaseUrl.trim() === "") {
   console.error("DATABASE_URL is required to run PostgreSQL migrations.");

@@ -28,21 +28,25 @@ locals {
   }
   base_environment = merge(
     {
-      AGENT_MODEL               = var.agent_model
-      APP_ENV                   = "production"
-      APP_HOST                  = "0.0.0.0"
-      APP_NAME                  = var.app_name
-      AWS_REGION                = var.aws_region
-      OBJECT_STORAGE_BUCKET     = aws_s3_bucket.objects.bucket
-      OBJECT_STORAGE_REGION     = var.aws_region
-      PORT                      = tostring(var.container_port)
-      REDIS_URL                 = "redis://${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379"
-      SLACK_AGENT_QUEUE_ENABLED = "true"
+      AGENT_MODEL           = var.agent_model
+      APP_ENV               = "production"
+      APP_HOST              = "0.0.0.0"
+      APP_NAME              = var.app_name
+      AWS_REGION            = var.aws_region
+      OBJECT_STORAGE_BUCKET = aws_s3_bucket.objects.bucket
+      OBJECT_STORAGE_REGION = var.aws_region
+      PORT                  = tostring(var.container_port)
+      REDIS_URL             = "redis://${aws_elasticache_replication_group.redis.primary_endpoint_address}:6379"
     },
     var.object_storage_prefix == null ? {} : {
       OBJECT_STORAGE_PREFIX = var.object_storage_prefix
     },
     var.additional_environment,
+    {
+      APP_DATABASE_BACKEND      = var.app_database_backend
+      SLACK_AGENT_QUEUE_BACKEND = var.slack_agent_queue_backend
+      SLACK_AGENT_QUEUE_ENABLED = "true"
+    },
   )
   container_secrets = [
     for name, value_from in var.runtime_secret_arns : {

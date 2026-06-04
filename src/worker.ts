@@ -1,46 +1,36 @@
-import { Pool } from "pg";
-
 import { createDefaultAgentRunner } from "./agents/runner.js";
 import { createSalesforcePdfToolDependencies } from "./agents/salesforcePdf/index.js";
 import { loadSettings } from "./config.js";
 import { FernetTextCipher } from "./integrations/oauth/fernet.js";
-import {
-  PostgresAgentRoutingRepository,
-  PostgresOAuthRepository,
-  PostgresSalesforcePdfWorkflowRepository,
-} from "./infrastructure/postgres/appRepositories.js";
-import { PostgresUserSettingsRepository } from "./infrastructure/postgres/userSettingsRepository.js";
-import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
-import { PostgresWorkspaceFeatureSettingsRepository } from "./infrastructure/postgres/workspaceFeatureSettingsRepository.js";
+import { createPostgresRepositoryBundle } from "./infrastructure/postgres/repositoryBundle.js";
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
-import { createBullMqSlackAgentJobWorker } from "./queues/slackAgentJobs.js";
+import { createSlackAgentJobWorker } from "./queues/slackAgentJobs.js";
 import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
 import { processSlackAgentJob } from "./slack/agentHandlers.js";
 import { createSlackCanvasAccessSetter } from "./slack/canvasAccess.js";
 import { createSlackInstallationMcpTokenResolver } from "./slack/mcpTokenResolver.js";
 import { createSlackWebClientProvider } from "./slack/webClient.js";
-import { PostgresSlackInstallationRepository } from "./infrastructure/postgres/slackInstallationRepository.js";
 
 const settings = loadSettings();
 
-if (settings.redisUrl === undefined) {
-  throw new Error("REDIS_URL is required to run the Slack agent worker.");
-}
-if (settings.databaseUrl === undefined) {
-  throw new Error("DATABASE_URL is required to run the Slack agent worker.");
+if (settings.databaseBackend !== "postgres" || settings.databaseUrl === undefined) {
+  throw new Error(
+    "APP_DATABASE_BACKEND=postgres and DATABASE_URL are required to run the Slack agent worker.",
+  );
 }
 
-const pool = new Pool({ connectionString: settings.databaseUrl });
-const routingRepository = new PostgresAgentRoutingRepository(pool);
-const oauthRepository = new PostgresOAuthRepository(pool);
-const salesforcePdfWorkflowRepository = new PostgresSalesforcePdfWorkflowRepository(pool);
-const userSettingsRepository = new PostgresUserSettingsRepository(pool);
-const featureSettingsRepository = new PostgresWorkspaceFeatureSettingsRepository(pool);
+const repositories = createPostgresRepositoryBundle(settings);
+if (repositories === undefined) {
+  throw new Error("PostgreSQL repositories are required to run the Slack agent worker.");
+}
+const postgresRepositories = repositories;
+const { featureSettingsRepository, oauthRepository, routingRepository, userSettingsRepository } =
+  postgresRepositories;
 const workspaceCredentialResolver =
   settings.llmApiKeyEncryptionKey === undefined
     ? undefined
     : new EncryptedWorkspaceCredentialService(
-        new PostgresWorkspaceCredentialRepository(pool),
+        postgresRepositories.workspaceCredentialRepository,
         new FernetTextCipher(settings.llmApiKeyEncryptionKey),
       );
 const salesforcePdfTools =
@@ -50,14 +40,10 @@ const salesforcePdfTools =
     ? createSalesforcePdfToolDependencies({
         contextSigningSecret: settings.salesforceOAuthContextSigningSecret,
         oauthRepository,
-        settingsRepository: salesforcePdfWorkflowRepository,
+        settingsRepository: postgresRepositories.salesforcePdfWorkflowRepository,
         tokenEncryptionKey: settings.salesforceTokenEncryptionKey,
       })
     : undefined;
-const slackMcpInstallationRepository =
-  settings.slackClientId === undefined
-    ? undefined
-    : new PostgresSlackInstallationRepository(settings.slackClientId, { pool });
 const runner = createDefaultAgentRunner(settings, {
   credentialResolver: workspaceCredentialResolver,
   featureSettingsRepository,
@@ -65,15 +51,15 @@ const runner = createDefaultAgentRunner(settings, {
   salesforcePdfTools,
   slackMcpCanvasAccessSetter: createSlackCanvasAccessSetter(),
   slackMcpTokenResolver:
-    slackMcpInstallationRepository === undefined
+    postgresRepositories.slackInstallationRepository === undefined
       ? undefined
-      : createSlackInstallationMcpTokenResolver(slackMcpInstallationRepository),
+      : createSlackInstallationMcpTokenResolver(postgresRepositories.slackInstallationRepository),
 });
 const audioTranscriptionGateway = createDefaultTranscriptionGateway(settings, {
   credentialResolver: workspaceCredentialResolver,
 });
-const slackClients = createSlackWebClientProvider(settings, { pool });
-const worker = createBullMqSlackAgentJobWorker(settings.redisUrl, async (job, context) => {
+const slackClients = createSlackWebClientProvider(settings, { pool: postgresRepositories.pool });
+const worker = createSlackAgentJobWorker(settings, async (job, context) => {
   const client = await slackClients.forTeam({
     enterpriseId: job.enterpriseId,
     isEnterpriseInstall: job.isEnterpriseInstall,
@@ -98,7 +84,7 @@ function shutdown(signal: NodeJS.Signals): void {
   void (async () => {
     await worker.close();
     await slackClients.close();
-    await pool.end();
+    await postgresRepositories.close();
     process.exit();
   })().catch((error) => {
     console.error(error);

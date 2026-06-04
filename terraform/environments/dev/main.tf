@@ -1,14 +1,18 @@
 locals {
   app_config_vars = merge(
     {
-      AGENT_MODEL               = var.agent_model
-      APP_ENV                   = "heroku"
-      SLACK_AGENT_QUEUE_ENABLED = tostring(var.slack_agent_queue_enabled)
+      AGENT_MODEL = var.agent_model
+      APP_ENV     = "heroku"
     },
     var.object_storage_prefix == null ? {} : {
       OBJECT_STORAGE_PREFIX = var.object_storage_prefix
     },
     var.additional_config_vars,
+    {
+      APP_DATABASE_BACKEND      = var.app_database_backend
+      SLACK_AGENT_QUEUE_BACKEND = var.slack_agent_queue_backend
+      SLACK_AGENT_QUEUE_ENABLED = tostring(var.slack_agent_queue_enabled)
+    },
   )
 }
 

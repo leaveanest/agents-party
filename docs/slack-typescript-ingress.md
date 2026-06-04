@@ -69,7 +69,13 @@ Provider-side data handling is outside application storage. Enable Google Speech
 
 Bolt `HTTPReceiver` is configured with `processBeforeResponse: false` so Slack requests are acknowledged independently from feature handler completion. Duplicate Events API deliveries are suppressed by `event_id` before feature handlers run.
 
-When `SLACK_AGENT_QUEUE_ENABLED=true`, `REDIS_URL`, and `DATABASE_URL` are configured, app mentions and active thread follow-up messages are handed off to a BullMQ-backed Redis queue. The web process performs request validation, channel/thread policy checks, and enqueue; the worker process re-reads Slack thread context, performs any ephemeral audio transcription, runs `AgentRunner`, updates PostgreSQL thread route state, and posts the final Slack reply. Without queue mode enabled, local/runtime behavior falls back to the in-process handler path.
+When `SLACK_AGENT_QUEUE_ENABLED=true`, `SLACK_AGENT_QUEUE_BACKEND=redis`, `REDIS_URL`,
+`APP_DATABASE_BACKEND=postgres`, and `DATABASE_URL` are configured, app mentions and active thread
+follow-up messages are handed off to a BullMQ-backed Redis queue. The web process performs request
+validation, channel/thread policy checks, and enqueue; the worker process re-reads Slack thread
+context, performs any ephemeral audio transcription, runs `AgentRunner`, updates PostgreSQL thread
+route state, and posts the final Slack reply. Without queue mode enabled, local/runtime behavior
+falls back to the in-process handler path.
 
 Completed Redis jobs are retained only briefly for debugging, up to 1 hour or 500 jobs. Failed jobs are retained up to 24 hours or 1,000 jobs.
 

@@ -26,6 +26,10 @@ runtime_secret_arns = {
 
 object_storage_prefix = "prod"
 
+# Backend selectors are managed by dedicated variables rather than additional_environment.
+app_database_backend      = "postgres"
+slack_agent_queue_backend = "redis"
+
 # Enable the RSS batch scheduler after migrations and Slack/provider secrets are configured.
 enable_rss_feed_schedule      = false
 rss_feed_schedule_expression = "rate(10 minutes)"

@@ -1,0 +1,30 @@
+cloudflare_zone_id = "023e105f4ecef8ad9ca31a8372d0c353"
+zone_name          = "example.com"
+
+# Point Cloudflare at the existing app origin, such as a Heroku app hostname or
+# an AWS ALB DNS name. The target must be a hostname, not an https:// URL.
+dns_records = {
+  app = {
+    name    = "agents-party"
+    type    = "CNAME"
+    content = "agents-party-dev.herokuapp.com"
+    proxied = true
+    ttl     = 1
+  }
+}
+
+# Use "strict" only when the origin presents a valid public certificate or
+# Cloudflare Origin CA certificate for the hostname.
+ssl_mode       = "strict"
+min_tls_version = "1.2"
+
+enable_always_use_https = true
+enable_tls_1_3          = true
+enable_http3            = true
+
+# Optional. Tune carefully because Slack retries can create bursts during outages.
+enable_ratelimit                          = false
+ratelimit_paths                           = ["/slack/events", "/slack/install", "/slack/oauth_redirect", "/oauth/google/start", "/oauth/google/callback", "/oauth/salesforce/start", "/oauth/salesforce/callback", "/oauth/salesforce/disconnect"]
+ratelimit_period_seconds                  = 60
+ratelimit_requests_per_period             = 120
+ratelimit_mitigation_timeout_seconds      = 60

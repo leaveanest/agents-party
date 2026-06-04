@@ -6,6 +6,7 @@ export type AppSettings = {
   appHost: string;
   appName: string;
   appPort: number;
+  databaseBackend: AppDatabaseBackend | undefined;
   databaseUrl: string | undefined;
   defaultLocale: Locale;
   redisUrl?: string;
@@ -37,6 +38,7 @@ export type AppSettings = {
   videoGenerationModelId: string;
   slackClientId: string | undefined;
   slackClientSecret: string | undefined;
+  slackAgentQueueBackend: SlackAgentQueueBackend | undefined;
   slackAgentQueueEnabled?: boolean;
   slackEnabled: boolean;
   slackEventsPath: string;
@@ -57,6 +59,10 @@ export type AppSettings = {
   salesforceOAuthStartPath: string;
   salesforceTokenEncryptionKey: string | undefined;
 };
+
+export type AppDatabaseBackend = "postgres";
+
+export type SlackAgentQueueBackend = "redis";
 
 const DEFAULT_PORT = 8000;
 const LOCAL_BOOTSTRAP_AGENT_MODEL_ID = "google:gemini-2.5-flash";
@@ -112,7 +118,14 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
   const appEnv = readText(env.APP_ENV) ?? "local";
   const agentModelId = readAgentModelId(env, appEnv);
   const databaseUrl = readText(env.DATABASE_URL);
+  const databaseBackend = readDatabaseBackend(env.APP_DATABASE_BACKEND, databaseUrl);
   const redisUrl = readText(env.REDIS_URL);
+  const slackAgentQueueEnabled = parseBoolean(env.SLACK_AGENT_QUEUE_ENABLED, false);
+  const slackAgentQueueBackend = readSlackAgentQueueBackend({
+    enabled: slackAgentQueueEnabled,
+    redisUrl,
+    value: env.SLACK_AGENT_QUEUE_BACKEND,
+  });
   const llmApiKeyEncryptionKey = readText(env.LLM_API_KEY_ENCRYPTION_KEY);
   const objectStorageBucket =
     readText(env.OBJECT_STORAGE_BUCKET) ?? readText(env.BUCKETEER_BUCKET_NAME);
@@ -131,6 +144,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     "OBJECT_STORAGE_PUBLIC_BASE_URL",
   );
   assertProductionProviderCredentialSettings(env, appEnv, {
+    databaseBackend,
     databaseUrl,
     llmApiKeyEncryptionKey,
   });
@@ -154,6 +168,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     slackStateSecret !== undefined;
   const slackEnabled = slackSigningSecret !== undefined && slackInstallationStoreEnabled;
   assertProductionSlackInstallationStoreSettings(env, appEnv, {
+    databaseBackend,
     databaseUrl,
     slackClientId,
     slackClientSecret,
@@ -203,6 +218,7 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
     appHost: env.APP_HOST ?? "0.0.0.0",
     appName: env.APP_NAME ?? "Agents party",
     appPort: parsePort(env.PORT ?? env.APP_PORT, DEFAULT_PORT),
+    databaseBackend,
     databaseUrl,
     defaultLocale: resolveLocale(readText(env.APP_DEFAULT_LOCALE), DEFAULT_LOCALE),
     redisUrl,
@@ -240,7 +256,8 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): AppSettings 
       readText(env.VIDEO_GENERATION_MODEL) ?? DEFAULT_VIDEO_GENERATION_MODEL_ID,
     slackClientId,
     slackClientSecret,
-    slackAgentQueueEnabled: parseBoolean(env.SLACK_AGENT_QUEUE_ENABLED, false),
+    slackAgentQueueBackend,
+    slackAgentQueueEnabled,
     slackEnabled,
     slackEventsPath: readPath(env.SLACK_EVENTS_PATH, "/slack/events"),
     slackInstallationStoreEnabled,
@@ -286,6 +303,7 @@ function assertProductionProviderCredentialSettings(
   env: NodeJS.ProcessEnv,
   appEnv: string,
   settings: {
+    databaseBackend: AppDatabaseBackend | undefined;
     databaseUrl: string | undefined;
     llmApiKeyEncryptionKey: string | undefined;
   },
@@ -293,9 +311,9 @@ function assertProductionProviderCredentialSettings(
   if (!isProductionLikeRuntime(env, appEnv)) {
     return;
   }
-  if (settings.databaseUrl === undefined) {
+  if (settings.databaseBackend !== "postgres" || settings.databaseUrl === undefined) {
     throw new Error(
-      "DATABASE_URL is required for production-like runtimes so provider API keys resolve from workspace credentials.",
+      "APP_DATABASE_BACKEND=postgres and DATABASE_URL are required for production-like runtimes so provider API keys resolve from workspace credentials.",
     );
   }
   if (settings.llmApiKeyEncryptionKey === undefined) {
@@ -309,6 +327,7 @@ function assertProductionSlackInstallationStoreSettings(
   env: NodeJS.ProcessEnv,
   appEnv: string,
   settings: {
+    databaseBackend: AppDatabaseBackend | undefined;
     databaseUrl: string | undefined;
     slackClientId: string | undefined;
     slackClientSecret: string | undefined;
@@ -325,9 +344,9 @@ function assertProductionSlackInstallationStoreSettings(
       "SLACK_SIGNING_SECRET is required for production-like multi-workspace Slack runtimes.",
     );
   }
-  if (settings.databaseUrl === undefined) {
+  if (settings.databaseBackend !== "postgres" || settings.databaseUrl === undefined) {
     throw new Error(
-      "DATABASE_URL is required for production-like multi-workspace Slack installation storage.",
+      "APP_DATABASE_BACKEND=postgres and DATABASE_URL are required for production-like multi-workspace Slack installation storage.",
     );
   }
   if (settings.slackClientId === undefined) {
@@ -381,6 +400,52 @@ function readText(value: string | undefined): string | undefined {
     return undefined;
   }
   return value;
+}
+
+function readDatabaseBackend(
+  value: string | undefined,
+  databaseUrl: string | undefined,
+): AppDatabaseBackend | undefined {
+  const backend = readText(value);
+  if (backend === undefined) {
+    return databaseUrl === undefined ? undefined : "postgres";
+  }
+  switch (backend) {
+    case "postgres":
+      return backend;
+    case "d1":
+    case "sqlite":
+      throw new Error(`APP_DATABASE_BACKEND=${backend} is not supported by this Node runtime yet.`);
+    default:
+      throw new Error("APP_DATABASE_BACKEND must be one of: postgres.");
+  }
+}
+
+function readSlackAgentQueueBackend(input: {
+  enabled: boolean;
+  redisUrl: string | undefined;
+  value: string | undefined;
+}): SlackAgentQueueBackend | undefined {
+  const backend = readText(input.value);
+  const resolved = backend ?? (input.enabled ? "redis" : undefined);
+  if (resolved === undefined) {
+    return undefined;
+  }
+  switch (resolved) {
+    case "redis":
+      if (input.enabled && input.redisUrl === undefined) {
+        throw new Error(
+          "REDIS_URL is required when SLACK_AGENT_QUEUE_ENABLED=true and SLACK_AGENT_QUEUE_BACKEND=redis.",
+        );
+      }
+      return resolved;
+    case "cloudflare-queues":
+      throw new Error(
+        "SLACK_AGENT_QUEUE_BACKEND=cloudflare-queues is not supported by this Node runtime yet.",
+      );
+    default:
+      throw new Error("SLACK_AGENT_QUEUE_BACKEND must be one of: redis.");
+  }
 }
 
 function readPath(value: string | undefined, fallback: string): string {

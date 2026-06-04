@@ -10,6 +10,7 @@ describe("loadSettings", () => {
       appHost: "0.0.0.0",
       appName: "Agents party",
       appPort: 8000,
+      databaseBackend: undefined,
       databaseUrl: undefined,
       defaultLocale: "ja",
       redisUrl: undefined,
@@ -41,6 +42,7 @@ describe("loadSettings", () => {
       videoGenerationModelId: "google:veo-3.1-fast-generate-001",
       slackClientId: undefined,
       slackClientSecret: undefined,
+      slackAgentQueueBackend: undefined,
       slackAgentQueueEnabled: false,
       slackEnabled: false,
       slackEventsPath: "/slack/events",
@@ -134,7 +136,7 @@ describe("loadSettings", () => {
   it("requires workspace credential storage for production-like runtime configuration", () => {
     expect(() =>
       loadSettings({ AGENT_MODEL: "google:gemini-2.5-flash", APP_ENV: "heroku" }),
-    ).toThrow("DATABASE_URL is required for production-like runtimes");
+    ).toThrow("APP_DATABASE_BACKEND=postgres and DATABASE_URL are required");
     expect(() =>
       loadSettings({
         AGENT_MODEL: "google:gemini-2.5-flash",
@@ -218,7 +220,34 @@ describe("loadSettings", () => {
     });
 
     expect(settings.redisUrl).toBe("rediss://redis.example.com:6379");
+    expect(settings.slackAgentQueueBackend).toBe("redis");
     expect(settings.slackAgentQueueEnabled).toBe(true);
+  });
+
+  it("reads explicit supported backend selectors", () => {
+    const settings = loadSettings({
+      APP_DATABASE_BACKEND: "postgres",
+      DATABASE_URL: "postgres://localhost/app",
+      REDIS_URL: "rediss://redis.example.com:6379",
+      SLACK_AGENT_QUEUE_BACKEND: "redis",
+    });
+
+    expect(settings.databaseBackend).toBe("postgres");
+    expect(settings.slackAgentQueueBackend).toBe("redis");
+  });
+
+  it("rejects unsupported backend selectors", () => {
+    expect(() =>
+      loadSettings({
+        APP_DATABASE_BACKEND: "d1",
+        DATABASE_URL: "postgres://localhost/app",
+      }),
+    ).toThrow("APP_DATABASE_BACKEND=d1 is not supported");
+    expect(() =>
+      loadSettings({
+        SLACK_AGENT_QUEUE_BACKEND: "cloudflare-queues",
+      }),
+    ).toThrow("SLACK_AGENT_QUEUE_BACKEND=cloudflare-queues is not supported");
   });
 
   it("enables database-backed Slack installation storage with client id and database", () => {

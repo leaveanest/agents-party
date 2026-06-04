@@ -38,6 +38,7 @@ services:
       AGENT_MODEL: ${AGENT_MODEL:-google:gemini-2.5-flash}
       APP_ENV: ${APP_ENV:-local}
       APP_HOST: 0.0.0.0
+      APP_DATABASE_BACKEND: ${APP_DATABASE_BACKEND:-postgres}
       IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL:-google:gemini-2.5-flash-image}
       NODE_ENV: development
       DATABASE_URL: postgresql://agents_party:agents_party@postgres:5432/agents_party
@@ -45,6 +46,7 @@ services:
       APP_PORT: ${APP_PORT:-8000}
       PORT: ${APP_PORT:-8000}
       REDIS_URL: redis://redis:6379
+      SLACK_AGENT_QUEUE_BACKEND: ${SLACK_AGENT_QUEUE_BACKEND:-redis}
       SLACK_AGENT_QUEUE_ENABLED: ${SLACK_AGENT_QUEUE_ENABLED:-true}
       SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
       SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}

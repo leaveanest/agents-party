@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { slackAgentJobId, slackAgentJobSchema } from "../../src/queues/slackAgentJobs.js";
+import {
+  createSlackAgentJobQueue,
+  slackAgentJobId,
+  slackAgentJobSchema,
+} from "../../src/queues/slackAgentJobs.js";
 
 describe("slackAgentJobs", () => {
   it("uses Slack event_id as the primary queue identity", () => {
@@ -66,5 +70,41 @@ describe("slackAgentJobs", () => {
 
     expect(job).not.toHaveProperty("image");
     expect(job).not.toHaveProperty("referenceImages");
+  });
+
+  it("does not create a queue when Slack agent queueing is disabled", () => {
+    expect(
+      createSlackAgentJobQueue({
+        databaseBackend: undefined,
+        databaseUrl: undefined,
+        redisUrl: undefined,
+        slackAgentQueueBackend: undefined,
+        slackAgentQueueEnabled: false,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("requires PostgreSQL when Slack agent queueing is enabled", () => {
+    expect(() =>
+      createSlackAgentJobQueue({
+        databaseBackend: undefined,
+        databaseUrl: undefined,
+        redisUrl: "redis://localhost:6379",
+        slackAgentQueueBackend: "redis",
+        slackAgentQueueEnabled: true,
+      }),
+    ).toThrow("APP_DATABASE_BACKEND=postgres and DATABASE_URL are required");
+  });
+
+  it("requires the Redis queue backend when Slack agent queueing is enabled", () => {
+    expect(() =>
+      createSlackAgentJobQueue({
+        databaseBackend: "postgres",
+        databaseUrl: "postgres://localhost/app",
+        redisUrl: "redis://localhost:6379",
+        slackAgentQueueBackend: undefined,
+        slackAgentQueueEnabled: true,
+      }),
+    ).toThrow("SLACK_AGENT_QUEUE_BACKEND=redis is required");
   });
 });

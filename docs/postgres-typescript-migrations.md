@@ -8,7 +8,7 @@ Run migrations with:
 vp run migrate
 ```
 
-`DATABASE_URL` must point at the target PostgreSQL database. Applied migrations are recorded in `schema_migrations`.
+`APP_DATABASE_BACKEND=postgres` and `DATABASE_URL` must point at the target PostgreSQL database. Applied migrations are recorded in `schema_migrations`.
 The runner takes a transaction-scoped PostgreSQL advisory lock before reading or applying migrations, so concurrent deploy hooks serialize instead of racing on the `schema_migrations` primary key.
 
 If a database already contains Alembic metadata, the TypeScript migration runner refuses to baseline it by default. After validating that the existing schema is at the expected Alembic head, set:

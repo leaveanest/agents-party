@@ -2,6 +2,8 @@ import { Queue, Worker, type JobsOptions, type WorkerOptions } from "bullmq";
 import { Redis, type RedisOptions } from "ioredis";
 import { z } from "zod";
 
+import type { AppSettings } from "../config.js";
+
 const QUEUE_NAME = "slack-agent-jobs";
 const JOB_NAME = "slack-agent-invocation";
 const JOB_ATTEMPTS = 3;
@@ -50,6 +52,33 @@ export type SlackAgentJobProcessor = (
   job: SlackAgentJob,
   context: { attempts: number; attemptsMade: number },
 ) => Promise<void>;
+
+export function createSlackAgentJobQueue(
+  settings: Pick<
+    AppSettings,
+    | "databaseBackend"
+    | "databaseUrl"
+    | "redisUrl"
+    | "slackAgentQueueBackend"
+    | "slackAgentQueueEnabled"
+  >,
+): SlackAgentJobQueue | undefined {
+  if (!settings.slackAgentQueueEnabled) {
+    return undefined;
+  }
+  if (settings.databaseBackend !== "postgres" || settings.databaseUrl === undefined) {
+    throw new Error(
+      "APP_DATABASE_BACKEND=postgres and DATABASE_URL are required when Slack agent queueing is enabled.",
+    );
+  }
+  if (settings.slackAgentQueueBackend !== "redis") {
+    throw new Error("SLACK_AGENT_QUEUE_BACKEND=redis is required by the Node web process.");
+  }
+  if (settings.redisUrl === undefined) {
+    throw new Error("REDIS_URL is required when SLACK_AGENT_QUEUE_BACKEND=redis.");
+  }
+  return createBullMqSlackAgentJobQueue(settings.redisUrl);
+}
 
 export function createBullMqSlackAgentJobQueue(redisUrl: string): SlackAgentJobQueue {
   const connection = createRedisConnection(redisUrl, {
@@ -117,6 +146,20 @@ export function createBullMqSlackAgentJobWorker(
       await connection.quit();
     },
   };
+}
+
+export function createSlackAgentJobWorker(
+  settings: Pick<AppSettings, "redisUrl" | "slackAgentQueueBackend">,
+  processor: SlackAgentJobProcessor,
+  options: { concurrency?: number } = {},
+): SlackAgentJobWorker {
+  if (settings.slackAgentQueueBackend !== "redis") {
+    throw new Error("SLACK_AGENT_QUEUE_BACKEND=redis is required by the Node worker process.");
+  }
+  if (settings.redisUrl === undefined) {
+    throw new Error("REDIS_URL is required when SLACK_AGENT_QUEUE_BACKEND=redis.");
+  }
+  return createBullMqSlackAgentJobWorker(settings.redisUrl, processor, options);
 }
 
 export function slackAgentJobId(job: SlackAgentJob): string {

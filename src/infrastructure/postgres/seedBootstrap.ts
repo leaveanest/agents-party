@@ -3,6 +3,8 @@ import { Pool } from "pg";
 import { createDefaultModelRegistry } from "../../providers/modelRegistry.js";
 import { PostgresAgentRoutingRepository } from "./appRepositories.js";
 
+assertPostgresBackend();
+
 const databaseUrl = readRequiredEnv("DATABASE_URL");
 const teamId = readRequiredEnv("AGENTS_PARTY_BOOTSTRAP_TEAM_ID");
 const agentId = readText(process.env.AGENTS_PARTY_BOOTSTRAP_AGENT_ID) ?? "assistant";
@@ -85,4 +87,13 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
     return false;
   }
   throw new Error(`${value} is not a valid boolean value.`);
+}
+
+function assertPostgresBackend(): void {
+  const backend = readText(process.env.APP_DATABASE_BACKEND) ?? "postgres";
+  if (backend !== "postgres") {
+    throw new Error(
+      "APP_DATABASE_BACKEND=postgres is required to seed PostgreSQL routing settings.",
+    );
+  }
 }

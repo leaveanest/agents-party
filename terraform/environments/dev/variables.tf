@@ -102,6 +102,28 @@ variable "slack_agent_queue_enabled" {
   default     = false
 }
 
+variable "app_database_backend" {
+  description = "Application database backend selector managed by this Terraform environment."
+  type        = string
+  default     = "postgres"
+
+  validation {
+    condition     = contains(["postgres"], var.app_database_backend)
+    error_message = "app_database_backend must be postgres for this Heroku environment."
+  }
+}
+
+variable "slack_agent_queue_backend" {
+  description = "Slack agent queue backend selector managed by this Terraform environment."
+  type        = string
+  default     = "redis"
+
+  validation {
+    condition     = contains(["redis"], var.slack_agent_queue_backend)
+    error_message = "slack_agent_queue_backend must be redis for this Heroku environment."
+  }
+}
+
 variable "worker_dyno_quantity" {
   description = "Number of worker dynos to run when worker formation management is enabled."
   type        = number
