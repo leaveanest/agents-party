@@ -32,6 +32,13 @@ At minimum, production-like tasks need:
 The RDS instance uses AWS-managed master credentials. After creating the database, create the
 `DATABASE_URL` secret out of band from the RDS endpoint and managed password.
 
+## Backend Selectors
+
+Backend selectors are non-secret ECS environment variables managed by dedicated Terraform variables:
+`app_database_backend` sets `APP_DATABASE_BACKEND`, and `slack_agent_queue_backend` sets
+`SLACK_AGENT_QUEUE_BACKEND`. Do not place those keys in `additional_environment`; the dedicated
+variables are merged last to keep platform-owned defaults authoritative.
+
 ## Object Storage
 
 AWS uses a private S3 bucket and ECS task role permissions. The application receives:

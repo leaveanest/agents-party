@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 import type { AppSettings } from "../../../src/config.js";
 import { NodeOAuthHttpGateway } from "../../../src/integrations/oauth/http.js";
 import type { SalesforceAuthCoordinator } from "../../../src/integrations/oauth/coordinators.js";
-import type { Pool } from "pg";
 
 const settings: AppSettings = {
   agentModelId: "google:gemini-2.5-flash",
@@ -14,6 +13,7 @@ const settings: AppSettings = {
   appHost: "127.0.0.1",
   appName: "Agents party",
   appPort: 0,
+  databaseBackend: undefined,
   databaseUrl: undefined,
   defaultLocale: "ja",
   imageGenerationModelId: "google:gemini-2.5-flash-image",
@@ -51,6 +51,8 @@ const settings: AppSettings = {
   salesforceTokenEncryptionKey: "token-key",
   slackClientId: undefined,
   slackClientSecret: undefined,
+  slackAgentQueueBackend: undefined,
+  slackAgentQueueEnabled: false,
   slackEnabled: false,
   slackEventsPath: "/slack/events",
   slackInstallationStoreEnabled: false,
@@ -79,7 +81,7 @@ describe("NodeOAuthHttpGateway", () => {
   it("accepts Salesforce disconnect context from a JSON POST body", async () => {
     let receivedContext: string | undefined;
     const gateway = new NodeOAuthHttpGateway({
-      pool: { end: async () => {} } as Pool,
+      close: async () => {},
       salesforce: {
         async disconnectByContext(contextToken: string) {
           receivedContext = contextToken;
@@ -111,7 +113,7 @@ describe("NodeOAuthHttpGateway", () => {
   it("rejects oversized Salesforce disconnect JSON bodies before invoking coordinator", async () => {
     let disconnectCalled = false;
     const gateway = new NodeOAuthHttpGateway({
-      pool: { end: async () => {} } as Pool,
+      close: async () => {},
       salesforce: {
         async disconnectByContext() {
           disconnectCalled = true;

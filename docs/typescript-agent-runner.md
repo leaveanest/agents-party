@@ -32,7 +32,7 @@ AGENT_MODEL=google:gemini-2.5-flash
 
 For local/bootstrap development, `loadSettings` uses `google:gemini-2.5-flash` when `AGENT_MODEL` is not set. This default is only a developer bootstrap default for `AgentRunner`; it is not a `ProviderRouter` model-resolution default.
 
-For production-like runtime configuration, including `APP_ENV=heroku`, `APP_ENV=production`, `APP_ENV=prod`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set, `AGENT_MODEL`, `DATABASE_URL`, and `LLM_API_KEY_ENCRYPTION_KEY` are required. Missing `AGENT_MODEL` fails during settings loading so production does not silently choose a provider or model. Missing workspace credential storage settings also fail during settings loading so provider calls cannot silently fall back to process-level provider API keys.
+For production-like runtime configuration, including `APP_ENV=heroku`, `APP_ENV=production`, `APP_ENV=prod`, `APP_ENV=staging`, `NODE_ENV=production`, or Heroku dynos with `DYNO` set, `AGENT_MODEL`, `APP_DATABASE_BACKEND=postgres`, `DATABASE_URL`, and `LLM_API_KEY_ENCRYPTION_KEY` are required. Missing `AGENT_MODEL` fails during settings loading so production does not silently choose a provider or model. Missing workspace credential storage settings also fail during settings loading so provider calls cannot silently fall back to process-level provider API keys.
 
 The routed Slack surfaces are `app_mention`, active thread follow-up `message` events, and flag-reaction translation commands.
 
@@ -61,4 +61,4 @@ TEXT_TO_SPEECH_MODEL=openai:gpt-4o-mini-tts
 
 Text-to-speech also requires workspace feature settings. A Slack admin or owner enables `text_to_speech` from App Home and selects an allowed channel list. The `text_to_speech` tool runs only when the OpenAI workspace API key exists, the workspace feature is enabled, and the current Slack channel is allowlisted. Generated audio is uploaded back into the Slack thread.
 
-Workspace-aware provider credentials are enabled when `DATABASE_URL` and `LLM_API_KEY_ENCRYPTION_KEY` are set, and production-like runtimes require both values. The runner carries Slack `teamId` into `LlmRequest.context.workspaceId`, and provider adapters use that typed context for encrypted `workspace_credentials` lookup instead of inferring credentials from metadata.
+Workspace-aware provider credentials are enabled when `APP_DATABASE_BACKEND=postgres`, `DATABASE_URL`, and `LLM_API_KEY_ENCRYPTION_KEY` are set, and production-like runtimes require those values. The runner carries Slack `teamId` into `LlmRequest.context.workspaceId`, and provider adapters use that typed context for encrypted `workspace_credentials` lookup instead of inferring credentials from metadata.

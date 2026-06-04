@@ -170,6 +170,28 @@ variable "additional_environment" {
   default     = {}
 }
 
+variable "app_database_backend" {
+  description = "Application database backend selector managed by this Terraform environment."
+  type        = string
+  default     = "postgres"
+
+  validation {
+    condition     = contains(["postgres"], var.app_database_backend)
+    error_message = "app_database_backend must be postgres for this AWS environment."
+  }
+}
+
+variable "slack_agent_queue_backend" {
+  description = "Slack agent queue backend selector managed by this Terraform environment."
+  type        = string
+  default     = "redis"
+
+  validation {
+    condition     = contains(["redis"], var.slack_agent_queue_backend)
+    error_message = "slack_agent_queue_backend must be redis for this AWS environment."
+  }
+}
+
 variable "database_name" {
   description = "Initial PostgreSQL database name."
   type        = string

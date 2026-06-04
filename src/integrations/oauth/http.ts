@@ -20,19 +20,19 @@ export type OAuthHttpGateway = {
 };
 
 export class NodeOAuthHttpGateway implements OAuthHttpGateway {
+  private readonly closeFn: () => Promise<void>;
   private readonly google: GoogleAuthCoordinator | undefined;
-  private readonly pool: Pool;
   private readonly salesforce: SalesforceAuthCoordinator | undefined;
   private readonly settings: AppSettings;
 
   constructor(input: {
+    close?: () => Promise<void>;
     google?: GoogleAuthCoordinator;
-    pool: Pool;
     salesforce?: SalesforceAuthCoordinator;
     settings: AppSettings;
   }) {
+    this.closeFn = input.close ?? (async () => {});
     this.google = input.google;
-    this.pool = input.pool;
     this.salesforce = input.salesforce;
     this.settings = input.settings;
   }
@@ -94,7 +94,7 @@ export class NodeOAuthHttpGateway implements OAuthHttpGateway {
   }
 
   async close(): Promise<void> {
-    await this.pool.end();
+    await this.closeFn();
   }
 
   private async handleGoogleStart(response: ServerResponse, url: URL): Promise<void> {
@@ -189,15 +189,23 @@ export class NodeOAuthHttpGateway implements OAuthHttpGateway {
   }
 }
 
-export function createOAuthHttpGateway(settings: AppSettings): OAuthHttpGateway | undefined {
+export function createOAuthHttpGateway(
+  settings: AppSettings,
+  dependencies: { repository?: PostgresOAuthRepository } = {},
+): OAuthHttpGateway | undefined {
   if (!settings.googleOAuthEnabled && !settings.salesforceOAuthEnabled) {
     return undefined;
   }
-  if (settings.databaseUrl === undefined) {
-    return undefined;
+  let repository = dependencies.repository;
+  let close: (() => Promise<void>) | undefined;
+  if (repository === undefined) {
+    if (settings.databaseUrl === undefined) {
+      return undefined;
+    }
+    const pool = new Pool({ connectionString: settings.databaseUrl });
+    repository = new PostgresOAuthRepository(pool);
+    close = () => pool.end();
   }
-  const pool = new Pool({ connectionString: settings.databaseUrl });
-  const repository = new PostgresOAuthRepository(pool);
   const google =
     settings.googleOAuthEnabled &&
     settings.googleOAuthClientId !== undefined &&
@@ -228,7 +236,12 @@ export function createOAuthHttpGateway(settings: AppSettings): OAuthHttpGateway 
           tokenCipher: new FernetTextCipher(settings.salesforceTokenEncryptionKey),
         })
       : undefined;
-  return new NodeOAuthHttpGateway({ google, pool, salesforce, settings });
+  return new NodeOAuthHttpGateway({
+    close,
+    google,
+    salesforce,
+    settings,
+  });
 }
 
 function redirect(response: ServerResponse, location: string): void {

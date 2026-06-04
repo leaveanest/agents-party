@@ -13,6 +13,11 @@ Secret values are intentionally not managed by Terraform. Set Slack, OAuth, encr
 and external API secrets with `heroku config:set` or CI secret injection after applying
 infrastructure.
 
+Backend selectors are non-secret app config vars managed by dedicated Terraform variables:
+`app_database_backend` sets `APP_DATABASE_BACKEND`, and `slack_agent_queue_backend` sets
+`SLACK_AGENT_QUEUE_BACKEND`. Do not place those keys in `additional_config_vars`; the dedicated
+variables are merged last to keep platform-owned defaults authoritative.
+
 ## Prerequisites
 
 - Terraform

@@ -265,7 +265,8 @@ Do not rely on process-level provider keys for multi-workspace production traffi
 
 Optional services:
 
-- Redis queue: `REDIS_URL`, `SLACK_AGENT_QUEUE_ENABLED`
+- PostgreSQL persistence: `APP_DATABASE_BACKEND=postgres`, `DATABASE_URL`
+- Redis queue: `SLACK_AGENT_QUEUE_BACKEND=redis`, `REDIS_URL`, `SLACK_AGENT_QUEUE_ENABLED`
 - S3-compatible object storage: `OBJECT_STORAGE_*`
 - Google OAuth: `GOOGLE_OAUTH_*`, `GOOGLE_TOKEN_ENCRYPTION_KEY`
 - Salesforce OAuth: `SALESFORCE_OAUTH_*`, `SALESFORCE_TOKEN_ENCRYPTION_KEY`
@@ -285,7 +286,13 @@ start Redis and run the web and worker processes separately:
 
 ```bash
 docker compose up -d redis
-SLACK_AGENT_QUEUE_ENABLED=true REDIS_URL=redis://localhost:6379 vp run dev
+APP_DATABASE_BACKEND=postgres \
+SLACK_AGENT_QUEUE_ENABLED=true \
+SLACK_AGENT_QUEUE_BACKEND=redis \
+REDIS_URL=redis://localhost:6379 \
+vp run dev
+APP_DATABASE_BACKEND=postgres \
+SLACK_AGENT_QUEUE_BACKEND=redis \
 REDIS_URL=redis://localhost:6379 \
 DATABASE_URL=postgresql://agents_party:agents_party@localhost:5432/agents_party \
 vp run worker
@@ -306,6 +313,9 @@ Heroku production deploys use:
   - `rss_worker: node dist/rssFeedWorker.mjs`
 - Heroku Postgres add-on for `DATABASE_URL`
 - Heroku Key-Value Store/Redis add-on for `REDIS_URL`
+- Terraform-managed non-secret backend selectors:
+  `APP_DATABASE_BACKEND=postgres` and `SLACK_AGENT_QUEUE_BACKEND=redis`
+  These are set from dedicated Terraform variables, not from generic extra environment maps.
 
 Terraform for the Heroku app, add-ons, buildpack, non-secret config vars, optional Bucketeer object
 storage, and optional web formation lives under [`terraform/environments/dev/`](terraform/environments/dev/).

@@ -123,11 +123,13 @@ health checks, and OAuth browser callbacks, plus a worker process
 for queued AI chat execution.
 The Procfile web process runs node dist/main.mjs and binds to Heroku's PORT.
 The worker process runs node dist/worker.mjs.
-The Redis queue path is enabled by SLACK_AGENT_QUEUE_ENABLED=true.
+The Redis queue path is enabled by SLACK_AGENT_QUEUE_ENABLED=true
+and SLACK_AGENT_QUEUE_BACKEND=redis.
 end note
 
 note right of postgres
-Production relational storage runs on Heroku Postgres.
+Production relational storage runs on Heroku Postgres with
+APP_DATABASE_BACKEND=postgres.
 Heroku app, add-ons, buildpack, and non-secret config are
 deployed through terraform/environments/dev/.
 end note

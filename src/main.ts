@@ -5,72 +5,36 @@ import { createAppServer } from "./server.js";
 import { issueSalesforceOAuthStartContext } from "./integrations/oauth/coordinators.js";
 import { FernetTextCipher } from "./integrations/oauth/fernet.js";
 import { createOAuthHttpGateway } from "./integrations/oauth/http.js";
-import { Pool } from "pg";
-import {
-  PostgresAgentRoutingRepository,
-  PostgresOAuthRepository,
-  PostgresSalesforcePdfWorkflowRepository,
-} from "./infrastructure/postgres/appRepositories.js";
-import { PostgresRssFeedRepository } from "./infrastructure/postgres/rssFeedRepository.js";
-import { PostgresSlackInstallationRepository } from "./infrastructure/postgres/slackInstallationRepository.js";
-import { PostgresUserSettingsRepository } from "./infrastructure/postgres/userSettingsRepository.js";
-import { createBullMqSlackAgentJobQueue } from "./queues/slackAgentJobs.js";
-import { PostgresWorkspaceCredentialRepository } from "./infrastructure/postgres/workspaceCredentialRepository.js";
-import { PostgresWorkspaceFeatureSettingsRepository } from "./infrastructure/postgres/workspaceFeatureSettingsRepository.js";
+import { createPostgresRepositoryBundle } from "./infrastructure/postgres/repositoryBundle.js";
+import { createSlackAgentJobQueue } from "./queues/slackAgentJobs.js";
 import { EncryptedWorkspaceCredentialService } from "./repositories/workspaceCredentials.js";
 import { createDefaultTranscriptionGateway } from "./providers/transcriptionGateway.js";
 import { createAgentSlackHandlers } from "./slack/agentHandlers.js";
 import { createSlackGateway } from "./slack/app.js";
 import { createSlackCanvasAccessSetter } from "./slack/canvasAccess.js";
+import { RepositorySlackInstallationStore } from "./slack/installationStore.js";
 import { createSlackInstallationMcpTokenResolver } from "./slack/mcpTokenResolver.js";
 import { createSlackWebClientProvider } from "./slack/webClient.js";
 
 const settings = loadSettings();
-const appRepositoryPool =
-  settings.databaseUrl === undefined
-    ? undefined
-    : new Pool({ connectionString: settings.databaseUrl });
-const routingRepository =
-  appRepositoryPool === undefined
-    ? undefined
-    : new PostgresAgentRoutingRepository(appRepositoryPool);
-const oauthRepository =
-  appRepositoryPool === undefined ? undefined : new PostgresOAuthRepository(appRepositoryPool);
-const salesforcePdfWorkflowRepository =
-  appRepositoryPool === undefined
-    ? undefined
-    : new PostgresSalesforcePdfWorkflowRepository(appRepositoryPool);
-const userSettingsRepository =
-  appRepositoryPool === undefined
-    ? undefined
-    : new PostgresUserSettingsRepository(appRepositoryPool);
-const featureSettingsRepository =
-  appRepositoryPool === undefined
-    ? undefined
-    : new PostgresWorkspaceFeatureSettingsRepository(appRepositoryPool);
-const rssFeedRepository =
-  appRepositoryPool === undefined ? undefined : new PostgresRssFeedRepository(appRepositoryPool);
-const slackInstallationRepository =
-  appRepositoryPool === undefined || settings.slackClientId === undefined
-    ? undefined
-    : new PostgresSlackInstallationRepository(settings.slackClientId, {
-        pool: appRepositoryPool,
-      });
-const agentJobQueue =
-  !settings.slackAgentQueueEnabled ||
-  settings.redisUrl === undefined ||
-  settings.databaseUrl === undefined
-    ? undefined
-    : createBullMqSlackAgentJobQueue(settings.redisUrl);
+const repositories = createPostgresRepositoryBundle(settings);
+const routingRepository = repositories?.routingRepository;
+const oauthRepository = repositories?.oauthRepository;
+const salesforcePdfWorkflowRepository = repositories?.salesforcePdfWorkflowRepository;
+const userSettingsRepository = repositories?.userSettingsRepository;
+const featureSettingsRepository = repositories?.featureSettingsRepository;
+const rssFeedRepository = repositories?.rssFeedRepository;
+const slackInstallationRepository = repositories?.slackInstallationRepository;
+const agentJobQueue = createSlackAgentJobQueue(settings);
 const slackTeamClients =
-  appRepositoryPool === undefined
+  repositories === undefined
     ? undefined
-    : createSlackWebClientProvider(settings, { pool: appRepositoryPool });
+    : createSlackWebClientProvider(settings, { pool: repositories.pool });
 const workspaceCredentialResolver =
-  appRepositoryPool === undefined || settings.llmApiKeyEncryptionKey === undefined
+  repositories === undefined || settings.llmApiKeyEncryptionKey === undefined
     ? undefined
     : new EncryptedWorkspaceCredentialService(
-        new PostgresWorkspaceCredentialRepository(appRepositoryPool),
+        repositories.workspaceCredentialRepository,
         new FernetTextCipher(settings.llmApiKeyEncryptionKey),
       );
 const salesforcePdfTools =
@@ -150,9 +114,13 @@ const slackGateway = settings.slackEnabled
         userSettingsRepository,
         workspaceCredentialSettings: workspaceCredentialResolver,
       }),
+      installationStore:
+        slackInstallationRepository === undefined
+          ? undefined
+          : new RepositorySlackInstallationStore(slackInstallationRepository),
     })
   : undefined;
-const oauthGateway = createOAuthHttpGateway(settings);
+const oauthGateway = createOAuthHttpGateway(settings, { repository: oauthRepository });
 const server = createAppServer(settings, {
   oauthGateway,
   slackGateway,
@@ -183,8 +151,8 @@ function shutdown(signal: NodeJS.Signals): void {
     if (slackTeamClients !== undefined) {
       await slackTeamClients.close();
     }
-    if (appRepositoryPool !== undefined) {
-      await appRepositoryPool.end();
+    if (repositories !== undefined) {
+      await repositories.close();
     }
     process.exit();
   });

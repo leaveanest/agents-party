@@ -10,6 +10,10 @@ manage_worker_formation = false
 # Enable together with worker formation after the worker process is deployed and scaled.
 slack_agent_queue_enabled = false
 
+# Backend selectors are managed by dedicated variables rather than additional_config_vars.
+app_database_backend      = "postgres"
+slack_agent_queue_backend = "redis"
+
 # Enable to provision Bucketeer for S3-compatible object storage on Heroku.
 enable_bucketeer     = false
 bucketeer_plan       = "bucketeer:micro"
