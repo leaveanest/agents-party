@@ -28,7 +28,7 @@ jobs:
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
-          node-version: "22"
+          node-version: "22.23.4"
           cache: true
 
       - name: Install dependencies
